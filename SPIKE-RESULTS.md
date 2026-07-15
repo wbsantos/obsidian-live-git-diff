@@ -44,6 +44,31 @@ Measured, window force-focused, fresh session, reproduced twice:
 Document height 34,230px. Drift is **bounded, not cumulative**, and quantized to
 0/24/40/48 = paragraph-margin steps (our `.sp2a-block` vs Obsidian's `div.el-*`).
 
+### Grain fix — measured after (block grain matched to Obsidian's sections)
+
+| Position | Before | After | Paired-block heights |
+|---|---|---|---|
+| 3%  | 24px | 24px | 0/14 mismatched |
+| 15% | 40px | **0px** | 0/13 |
+| 40% | 40px | **0px** | 0/8 |
+| 65% | 40px | **0px** | 0/7 |
+| 90% | 48px | 46px | 2/6 |
+
+Root cause was NOT margins: our splitter grouped "runs of non-blank lines", so a
+paragraph immediately followed by a list became ONE base block where Obsidian
+renders TWO sections. Oracle: `metadataCache.getFileCache().sections` = 308 vs our
+270; all 38 of the gap were exactly that pattern. One rule (break paragraph->list)
+took `stillMerging` to 0 and drift to 0px through the middle of the document.
+
+**Use `metadataCache.getFileCache().sections` as the grain oracle in the real build** —
+it is the same sectioning the renderer uses, so it settles grain questions by
+measurement instead of argument. (It only covers vault files; the base text still
+needs our splitter, which is why the splitter must agree with it.)
+
+Residual at 3%/90% is the unpaired regions (pure deletions/insertions with no
+counterpart) — the case VS Code solves with view zones, and where there is no
+correct answer without them.
+
 ### Architecture facts (verified against Obsidian 1.11.5 source)
 - **Reading view virtualizes**: off-screen sections are `.detach()`ed (getBoundingClientRect
   = zeros) and `sizerEl.setChildrenInPlace()` runs every scroll tick — so **injected spacers

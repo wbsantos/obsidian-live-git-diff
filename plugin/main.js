@@ -60,6 +60,9 @@ const { blocks, pair } = (function () {
 /** Similarity threshold below which a replace-run pair is split into del+ins. */
 var MOD_MIN_SIMILARITY = 0.5;
 
+/** A line that STARTS a list item. Used to match Obsidian's section grain. */
+var LIST_START = /^\s*(?:[-*+]|\d+[.)])\s/;
+
 /**
  * Split markdown source into top-level blocks.
  * A block = a run of non-blank lines, OR a whole fenced code block (``` ... ```),
@@ -99,6 +102,16 @@ function blocks(text) {
     if (line.trim() === '') {
       push(i - 1);
     } else {
+      // Obsidian's renderer sections a LIST separately from a paragraph that
+      // immediately precedes it with no blank line; our "run of non-blank lines"
+      // grain merged them. That grain mismatch is not cosmetic: a merged base
+      // block is one element where the note has two, so the pair has different
+      // heights and every block below it drifts. Measured on the reference corpus:
+      // 308 Obsidian sections vs 270 of our blocks — all 38 of the difference
+      // were exactly this paragraph+list case.
+      if (cur.length && LIST_START.test(line) && !LIST_START.test(cur[cur.length - 1])) {
+        push(i - 1);
+      }
       if (curStart < 0) curStart = i;
       cur.push(line);
     }
