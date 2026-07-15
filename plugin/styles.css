@@ -1,0 +1,140 @@
+/* spike2a-gitdiff — block-level diff rails.
+   Rails are CSS ONLY (borders/backgrounds). Never real text: injecting text into
+   an annotated block silently breaks the side-comments plugin's anchors. */
+
+/* Diff marks, following VS Code's rendered-markdown-preview technique
+   (extensions/markdown-language-features/media/markdown.css).
+
+   TWO THINGS COPIED DELIBERATELY:
+
+   1. The rail is a BOX-SHADOW, not a border+padding. A box-shadow occupies no
+      space, so a decorated block has EXACTLY the same geometry as an undecorated
+      one. This matters most on the real note pane: border-left+padding-left made
+      our decoration shift the text and change the box Obsidian measures for its
+      virtualised layout. VS Code's `box-shadow:-4px 0 0 <c>` avoids that entirely.
+
+   2. Colors come from THEME VARIABLES, not literals. VS Code uses
+      var(--vscode-diffEditor-insertedTextBackground); the Obsidian equivalents are
+      below, so the marks follow whatever theme is active instead of being a
+      light-mode lookalike. Fallbacks keep it sane on themes that omit them. */
+.sp2a-ins,.sp2a-mod,.sp2a-del{border-radius:2px}
+.sp2a-ins{
+  background-color:var(--color-green-rgb-bg,rgba(var(--color-green-rgb),0.10));
+  box-shadow:-4px 0 0 var(--color-green,#1a7f37);
+}
+.sp2a-mod{
+  background-color:var(--color-yellow-rgb-bg,rgba(var(--color-yellow-rgb),0.10));
+  box-shadow:-4px 0 0 var(--color-yellow,#bf8700);
+}
+.sp2a-del{
+  background-color:var(--color-red-rgb-bg,rgba(var(--color-red-rgb),0.10));
+  box-shadow:-4px 0 0 var(--color-red,#cf222e);
+}
+.sp2a-same{opacity:.75}
+
+/* ---- left (base) view ---- */
+
+.sp2a-view{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  overflow:hidden;
+}
+
+.sp2a-header{
+  flex:0 0 auto;
+  padding:10px 16px;
+  border-bottom:1px solid var(--background-modifier-border);
+  background:var(--background-secondary);
+}
+
+.sp2a-title{
+  font-weight:600;
+  font-size:var(--font-ui-medium);
+  color:var(--text-normal);
+}
+
+.sp2a-sub{
+  margin-top:2px;
+  font-size:var(--font-ui-smaller);
+  color:var(--text-muted);
+}
+
+/* Scroll-sync state, shown in the base pane's subheader. */
+.sp2b-sync{color:var(--text-muted)}
+
+.sp2a-sha{
+  font-family:var(--font-monospace);
+  padding:1px 5px;
+  border-radius:4px;
+  background:var(--background-modifier-border);
+  color:var(--text-normal);
+}
+
+.sp2a-body{
+  flex:1 1 auto;
+  overflow-y:auto;
+}
+
+.sp2a-block{
+  /* No margin override: blocks are spaced by the rendered content's OWN
+     margins, exactly as in a real reading view. `margin:0 0 4px` here
+     collapsed every paragraph gap and made the pane look squished. */
+  /* No gutter reserved: the rail is a box-shadow (see the diff marks below), which
+     occupies no space, so decorated and undecorated blocks stay identical. */
+}
+
+
+.sp2a-empty{
+  padding:24px 16px;
+  color:var(--text-muted);
+  font-size:var(--font-ui-smaller);
+}
+
+.sp2a-error{
+  margin:8px 0;
+  padding:12px 14px;
+  border-left:3px solid var(--color-red,#cf222e);
+  border-radius:4px;
+  background:var(--background-modifier-error,#ffebe966);
+  color:var(--text-normal);
+  font-family:var(--font-monospace);
+  font-size:var(--font-ui-smaller);
+  white-space:pre-wrap;
+}
+
+/* ------------------------------------------------------------------ *
+ * Make the base pane geometrically IDENTICAL to a real reading view.
+ *
+ * Why this is not cosmetic: scroll sync anchors the TOPMOST block by source
+ * line. Everything below the anchor only stays aligned if both panes wrap at
+ * the same place and produce the same block heights. Different widths =>
+ * different wrap points => blocks below the anchor drift within the viewport.
+ * Matching typography is therefore load-bearing for perceived alignment.
+ *
+ * Obsidian sizes `.markdown-preview-sizer` against a real preview host and sets
+ * min-height inline per scroll tick; dropped into our custom view it can end up
+ * wider than the pane, which clips text at the right edge instead of wrapping.
+ * Pin it to the pane and let the theme own everything else.
+ * ------------------------------------------------------------------ */
+.sp2a-body{
+  overflow-x:hidden;
+  /* Rail breathing room lives on the SCROLLER, never on the sizer: the sizer's
+     max-width is a fixed px value, so padding there would shrink the CONTENT box
+     and change where text wraps — which is exactly the bug this block fixes. */
+  padding-left:10px;
+}
+/* Mirror Obsidian's own sizer instead of overriding it.
+   THE BUG THIS FIXES: an earlier attempt set `max-width:100% !important` to stop
+   text clipping. That overrode --file-line-width, so the base pane wrapped at
+   795px while the real note wrapped at 700px. Different wrap points => different
+   line counts => different block heights => every block below the sync anchor
+   drifted, even though the anchor itself was pixel-exact (measured DELTA_PX: 0).
+   Same max-width => same wrap => same heights => alignment holds down the page. */
+.sp2a-body .markdown-preview-sizer{
+  width:100% !important;
+  max-width:var(--file-line-width,100%) !important;
+  margin:0 auto !important;
+  min-height:0 !important;
+  padding:12px 0 !important;
+}
