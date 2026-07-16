@@ -166,7 +166,9 @@ export function resolveGit(app: App, file: TFile): GitContext {
 /** Current HEAD sha of a repo. */
 export function headSha(root: string): string {
   try {
-    return git(['-C', root, 'rev-parse', 'HEAD']).trim();
+    // 'HEAD' is a literal and could never be option-shaped — but a rule with an
+    // exception is not a rule, so this site carries --end-of-options like every other.
+    return git(['-C', root, 'rev-parse', '--end-of-options', 'HEAD']).trim();
   } catch (e: unknown) {
     throw new GitError(`Cannot read HEAD — the repo may have no commits yet.\n${(e as Error).message}`);
   }

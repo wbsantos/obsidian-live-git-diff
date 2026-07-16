@@ -233,18 +233,22 @@ The cost: progress is measured in **block count, not pixels**. A run of one shor
 
 ## The color scheme is VS Code's, and it has no third state
 
-Verified by grepping VS Code's own `markdown-language-features/media/markdown.css`: **it uses no yellow anywhere.** Its only "modified" color is `--vscode-editorGutter-modifiedBackground`. The whole design is in one rule:
+Verified by grepping VS Code's own `markdown-language-features/media/markdown.css`: **it uses no yellow anywhere.** `.code-line-diff-modified` exists, but only ever lands *combined with* `-added` — it never carries a color of its own. The whole design is in one rule:
 
 ```css
 .code-line-diff-modified.code-line-diff-added { box-shadow: none }
 ```
 
-A modified line **is** the *added* (green) wash; the `modified` class merely drops the green rail so the other bar shows. Two orthogonal channels:
+A modified line **is** the *added* (green) wash; the `modified` class merely drops the rail so the dashed indicator can show instead. One channel, two states:
 
 - **background** answers *"is this the new text?"* → green = new, red = old
-- **rail** answers *"where did it come from?"* → a distinct bar = replaced something
+- **rail** repeats that same answer in the margin (GitHub's `editorGutter.{added,deleted}Background`), so a page can be *scanned* for changes without reading it. It is **not** a second channel: a rail disagreeing with the wash it borders would claim a state the diff doesn't have.
 
-An earlier draft washed modified blocks **amber on both sides** — a third state VS Code doesn't have, inherited from a previous tool's convention and never validated. It collided with annotation plugins' own yellow highlight, so yellow meant two things on screen. Deleting the state fixed the collision for free: **yellow now means only "annotated"**. Side-by-side needs no third color anyway — the layout already says "this became that".
+An earlier draft washed modified blocks **amber on both sides**; a later one kept an amber *rail* after that wash was deleted. Both collided with annotation plugins' own yellow highlight, so yellow meant two things on screen at once. Deleting the state fixed the collision for free: **yellow now means only "annotated"**. Side-by-side needs no third state anyway — the layout already says "this became that".
+
+Be precise about *why* the amber was wrong, because the obvious explanation is not the true one. `#d4a72c66` **is** `editorGutter.modifiedBackground` in GitHub Light Default — copied faithfully. The value was never the error; the **source** was. `editorGutter.*` is the SCM dirty-diff gutter of a *normal editor*, answering "what have I not committed?" — a different question on a different surface. `markdown.css` never reaches for it, and a diff has no use for it.
+
+**Where we part company with VS Code:** its markdown diff is **single-pane**, so removed text is nowhere on screen and needs a stand-in — hence killing the rail on a modified block and marking the deletion with a 2px dashed red bar after it (`.diff-change-indicator-modification`). We are two-pane: the old text is in the pane to the left. That marker solves a problem we don't have, so `mod` keeps its rail, colored by the side it sits on.
 
 **Why literal values, not Obsidian's theme vars:** an early version used `var(--color-green)` / `var(--color-red)` at 0.10 alpha and it read as *harsh* — even though 0.10 is **lighter** than GitHub's 0.30. The intensity was never the alpha; it was the **hue**. Obsidian's `--color-red` is `rgb(233,49,71)`, an alarm red. GitHub picked hues that are already nearly white and can therefore sit at higher alpha while staying quiet behind text. They tuned the hue, not the opacity. (The values are now CSS custom properties so settings can override them — but the *defaults* are GitHub's, and that's why.)
 

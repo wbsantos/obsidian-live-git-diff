@@ -1,6 +1,6 @@
 # Live Git Diff
 
-**Review a note side by side against its git version — both fully rendered, scroll-synced, inside Obsidian.**
+**Review a note side by side against any git version of itself — both fully rendered, scroll-synced, inside Obsidian. The pane you review is your actual note, not a copy — so your comments stay anchored.**
 
 ---
 
@@ -10,25 +10,26 @@ No Obsidian plugin diffs rendered markdown **without destroying the rendered doc
 
 File Diff, Intervaults, Diff Apply, and the GitHub-sync plugins all diff **raw source** — you get `**bold**` and `| --- |` and pipe tables in a monospace gutter, which is not the document you wrote. Obsidian's reading view has no diff of its own. Smart2Brain (2.0.0-beta, April 2026) does render a two-pane diff of pending AI edits inside a reading-view block — but it calls `el.empty()` and rebuilds the DOM, so anything anchored to that DOM is gone.
 
-That last part is the whole point. Reviewing a note against its last commit otherwise means leaving Obsidian for a tool that renders the diff — and leaving behind your annotations, your text-to-speech, and your links. This plugin only **adds CSS classes to blocks Obsidian already rendered**. It never rebuilds them and never touches your text, which is why your comments, TTS, and links keep working while you read the diff.
+That last part is the whole point. A rendered diff anywhere else puts a **copy** on your screen — synthesized for the review, thrown away after it — while your comments, your text-to-speech, and your links stay attached to the original. This plugin only **adds CSS classes to blocks Obsidian already rendered**: the pane you review is your **actual note** — nothing synthesized, nothing duplicated, nothing written — which is why everything that attaches to it keeps working while you read the diff.
 
-> *Prior art checked 2026-07-15. If another plugin has since shipped rendered diffs, this section is out of date — please open an issue.*
+> *Prior art checked 2026-07-15/16, to source or shipped binary (Smart2Brain's diff verified in its 2.0.0-beta bundle: rendered, stacked vertically, rebuilt via `el.empty()`). If a plugin has since shipped a non-destructive rendered diff, this section is out of date — please open an issue.*
 
 ## What it does
 
+- **The note you review is the real one.** The right pane is your actual note in an ordinary markdown leaf — not a copy, not a generated document. The plugin *adds CSS classes* to blocks Obsidian already rendered; it never rebuilds the view and never touches your text.
+- **So your comments survive the review.** Anything that anchors to your note — annotation plugins such as [side-comments](https://github.com/guoxueziliao/side-comments), TTS, links — keeps working mid-review, because the thing it anchored to is still there. Comments are deliberately out of scope: plenty of plugins annotate well; what was missing was a diff view that doesn't break them.
 - **Side-by-side rendered diff.** Left = the git version, right = your real note. Both typeset by Obsidian, in your theme.
-- **Compare against any version.** Pick from a list of the file's commits — by subject and age, not by sha. Spans as many commits as you like in one view, and follows renames.
+- **Compare against any version.** Pick from a list of the file's commits — by subject and age, not by sha. "Everything since last week" or "the last ten edits in one view" is two clicks: one base, N commits, one diff. Follows renames.
 - **Nothing is written to disk.** The base version is fetched into memory with `git show`. No temp file, no generated note, nothing in your vault.
-- **Scroll-synced.** Scroll either pane; the other follows, anchored block-to-block.
+- **Scroll-synced, block-aligned.** Scroll either pane and the other follows — the same paragraph sits across from itself the whole way down, with blank space reserved where one side has text the other doesn't. You read one document in two states, not two documents.
 - **Word-level marks.** Inside a changed block, the words that actually changed are highlighted — on both sides.
-- **Your plugins keep working.** The right pane is an ordinary markdown leaf. This plugin only *adds CSS classes* to it — it never touches your text — so annotation plugins, TTS, and links behave exactly as they always do.
 - **Read-only, and that's enforced.** Not a promise: a [build gate](#privacy-and-safety) fails the build if a write method reaches the bundle.
 
 ## Requirements
 
 - **Obsidian 1.4.0+**, **desktop only.** The plugin runs `git` as a subprocess, which a mobile app cannot do.
 - **`git` on your PATH.**
-- **The note must live inside a git repository.** Your vault root does **not** have to be the git root — a vault nested inside a larger repo works fine, which is the common case for anyone keeping docs alongside code.
+- **The note must live inside a git repository.** Your vault root does **not** have to be the git root — a vault nested inside a larger repo works fine, which is the common case for anyone keeping docs alongside code. Not a git user? An AI agent can own all of this for you — see [Let the agent do the git](#let-the-agent-do-the-git).
 - The note must be **tracked** in git at the version you are comparing against.
 
 ## Installation
@@ -52,7 +53,7 @@ Obsidian loads exactly three files — `main.js`, `manifest.json`, `styles.css` 
 
 Either download the three files from a release, or build them yourself.
 
-**From a release** — download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jkosturko/obsidian-live-git-diff/releases), put them in `<your-vault>/.obsidian/plugins/live-git-diff/`, then restart Obsidian (or toggle **Community plugins** off and on) and enable **Live Git Diff**.
+**From a release** *(once one exists)* — download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jkosturko/obsidian-live-git-diff/releases), put them in `<your-vault>/.obsidian/plugins/live-git-diff/`, then restart Obsidian (or toggle **Community plugins** off and on) and enable **Live Git Diff**.
 
 **From source** — no release needed:
 
@@ -60,11 +61,13 @@ Either download the three files from a release, or build them yourself.
 git clone https://github.com/jkosturko/obsidian-live-git-diff
 cd obsidian-live-git-diff/plugin-src
 npm ci && npm run build          # typecheck -> bundle -> read-only gate
-cp ../plugin-dist/{main.js,manifest.json,styles.css} \
-   "/path/to/YourVault/.obsidian/plugins/live-git-diff/"
+
+PLUGIN="/path/to/YourVault/.obsidian/plugins/live-git-diff"
+mkdir -p "$PLUGIN"
+cp ../plugin-dist/{main.js,manifest.json,styles.css} "$PLUGIN"
 ```
 
-Create the plugin folder first if it isn't there. `plugin-dist/` is also committed, so a clone alone has the three files if you'd rather not run the toolchain — though building them yourself is the point of the [read-only gate](#privacy-and-safety) being a build step. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, including symlinking `plugin-dist` into a vault.
+Then restart Obsidian and enable **Live Git Diff**. `plugin-dist/` is committed, so a clone alone has the three files if you'd rather not run the toolchain — though running the build is what puts the [read-only gate](#privacy-and-safety) between the source and the bundle you install. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, including symlinking `plugin-dist` into a vault so a rebuild lands without copying.
 
 ### Via Community plugins
 
@@ -77,11 +80,30 @@ Open a note that lives in a git repo, switch to **Reading view**, then run **Liv
 | Command | What it does |
 | --- | --- |
 | **Open review against a version…** | **The main one.** Lists this file's recent commits — subject, age, sha — and pins the one you pick as the base. |
-| **Open git diff review for this file** | The quick path: pins whatever you set as the default base (HEAD unless you change it) without asking. |
+| **Open git diff review for this file** | The quick path: pins whatever you set as the default base (HEAD unless you change it) without asking. If a review is already open on the file, it keeps the pinned base and just re-diffs. |
 | **Close review** | Ends the session, removes every decoration, and closes the base pane. |
 | **Refresh review (re-pin the base version)** | Re-resolves the base and re-diffs. Use it after new commits land. |
 | **Toggle scroll sync** | Turns the pane-following on and off. The base pane's header shows which. |
 | **Copy alignment report to clipboard** | Copies a JSON diagnostic — how far the panes are out of alignment, in pixels, right now. For bug reports. |
+
+### The review loop
+
+The workflow this plugin was built for — reviewing an AI agent's writing without giving up your annotations:
+
+1. **Open a review** against the version you recognise — the commit from before the agent's work started.
+2. **Comment on your note** with your annotation plugin ([side-comments](https://github.com/guoxueziliao/side-comments) keeps comments in a sidecar file, so the `.md` stays clean).
+3. **The agent reads the comments and revises** — editing the note, committing as it goes.
+4. **Run _Open git diff review for this file_ again.** With a review already open it keeps the pinned base — a fresh diff against the same baseline, and your comments are exactly where you left them, because the note was never rebuilt.
+
+Each round shows the *total* change since your chosen baseline, not just the last edit. Use **Refresh review** only when you want to move the baseline forward.
+
+### Let the agent do the git
+
+You don't need to run git yourself for any of this. If an AI agent works in your vault, give it one standing instruction — in `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or whatever instruction file your agent reads:
+
+> After each meaningful change to my notes, commit with a one-line message saying what you did and why.
+
+The agent handles the repository setup, the commits, and the messages; you get a version picker full of checkpoints you can actually recognise ("apply review round 1", "rework intro per comments") and a diff against any of them. The plugin never asks you to touch a terminal — it only needs the history to exist.
 
 ### Choosing what to compare against
 

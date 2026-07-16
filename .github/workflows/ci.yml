@@ -40,6 +40,16 @@ jobs:
           cache: npm
           cache-dependency-path: plugin-src/package-lock.json
 
+      - name: Root copies must match plugin-src
+        # manifest.json and versions.json exist twice: the originals under plugin-src/
+        # and copies at the repo root, because BRAT resolves versions from the ROOT
+        # manifest before it downloads anything. Nothing regenerates the copies, so a
+        # version bump that forgets them makes BRAT install the wrong version silently.
+        # test/bundle.test.ts cannot see the root copies; this diff is the only gate.
+        run: |
+          diff manifest.json ../manifest.json
+          diff versions.json ../versions.json
+
       - name: Install
         run: npm ci
 

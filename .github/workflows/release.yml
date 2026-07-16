@@ -67,6 +67,14 @@ jobs:
           fi
           echo "Tag ${GITHUB_REF_NAME} matches manifest.json version ${MANIFEST}."
 
+      - name: Root copies must match plugin-src
+        # Same gate as ci.yml, run against the tag: BRAT resolves the version from the
+        # ROOT manifest, so a release cut with a stale root copy installs as the wrong
+        # version. The diff makes that a failed run instead of a silent mis-install.
+        run: |
+          diff manifest.json ../manifest.json
+          diff versions.json ../versions.json
+
       - name: Install
         run: npm ci
 

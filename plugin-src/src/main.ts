@@ -699,6 +699,9 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
     let notePart: Record<string, unknown> = { found: false };
     let noteRow: Row | null = null;
     let noteOffsetPx: number | null = null;
+    // The anchor's absolute VIEWPORT y. deltaPx is computed against this, not against
+    // noteOffsetPx — see the deltaPx comment below for the 88px reason why.
+    let noteHitTopPx: number | null = null;
     if (note) {
       const hit = topmostVisible(
         note.scroller,
@@ -707,6 +710,7 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
       const info = hit ? this.noteLines.get(hit.el) : null;
       noteRow = info ? this.rowForNoteRange(info.lineStart, info.lineEnd) : null;
       if (hit) noteOffsetPx = hit.rect.top - note.scroller.getBoundingClientRect().top;
+      if (hit) noteHitTopPx = hit.rect.top;
       notePart = {
         found: !!hit,
         renderedBlocksInDom: note.scroller.querySelectorAll(`.${CLS.nblock}`).length,
@@ -752,18 +756,39 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
     // reported null for every 'ins' row — i.e. it went quiet on exactly the rows that
     // drifted most, which is how a 340px anchor error stayed invisible in a diagnostic
     // whose whole job was to surface it.
+    // MEASURE IN SCREEN SPACE, NOT SCROLLER-DEPTH SPACE.
+    //
+    // This used to subtract two SCROLLER-RELATIVE offsets:
+    //   (baseElTop - baseScrollerTop) - (noteElTop - noteScrollerTop)
+    // which silently assumes both scrollers start at the same height on screen. They do
+    // not: the base pane carries an 88px header ABOVE its scroller, so the identity is
+    //   depthDelta = screenDelta - (baseScrollerTop - noteScrollerTop)
+    // and the report subtracted a constant 88px from a correct answer. Measured over 21
+    // scroll positions on a 94-change diff: screen delta median 0.1px / max 0.2px (21/21
+    // within 4px) while this reported a flat -87.8px, 0/21 within 4px. The panes were
+    // pixel-perfect and the diagnostic whose entire job is to detect misalignment called
+    // it 88px broken — which would send anyone reading a bug report chasing a phantom.
+    //
+    // The reader aligns two blocks with their eyes, so the metric is where the blocks are
+    // ON SCREEN. paneOriginOffsetPx below reports the scroller gap separately, so the two
+    // spaces can never be silently conflated again.
     let deltaPx: number | null = null;
     let deltaNote = 'no base-side counterpart at all — interpolated region';
-    if (noteRow && base && view && noteOffsetPx != null) {
+    if (noteRow && base && view && noteHitTopPx != null) {
       const el = this.baseElFor(noteRow.idx);
       if (el) {
-        const baseOffsetPx = el.getBoundingClientRect().top - base.getBoundingClientRect().top;
-        deltaPx = Number((baseOffsetPx - noteOffsetPx).toFixed(1));
-        deltaNote = '0 = counterpart blocks sit at the same depth in both viewports; ' +
-                    '+ = base pane block sits lower than the note pane block' +
+        deltaPx = Number((el.getBoundingClientRect().top - noteHitTopPx).toFixed(1));
+        deltaNote = '0 = counterpart blocks sit at the same height ON SCREEN (what the ' +
+                    'reader sees); + = base pane block sits lower than the note pane block' +
                     (noteRow.paired ? '' : ' (counterpart is a view zone, not a block)');
       }
     }
+    // The two scrollers' origins differ by the base pane's header. Reported so a future
+    // reader can tell a real misalignment from a coordinate-space mistake.
+    const paneOriginOffsetPx = base && note
+      ? Number((base.getBoundingClientRect().top -
+                note.scroller.getBoundingClientRect().top).toFixed(1))
+      : null;
 
     const zoneStats = this.zones.stats();
     const report = {
@@ -799,6 +824,7 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
         notePaired: noteRow ? noteRow.paired : null,
       },
       deltaPx,
+      paneOriginOffsetPx,
       deltaNote,
     };
 

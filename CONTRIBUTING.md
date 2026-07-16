@@ -53,11 +53,16 @@ plugin-src/        the source. This is where you work.
   test/            node:test suites + fixtures
   tools/           the invariant gate + the oracle capture tool
 plugin-dist/       the BUILT plugin — main.js, manifest.json, styles.css. Committed.
-docs/              ARCHITECTURE.md and screenshots
-plugin/ spikes/ tools/   the original spike. Kept for provenance; not built or shipped.
+docs/              ARCHITECTURE.md and OBSIDIAN-COMPLIANCE.md
+manifest.json      a copy of plugin-src/manifest.json. BRAT reads it from the root.
+versions.json      a copy of plugin-src/versions.json, for the same reason.
 ```
 
+The original spike lives on the **`archive/spike`** branch — `git show archive/spike:SPIKE-RESULTS.md`, or check it out to browse. It is off `main` on purpose: it carried its own older `manifest.json` (`id: spike2b-gitdiff`), and a repo with two manifests in it confuses BRAT and anyone reading it for the first time. `SPIKE-RESULTS.md` stays on `main` as the measured record the design rests on.
+
 `plugin-dist/` is committed on purpose: it's the artifact a user copies into their vault, and committing it means the read-only claim is auditable from a clone without trusting that someone's local build matched these sources.
+
+**The root `manifest.json` and `versions.json` are copies, and copies drift.** They exist because BRAT resolves a version by reading the manifest from the **repository root**, before it downloads any release asset — with the manifest only under `plugin-src/`, BRAT could not install this plugin at all. Nothing regenerates them, so **releasing means updating all three**: `plugin-src/manifest.json`, the root copy, and `versions.json` at both paths. `test/bundle.test.ts` catches a manifest that disagrees with `package.json` on version; CI and the release workflow additionally `diff` the root copies against their `plugin-src/` originals, so a root copy left behind fails the run instead of shipping.
 
 ## Before you open a PR
 
@@ -65,12 +70,15 @@ plugin/ spikes/ tools/   the original spike. Kept for provenance; not built or s
 2. **You tested it in a real Obsidian**, in Reading view, on a note in a git repo. The typecheck cannot tell you the feature works — see `docs/ARCHITECTURE.md` for the story of a relative `require()` that typechecked, linted, read correctly, and silently never loaded.
 3. **Comments explain WHY, not what.** This codebase is dense with hard-won facts (the reading view virtualises; padding not margin; block grain must match Obsidian's sections). If you discover a new one, write it down where the next person will hit it. If you find one that's *wrong*, please fix the comment as well as the code.
 4. **No new dependencies** without a good reason. The plugin ships zero runtime dependencies and the toolchain is esbuild + TypeScript + node's own test runner. That's deliberate.
+5. **If you bumped the version**, the root `manifest.json` and `versions.json` match their `plugin-src/` originals. Nothing copies them for you, and a stale root manifest makes BRAT install the wrong version — silently.
 
-## The grain oracle (the one test that needs you)
+## The grain oracle
 
 `test/grain-oracle.test.ts` asserts that our block splitter agrees with **Obsidian's own sectioning** — which matters because a disagreement means the two panes measure differently and everything below it drifts. Obsidian's sectioning is closed source, so agreement is a **measurement**, not an argument.
 
-It compares against a captured snapshot of `metadataCache.getFileCache().sections`. If `test/fixtures/obsidian-sections.json` is absent, the test **skips** locally and **fails** in CI (which sets `LGD_REQUIRE_ORACLE=1`).
+It compares against a captured snapshot of `metadataCache.getFileCache().sections`. **The fixture is committed** (`test/fixtures/obsidian-sections.json`, captured from a live Obsidian 1.12.7), so the suite runs green out of the box and CI's `LGD_REQUIRE_ORACLE=1` is satisfied honestly. If the fixture is ever absent, the test **skips** locally and **fails** in CI — which is the deliberate design: a missing oracle must be loud, not silently green.
+
+You need to re-capture it if you change the block splitter's grain, or to check a newer Obsidian still sections the way this one did. The fixture records a sha256 of the exact bytes Obsidian sectioned, so a stale oracle fails loudly instead of passing quietly.
 
 To capture it:
 
@@ -83,7 +91,7 @@ cp test/fixtures/corpus-head.md /path/to/AnyVault/
 npm run capture-oracle -- --window "AnyVault" --file "corpus-head.md"
 ```
 
-Commit the fixture it writes. The fixture records a sha256 of the exact bytes Obsidian sectioned, so a stale oracle fails loudly instead of passing quietly.
+Commit the fixture it writes, and say which Obsidian version it came from.
 
 **Please don't "fix" a missing oracle by reimplementing Obsidian's sectioner to compare against.** That only proves our splitter agrees with our own second guess — a fake oracle, which is worse than no oracle because it reports green.
 

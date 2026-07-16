@@ -12,8 +12,8 @@
  * the verbatim rules and for where we deliberately part company):
  *
  *   WASH answers "is this the new text?"  green = new, red = old
- *   RAIL is the same answer in the margin, a shade darker, so a page can be SCANNED for
- *        changes without reading it. It is not a third signal.
+ *   RAIL is the same answer repeated in the margin (GitHub's editorGutter tokens), so a
+ *        page can be SCANNED for changes without reading it. It is not a third signal.
  *
  * VS Code uses NO yellow anywhere in this surface, and neither do we. An earlier draft
  * gave 'mod' blocks an amber wash and then, after that was deleted, an amber RAIL — a
@@ -39,8 +39,8 @@
 body {
   --lgd-ins-bg: #6fdd8b80;   /* insertedTextBackground */
   --lgd-del-bg: #ff818266;   /* removedTextBackground  */
-  --lgd-ins-rail: #4ac26b66; /* editorGutter.addedBackground   — darker than its wash */
-  --lgd-del-rail: #f8514966; /* editorGutter.deletedBackground — darker than its wash */
+  --lgd-ins-rail: #4ac26b66; /* editorGutter.addedBackground   */
+  --lgd-del-rail: #ff818266; /* editorGutter.deletedBackground */
 }
 
 /* --- dark (GitHub Dark Default) --- */
@@ -128,12 +128,13 @@ body.theme-dark {
  *
  * A modified block IS an added block. There is no third hue anywhere in the file.
  *
- * An earlier version railed 'mod' in amber, citing editorGutter.modifiedBackground. Wrong
- * twice over: editorGutter.* is the SCM dirty-diff gutter of a NORMAL editor, answering
- * "what have I not committed?" — a different question on a different surface — and its real
- * value is BLUE (#0078D4 dark / #005FB8 light), never amber. It left blocks washed green
- * under a rail claiming a third state, and it spent the one color Obsidian's annotation
- * plugins highlight with. Amber now means exactly one thing here: someone left a comment.
+ * An earlier version railed 'mod' in amber, citing editorGutter.modifiedBackground. The
+ * VALUE was faithful — #d4a72c66 is exactly that token in GitHub Light Default — but the
+ * SOURCE was the wrong surface: editorGutter.* is the SCM dirty-diff gutter of a NORMAL
+ * editor, answering "what have I not committed?". markdown.css never reaches for it, and
+ * a diff has no use for it. The result was a block washed green under a rail claiming a
+ * third state, spending the one color Obsidian's annotation plugins highlight with.
+ * Amber now means exactly one thing in this window: someone left a comment.
  *
  * WHERE WE INTENTIONALLY DIVERGE: VS Code kills the rail on a modified block and puts a
  * 2px dashed RED bar after it instead (.diff-change-indicator-modification), because its
@@ -142,18 +143,15 @@ body.theme-dark {
  * marker solves a problem we do not have, so 'mod' keeps a rail, and the rail takes the
  * color of the side it is on — green where the new text is, red where the old text is.
  *
- * A rail must also be DARKER than the wash it borders, or it is not a rail — it is just
- * 12px more wash. The light palette originally took #ff818266 for both the deleted rail
- * and the deleted wash (GitHub's own two tokens happen to collide there), so the base
- * pane's rail was invisible while the note pane's read fine — the asymmetry the dark
- * palette had already avoided by railing in #f85149. Both panes now rail a shade down
- * from their wash.
+ * Our rail VALUES are GitHub's editorGutter.{added,deleted}Background, verbatim in both
+ * themes, rather than the diffEditorGutter.* family markdown.css rails from — because the
+ * workbench registers diffEditorGutter.insertedLineBackground with a default of NULL, so
+ * unless a theme sets it VS Code's own rail paints nothing at all. Having a rail is the
+ * deliberate improvement; its colors are still GitHub's.
  *
- * Our rail VALUES are GitHub's editorGutter.{added,deleted}Background rather than the
- * diffEditorGutter.* family markdown.css rails from, because the workbench registers
- * diffEditorGutter.insertedLineBackground with a default of NULL: unless a theme sets it,
- * VS Code's own rail paints nothing at all. Ours is a deliberate improvement on that, not
- * a copy of it.
+ * In light, GitHub's editorGutter.deletedBackground and removedTextBackground are the same
+ * value (#ff818266) while the green pair differ — an asymmetry that is GitHub's own design
+ * call, not a defect, and one the 8px gap between rail and wash makes moot. Left verbatim.
  * ------------------------------------------------------------------ */
 .lgd-ins::before { background: var(--lgd-ins-rail); }
 .lgd-del::before { background: var(--lgd-del-rail); }

@@ -2185,6 +2185,7 @@ ${e.message}`;
     let notePart = { found: false };
     let noteRow = null;
     let noteOffsetPx = null;
+    let noteHitTopPx = null;
     if (note) {
       const hit = topmostVisible(
         note.scroller,
@@ -2193,6 +2194,7 @@ ${e.message}`;
       const info = hit ? this.noteLines.get(hit.el) : null;
       noteRow = info ? this.rowForNoteRange(info.lineStart, info.lineEnd) : null;
       if (hit) noteOffsetPx = hit.rect.top - note.scroller.getBoundingClientRect().top;
+      if (hit) noteHitTopPx = hit.rect.top;
       notePart = {
         found: !!hit,
         renderedBlocksInDom: note.scroller.querySelectorAll(`.${CLS.nblock}`).length,
@@ -2232,14 +2234,14 @@ ${e.message}`;
     }
     let deltaPx = null;
     let deltaNote = "no base-side counterpart at all \u2014 interpolated region";
-    if (noteRow && base && view && noteOffsetPx != null) {
+    if (noteRow && base && view && noteHitTopPx != null) {
       const el = this.baseElFor(noteRow.idx);
       if (el) {
-        const baseOffsetPx = el.getBoundingClientRect().top - base.getBoundingClientRect().top;
-        deltaPx = Number((baseOffsetPx - noteOffsetPx).toFixed(1));
-        deltaNote = "0 = counterpart blocks sit at the same depth in both viewports; + = base pane block sits lower than the note pane block" + (noteRow.paired ? "" : " (counterpart is a view zone, not a block)");
+        deltaPx = Number((el.getBoundingClientRect().top - noteHitTopPx).toFixed(1));
+        deltaNote = "0 = counterpart blocks sit at the same height ON SCREEN (what the reader sees); + = base pane block sits lower than the note pane block" + (noteRow.paired ? "" : " (counterpart is a view zone, not a block)");
       }
     }
+    const paneOriginOffsetPx = base && note ? Number((base.getBoundingClientRect().top - note.scroller.getBoundingClientRect().top).toFixed(1)) : null;
     const zoneStats = this.zones.stats();
     const report = {
       generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -2274,6 +2276,7 @@ ${e.message}`;
         notePaired: noteRow ? noteRow.paired : null
       },
       deltaPx,
+      paneOriginOffsetPx,
       deltaNote
     };
     const json = JSON.stringify(report, null, 2);
