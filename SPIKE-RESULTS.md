@@ -106,6 +106,42 @@ Verified no feedback loop: ins-height measurement subtracts del padding before
 caching; hammering one scroll position 8x holds at 2616px ins zones / 120px del
 pads — converges in one pass, no growth.
 
+### Color scheme — VS Code's, adopted verbatim
+
+Verified by grepping VS Code's own markdown-language-features/media/markdown.css:
+**it uses NO yellow anywhere.** Its only 'modified' color is
+`--vscode-editorGutter-modifiedBackground` = **#1b81a8, blue**. The design is in
+one rule: `.code-line-diff-modified.code-line-diff-added { box-shadow:none }` — a
+modified line IS the *added* (green) wash; the `modified` class merely drops the
+green rail so the blue bar shows instead.
+
+Two orthogonal channels:
+- **background** = "is this the new text?" -> green = new, red = old
+- **rail** = "where did it come from?" -> blue = replaced something, green/red = wholly new/removed
+
+We had washed 'mod' amber on BOTH sides — a third state VS Code doesn't have,
+inherited from render-preview.py's convention and never validated. It also
+collided with side-comments' own yellow annotation highlight (yellow meant two
+things on screen). Deleting the state fixed the collision for free: **yellow now
+means only "annotated"**. Side-by-side needs no third color anyway — the layout
+already says "this became that".
+
+### Word-level marks (VS Code's .char-insert / .char-delete layer)
+
+Diff the two blocks' **rendered `textContent`**, not the markdown source — both are
+rendered, which sidesteps `**bold**`->`bold` offset mapping entirely.
+
+Measured: 43/43 mod rows marked, 225 spans, **0 suppressed**, and the two numbers
+that matter:
+- **`reverts: 0`** — `textContent` byte-identical before/after on every block, so
+  comment anchors are provably intact. The wrapper asserts this and self-reverts.
+- **`maxBaseHeightDeltaPx: 0`** — inline spans changed no block heights, so the
+  view zones stay in sync. Probed at runtime rather than assumed.
+
+Coalesce runs across whitespace but start/end only on real words; suppress when
+>80% of tokens changed (a rewrite, not an edit). Skipped nodes (code/math) still
+count toward offsets — getting that backwards shifts every later range.
+
 ### Architecture facts (verified against Obsidian 1.11.5 source)
 - **Reading view virtualizes**: off-screen sections are `.detach()`ed (getBoundingClientRect
   = zeros) and `sizerEl.setChildrenInPlace()` runs every scroll tick — so **injected spacers

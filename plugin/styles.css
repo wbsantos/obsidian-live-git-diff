@@ -18,19 +18,82 @@
       below, so the marks follow whatever theme is active instead of being a
       light-mode lookalike. Fallbacks keep it sane on themes that omit them. */
 .sp2a-ins,.sp2a-mod,.sp2a-del{border-radius:2px}
+
+/* ------------------------------------------------------------------ *
+ * VS Code's scheme, adopted verbatim (verified by grepping its own
+ * markdown-language-features/media/markdown.css):
+ *
+ *   BACKGROUND answers "is this the new text?"   green = new, red = old
+ *   RAIL       answers "where did it come from?" blue  = replaced something
+ *
+ * VS Code uses NO yellow anywhere. Its only 'modified' color is
+ * --vscode-editorGutter-modifiedBackground (#1b81a8, BLUE), and its rule
+ *   .code-line-diff-modified.code-line-diff-added { box-shadow:none }
+ * shows the design: a modified line IS the 'added' (green) wash; the
+ * 'modified' class merely drops the green rail so the blue bar can show.
+ *
+ * We previously washed 'mod' blocks amber on BOTH sides — a third state VS
+ * Code doesn't have, inherited from render-preview.py's convention and
+ * never validated. It also collided with side-comments' own yellow annotation
+ * highlight, so yellow meant two things on screen. Deleting the state fixes
+ * that for free: yellow now means ONLY "annotated".
+ *
+ * Side-by-side needs no third color anyway — the layout already says
+ * "this became that": red on the left, green on the right.
+ * ------------------------------------------------------------------ */
+
+/* --- wholly new / wholly removed: background and rail agree --- */
 .sp2a-ins{
   background-color:var(--color-green-rgb-bg,rgba(var(--color-green-rgb),0.10));
   box-shadow:-4px 0 0 var(--color-green,#1a7f37);
-}
-.sp2a-mod{
-  background-color:var(--color-yellow-rgb-bg,rgba(var(--color-yellow-rgb),0.10));
-  box-shadow:-4px 0 0 var(--color-yellow,#bf8700);
 }
 .sp2a-del{
   background-color:var(--color-red-rgb-bg,rgba(var(--color-red-rgb),0.10));
   box-shadow:-4px 0 0 var(--color-red,#cf222e);
 }
+
+/* --- modified: background says which VERSION you're reading, rail says
+       "this one has a counterpart on the other side" --- */
+.sp2b-nblock.sp2a-mod{   /* note pane = the NEW text */
+  background-color:var(--color-green-rgb-bg,rgba(var(--color-green-rgb),0.10));
+  box-shadow:-4px 0 0 var(--color-blue,#1b81a8);
+}
+.sp2a-block.sp2a-mod{    /* base pane = the OLD text */
+  background-color:var(--color-red-rgb-bg,rgba(var(--color-red-rgb),0.10));
+  box-shadow:-4px 0 0 var(--color-blue,#1b81a8);
+}
 .sp2a-same{opacity:.75}
+
+/* ---- word-level marks (VS Code's .char-insert / .char-delete layer) ----
+
+   VS Code renders diffs in TWO layers: a whole-line wash (.line-insert/.line-delete
+   — our .sp2a-ins/.sp2a-mod/.sp2a-del above) and a MORE SATURATED mark on exactly
+   the words that changed (.char-insert/.char-delete — these). The block tint says
+   "something here changed"; the char mark says "this is what".
+
+   BACKGROUND ONLY — no border, no padding, no font change. Anything that alters an
+   inline box's metrics would change its block's height, and the view zones are
+   measured from those heights: a padded char mark would silently desync the pane
+   alignment. main.js measures this at runtime (charMarks.maxBaseHeightDeltaPx) rather
+   than trusting the claim.
+
+   COLOR CHOICE — yellow was already overloaded. On a 'mod' block the reader can be
+   looking at up to three yellows at once: the block's own wash, and side-comments'
+   annotation highlight. So the char marks deliberately stay GREEN/RED — the diff's
+   own vocabulary, and the one pair of hues that can sit inside a yellow-washed block
+   and still read as "changed word" rather than "annotated word". Saturation (~0.30)
+   is roughly 3x the block wash's 0.10, which is what makes them legible ON TOP of it.
+
+   Fallbacks are the literal channel triplets so the marks survive a theme that omits
+   --color-*-rgb (fallbacks may contain commas — legal, and necessary here). */
+.sp2a-char-ins,.sp2a-char-del{
+  border-radius:2px;
+  /* A mark that wraps across lines should paint each line, not one giant box. */
+  box-decoration-break:clone;
+  -webkit-box-decoration-break:clone;
+}
+.sp2a-char-ins{background-color:rgba(var(--color-green-rgb,26,127,55),0.30)}
+.sp2a-char-del{background-color:rgba(var(--color-red-rgb,207,34,46),0.30)}
 
 /* ---- left (base) view ---- */
 
