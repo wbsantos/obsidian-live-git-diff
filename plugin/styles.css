@@ -42,26 +42,72 @@
  * "this became that": red on the left, green on the right.
  * ------------------------------------------------------------------ */
 
-/* --- wholly new / wholly removed: background and rail agree --- */
-.sp2a-ins{
-  background-color:var(--color-green-rgb-bg,rgba(var(--color-green-rgb),0.10));
-  box-shadow:-4px 0 0 var(--color-green,#1a7f37);
-}
-.sp2a-del{
-  background-color:var(--color-red-rgb-bg,rgba(var(--color-red-rgb),0.10));
-  box-shadow:-4px 0 0 var(--color-red,#cf222e);
+/* ------------------------------------------------------------------ *
+ * DIFF COLORS — GitHub's palette, taken verbatim from the themes VS Code
+ * actually ships (github-vscode-theme/themes/{light,dark}-default.json).
+ *
+ * WHY LITERALS AND NOT OBSIDIAN'S THEME VARS:
+ * we used var(--color-green) / var(--color-red) at 0.10 alpha and it read as
+ * harsh — even though 0.10 is LIGHTER than GitHub's 0.30. The intensity was
+ * never the alpha; it was the HUE. Obsidian's --color-red is rgb(233,49,71),
+ * an alarm red. GitHub picked hues that are already nearly white (#ffcecb pale
+ * pink, #aceebb pale mint) and can therefore sit at a higher alpha while
+ * staying quiet behind the text. They tuned the hue, not the opacity.
+ *
+ * TWO LAYERS, as VS Code does:
+ *   *LineBackground -> the whole changed block (quieter)
+ *   *TextBackground -> just the changed WORDS (stronger, and it stacks)
+ *
+ * RAIL uses editorGutter.*Background. 'modified' is amber (#d4a72c) here —
+ * GitHub's own choice. It barely competes with side-comments' yellow because
+ * it's a 4px bar, not a wash; if it ever does, swap it for VS Code's default
+ * blue (#005FB8) — same channel, different pigment.
+ * ------------------------------------------------------------------ */
+
+/* rail: floats 12px clear of the text (VS Code's .diff-modification-gutter
+   trick) and costs ZERO layout — no padding, no width change, so paired-block
+   heights and wrap points stay identical and the view zones hold. ::before is
+   not a text node, so it can't perturb side-comments' offset walk either. */
+.sp2a-ins,.sp2a-del,.sp2a-mod{ position:relative; border-radius:2px; }
+.sp2a-ins::before,.sp2a-del::before,.sp2a-mod::before{
+  content:''; position:absolute; left:-12px; top:0; bottom:0;
+  width:4px; border-radius:2px; pointer-events:none;
 }
 
-/* --- modified: background says which VERSION you're reading, rail says
-       "this one has a counterpart on the other side" --- */
-.sp2b-nblock.sp2a-mod{   /* note pane = the NEW text */
-  background-color:var(--color-green-rgb-bg,rgba(var(--color-green-rgb),0.10));
-  box-shadow:-4px 0 0 var(--color-blue,#1b81a8);
-}
-.sp2a-block.sp2a-mod{    /* base pane = the OLD text */
-  background-color:var(--color-red-rgb-bg,rgba(var(--color-red-rgb),0.10));
-  box-shadow:-4px 0 0 var(--color-blue,#1b81a8);
-}
+/* --- light (GitHub Light Default) ---
+   ONE COLOR, PAINTED TWICE. VS Code's rendered-markdown diff has NO word-level
+   classes at all — grep its markdown.css and you find only .code-line-diff{,-added,
+   -deleted,-modified}. It gets darker words by putting the SAME class on the
+   changed word spans as on the line: the word receives a second coat of the same
+   translucent color and alpha compositing does the work.
+
+   Note it uses *TextBackground* for the LINE, not *LineBackground*:
+     .code-line-diff-deleted { background-color: var(--vscode-diffEditor-removedTextBackground) }
+   We had used removedLineBackground (#ffcecb4d) for the block, which composites to
+   rgb(255,240,239) — nearly white — so the whole effect floated away. Theirs lands
+   at rgb(255,205,205) with words at rgb(255,175,175). */
+.sp2a-ins            { background-color:#6fdd8b80; }  /* insertedTextBackground */
+.sp2a-del            { background-color:#ff818266; }  /* removedTextBackground  */
+.sp2b-nblock.sp2a-mod{ background-color:#6fdd8b80; }  /* NEW side of a change */
+.sp2a-block.sp2a-mod { background-color:#ff818266; }  /* OLD side of a change */
+.sp2a-ins::before    { background:#4ac26b66; }
+.sp2a-del::before    { background:#ff818266; }
+.sp2a-mod::before    { background:#d4a72c66; }
+/* the second coat — same color as the line it sits on */
+.sp2a-char-ins       { background-color:#6fdd8b80; }
+.sp2a-char-del       { background-color:#ff818266; }
+
+/* --- dark (GitHub Dark Default) --- */
+.theme-dark .sp2a-ins            { background-color:#3fb9504d; }
+.theme-dark .sp2a-del            { background-color:#ff7b724d; }
+.theme-dark .sp2b-nblock.sp2a-mod{ background-color:#3fb9504d; }
+.theme-dark .sp2a-block.sp2a-mod { background-color:#ff7b724d; }
+.theme-dark .sp2a-ins::before    { background:#2ea04366; }
+.theme-dark .sp2a-del::before    { background:#f8514966; }
+.theme-dark .sp2a-mod::before    { background:#bb800966; }
+.theme-dark .sp2a-char-ins       { background-color:#3fb9504d; }
+.theme-dark .sp2a-char-del       { background-color:#ff7b724d; }
+
 .sp2a-same{opacity:.75}
 
 /* ---- word-level marks (VS Code's .char-insert / .char-delete layer) ----
@@ -92,8 +138,6 @@
   box-decoration-break:clone;
   -webkit-box-decoration-break:clone;
 }
-.sp2a-char-ins{background-color:rgba(var(--color-green-rgb,26,127,55),0.30)}
-.sp2a-char-del{background-color:rgba(var(--color-red-rgb,207,34,46),0.30)}
 
 /* ---- left (base) view ---- */
 
@@ -219,7 +263,7 @@
   /* Rail breathing room lives on the SCROLLER, never on the sizer: the sizer's
      max-width is a fixed px value, so padding there would shrink the CONTENT box
      and change where text wraps — which is exactly the bug this block fixes. */
-  padding-left:10px;
+  padding-left:18px;   /* room for the ::before rail that hangs 12px left */
 }
 /* Mirror Obsidian's own sizer instead of overriding it.
    THE BUG THIS FIXES: an earlier attempt set `max-width:100% !important` to stop
