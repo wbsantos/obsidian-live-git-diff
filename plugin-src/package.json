@@ -9,7 +9,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "comment": "PLACEHOLDER — replace with the real public repo URL before publishing.",
     "url": "git+https://github.com/jkosturko/obsidian-live-git-diff.git"
   },
   "bugs": {

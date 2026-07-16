@@ -1,9 +1,0 @@
-{
-  "id": "spike2b-gitdiff",
-  "name": "Spike2b Git Diff (scroll sync)",
-  "version": "0.0.2",
-  "minAppVersion": "1.4.0",
-  "description": "Side-by-side rendered review of the current note against its pinned git HEAD version, with anchor-based scroll sync. Read-only: no note is ever written.",
-  "author": "spike2b",
-  "isDesktopOnly": true
-}

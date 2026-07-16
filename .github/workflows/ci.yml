@@ -19,9 +19,20 @@ jobs:
         working-directory: plugin-src
 
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to COMMIT SHAS, not to `@v4`. A major tag is mutable: whoever
+      # controls the action repo can repoint it at any commit, and every workflow that
+      # trusts the tag runs the new code on the next push — with this repo's contents
+      # already checked out. The sha is the only immutable name. The trailing comment is
+      # the human-readable version; it has no effect on what runs.
+      #
+      # To move one: resolve the tag with
+      #   git ls-remote --tags https://github.com/actions/<name>.git 'refs/tags/v4*'
+      # and paste the sha it prints. Never copy a sha from memory or from a blog post.
+      # (These tags are lightweight, so the sha ls-remote prints IS the commit. For an
+      # annotated tag you would need the `^{}` deref line instead.)
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           # The test suite runs TypeScript directly through node's native type
           # stripping, which needs >= 22.6. No transpile step for tests.
@@ -67,7 +78,7 @@ jobs:
         run: npm run gate
 
       - name: Upload built plugin
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: live-git-diff-plugin
           path: |

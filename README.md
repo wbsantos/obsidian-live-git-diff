@@ -2,19 +2,15 @@
 
 **Review a note side by side against its git version — both fully rendered, scroll-synced, inside Obsidian.**
 
-<!-- SCREENSHOT: replace this comment with the hero image once captured.
-     Expected path: docs/screenshot-side-by-side.png
-     See "Screenshots to capture" at the bottom of this file. -->
-
-![Live Git Diff — the base version on the left, your real note on the right](docs/screenshot-side-by-side.png)
-
 ---
 
 ## Why this exists
 
-No Obsidian plugin diffs **rendered** markdown. File Diff, Intervaults, and Diff Apply all diff **raw source** — you get `**bold**` and `| --- |` and pipe tables in a monospace gutter, which is not the document you wrote. Obsidian's reading view has no diff at all.
+No Obsidian plugin diffs rendered markdown **without destroying the rendered document to do it.**
 
-So reviewing a note against its last commit means leaving Obsidian for a tool that renders the diff — and leaving behind your annotations, your text-to-speech, and your links. This plugin closes that gap: the diff is rendered, it is side by side, it is scroll-synced, and the right-hand pane is your **actual note**, so everything that attaches to your notes keeps working.
+File Diff, Intervaults, Diff Apply, and the GitHub-sync plugins all diff **raw source** — you get `**bold**` and `| --- |` and pipe tables in a monospace gutter, which is not the document you wrote. Obsidian's reading view has no diff of its own. Smart2Brain (2.0.0-beta, April 2026) does render a two-pane diff of pending AI edits inside a reading-view block — but it calls `el.empty()` and rebuilds the DOM, so anything anchored to that DOM is gone.
+
+That last part is the whole point. Reviewing a note against its last commit otherwise means leaving Obsidian for a tool that renders the diff — and leaving behind your annotations, your text-to-speech, and your links. This plugin only **adds CSS classes to blocks Obsidian already rendered**. It never rebuilds them and never touches your text, which is why your comments, TTS, and links keep working while you read the diff.
 
 > *Prior art checked 2026-07-15. If another plugin has since shipped rendered diffs, this section is out of date — please open an issue.*
 
@@ -37,28 +33,38 @@ So reviewing a note against its last commit means leaving Obsidian for a tool th
 
 ## Installation
 
-### Via BRAT (recommended while this is in beta)
+Obsidian loads exactly three files — `main.js`, `manifest.json`, `styles.css` — from `<your-vault>/.obsidian/plugins/live-git-diff/`. Every route below is a way of getting those three files there.
 
-[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs plugins straight from a GitHub repo and keeps them updated.
+### Via BRAT (the recommended route, once a release exists)
 
-1. Install **Obsidian42 - BRAT** from Community Plugins and enable it.
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs plugins straight from a GitHub repo and keeps them updated. It reads this repo's root `manifest.json` to resolve the version, then downloads the assets from the latest **release** — so it works from the first tagged release onward, and **not before one exists.** If [the releases page](https://github.com/jkosturko/obsidian-live-git-diff/releases) is empty, build from source instead.
+
+1. Install **Obsidian42 - BRAT** from Community plugins and enable it.
 2. Open the command palette → **BRAT: Add a beta plugin for testing**.
 3. Paste the repo URL:
    ```
    https://github.com/jkosturko/obsidian-live-git-diff
    ```
-   <!-- PLACEHOLDER: replace with the real public repo URL before sharing. -->
 4. Choose the latest version and click **Add Plugin**.
 5. Enable **Live Git Diff** in **Settings → Community plugins**.
 
 ### Manual
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jkosturko/obsidian-live-git-diff/releases). <!-- PLACEHOLDER: repo URL -->
-2. Create the folder `<your-vault>/.obsidian/plugins/live-git-diff/`.
-3. Put the three files in it.
-4. Restart Obsidian (or toggle **Community plugins** off and on) and enable **Live Git Diff**.
+Either download the three files from a release, or build them yourself.
 
-> Building from source instead? See [CONTRIBUTING.md](CONTRIBUTING.md). `npm run build` emits those three files into `plugin-dist/`.
+**From a release** — download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jkosturko/obsidian-live-git-diff/releases), put them in `<your-vault>/.obsidian/plugins/live-git-diff/`, then restart Obsidian (or toggle **Community plugins** off and on) and enable **Live Git Diff**.
+
+**From source** — no release needed:
+
+```bash
+git clone https://github.com/jkosturko/obsidian-live-git-diff
+cd obsidian-live-git-diff/plugin-src
+npm ci && npm run build          # typecheck -> bundle -> read-only gate
+cp ../plugin-dist/{main.js,manifest.json,styles.css} \
+   "/path/to/YourVault/.obsidian/plugins/live-git-diff/"
+```
+
+Create the plugin folder first if it isn't there. `plugin-dist/` is also committed, so a clone alone has the three files if you'd rather not run the toolchain — though building them yourself is the point of the [read-only gate](#privacy-and-safety) being a build step. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, including symlinking `plugin-dist` into a vault.
 
 ### Via Community plugins
 
@@ -134,7 +140,6 @@ base 3c9d151 · "apply review round 1" · 7 hours ago
 | **Deleted text** | GitHub red | Wash behind removed blocks and the old side of a change. |
 | **Rail — added** | GitHub green | The 4px bar beside a wholly new block. |
 | **Rail — removed** | GitHub red | The 4px bar beside a wholly removed block. |
-| **Rail — changed** | GitHub amber | The 4px bar beside a changed block. |
 | **Debug logging** | Off | Verbose console output. Warnings and errors are logged either way. |
 
 Colors accept **any CSS color**, including alpha — `#6fdd8b80`, `rgb(0 0 0 / 20%)`, `color-mix(...)`. Alpha matters: these are washes that sit *behind* your text, and the defaults are translucent on purpose. Leave a field empty for the default.
@@ -218,8 +223,10 @@ And the gate itself is tested — [`plugin-src/test/invariant.test.ts`](plugin-s
 
 ## Credits and prior art
 
-- **[VS Code](https://github.com/microsoft/vscode)** — `markdown-language-features` is the closest prior art for decorating a *rendered* markdown view, and this plugin borrows its technique on purpose: rails that cost zero layout, the two-channel color scheme (background = "is this new?", rail = "where did it come from?"), one color painted twice to darken changed words, and **view zones** — reserving blank space on the short side rather than collapsing or hiding either side's content.
-- **[GitHub's VS Code themes](https://github.com/primer/github-vscode-theme)** — the diff palette, taken verbatim from `light-default` / `dark-default`. GitHub's hues are nearly white, which is what lets a wash sit behind text without shouting; the intensity was never the alpha.
+- **[VS Code](https://github.com/microsoft/vscode)**, two different parts of it:
+  - `markdown-language-features` (`media/markdown.css`) is the closest prior art for decorating a *rendered* markdown view, and this plugin borrows its technique on purpose: rails that cost zero layout (`box-shadow`, never border + padding), two states rather than three (a modified block *is* an added block — `.code-line-diff-modified` only ever lands combined with `.code-line-diff-added`), and one color painted twice to darken the changed words. Where it goes its own way: that diff is **single-pane**, so it marks a deletion with a dashed indicator after the block. We are two-pane and show the removed text itself.
+  - Monaco's **diff editor** is where **view zones** come from — reserving blank space on the short side rather than collapsing or hiding either side's content. That's a text diff, not a rendered one, but the idea is what keeps two rendered panes aligned.
+- **[GitHub's VS Code themes](https://github.com/primer/github-vscode-theme)** — the diff palette, taken verbatim from `light-default` / `dark-default`: `diffEditor.{inserted,removed}TextBackground` for the washes, `editorGutter.{added,deleted}Background` for the rails, in both themes. GitHub's hues are nearly white, which is what lets a wash sit behind text without shouting; the intensity was never the alpha. (Having a rail at all is ours — VS Code rails its markdown diff from `diffEditorGutter.*`, which is registered with a `null` default, so unless a theme sets it that rail paints nothing.)
 - **Obsidian's own reading view** — the base pane inherits `markdown-preview-view` / `markdown-preview-sizer` rather than re-deriving typography. Every hand-rolled lookalike drifted.
 - The `metadataCache.getFileCache().sections` API, which settles block-grain questions by measurement instead of argument.
 
@@ -230,19 +237,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). The one hard rule: **this plugin does no
 ## License
 
 [MIT](LICENSE) © 2026 Jessica Kosturko
-
----
-
-## Screenshots to capture
-
-*(Delete this section once the images exist.)*
-
-| File | What to capture |
-| --- | --- |
-| `docs/screenshot-side-by-side.png` | **The hero shot.** A review open on a real note: base pane left, note right, with a red-washed deleted block, a green-washed inserted block, and at least one changed block showing word-level marks on both sides. Wide enough that both panes are comfortably readable. Light theme. |
-| `docs/screenshot-word-marks.png` | **Close-up** of a single changed block, both panes, showing the darker word-level marks inside the lighter block wash. This is the detail the hero shot is too zoomed-out to show. |
-| `docs/screenshot-view-zones.png` | A **deleted run**: the base pane showing removed text, and the gap reserved opposite it in the note pane. Shows that nothing is collapsed. |
-| `docs/screenshot-version-picker.png` | **The version picker** (`Open review against a version…`), open, showing several commits with subject / relative age / date / sha. This is the feature that makes the plugin work for a committed-changes workflow — worth showing high in the README. |
-| `docs/screenshot-settings.png` | The **settings tab**, with the five color fields and their live swatches visible. |
-| `docs/demo-scroll-sync.gif` | **10-15s**: scroll the note pane and watch the base pane follow, through at least one inserted and one deleted region. This is the feature that's impossible to convey in a still. Keep it under ~5MB. |
-| `docs/screenshot-dark.png` | *(Optional)* The hero shot in dark theme, to show the palette adapts. |

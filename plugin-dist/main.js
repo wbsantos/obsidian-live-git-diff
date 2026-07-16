@@ -721,7 +721,7 @@ function resolveRef(root, ref) {
   const wanted = String(ref || "").trim();
   if (!wanted) throw new GitError("Base ref is empty. Set one in the plugin settings.");
   try {
-    return git(["-C", root, "rev-parse", "--verify", `${wanted}^{commit}`]).trim();
+    return git(["-C", root, "rev-parse", "--verify", "--end-of-options", `${wanted}^{commit}`]).trim();
   } catch (e) {
     throw new GitError(
       `Cannot resolve base ref "${wanted}" in this repository.
@@ -732,7 +732,7 @@ ${e.message}`
 }
 function showAt(root, sha, rel) {
   try {
-    return git(["-C", root, "show", `${sha}:${rel}`]);
+    return git(["-C", root, "show", "--end-of-options", `${sha}:${rel}`]);
   } catch (e) {
     const m = e.message || "";
     if (/exists on disk, but not in|does not exist in|path .* does not exist/i.test(m)) {
@@ -750,7 +750,16 @@ ${m}`);
 function commitInfoFor(root, ref) {
   let out;
   try {
-    out = git(["-C", root, "show", "-s", `--format=${COMMIT_FIELDS}`, `--date=${HUMAN_DATE}`, ref]);
+    out = git([
+      "-C",
+      root,
+      "show",
+      "-s",
+      `--format=${COMMIT_FIELDS}`,
+      `--date=${HUMAN_DATE}`,
+      "--end-of-options",
+      ref
+    ]);
   } catch (e) {
     throw new GitError(`Cannot read commit ${ref}:
 ${e.message}`);

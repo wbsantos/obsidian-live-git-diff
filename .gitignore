@@ -9,6 +9,9 @@ node_modules/
 # Local-only oracle capture (see plugin-src/tools/capture-sections.mjs).
 plugin-src/test/fixtures/*.local.json
 
+# Local working notes — never published.
+/private/
+
 # Editors / OS
 .DS_Store
 .idea/

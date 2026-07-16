@@ -88,6 +88,12 @@ function parseCommitFields(line: string, path: string): CommitInfo | null {
  *
  * argv form is also why a ref/branch name from settings cannot become a shell
  * injection: it is an argument, not a fragment of a command line.
+ *
+ * ARGV IS NOT THE WHOLE STORY. An argv element that begins with '-' is still read by
+ * GIT as an OPTION — a separate class from shell injection, and one the arg array does
+ * nothing about. So the constraint every caller below holds to is: A REF MUST NEVER BE
+ * PARSEABLE AS AN OPTION. `--end-of-options` (git >= 2.24) is what enforces it, and it
+ * goes in front of every ref this module hands to git, resolved or not.
  */
 function git(args: string[]): string {
   try {
@@ -174,12 +180,19 @@ export function headSha(root: string): string {
  * would then fail on. It also makes a nonsense ref fail HERE, with the ref quoted in
  * the message, instead of failing later inside `git show` where the error reads as
  * "the file isn't tracked".
+ *
+ * `--end-of-options` is not decoration either. THIS is the ref that arrives from
+ * settings — i.e. from the vault's data.json, which in a shared or downloaded vault was
+ * not necessarily written by the person now reading the note. Without it, git parses a
+ * ref beginning with '-' as an option instead of a revision. That is the argument-
+ * injection class, and it is ALSO a plain bug: `-x` is a ref name git will happily
+ * create, and this function could not resolve it (`fatal: Needed a single revision`).
  */
 export function resolveRef(root: string, ref: string): string {
   const wanted = String(ref || '').trim();
   if (!wanted) throw new GitError('Base ref is empty. Set one in the plugin settings.');
   try {
-    return git(['-C', root, 'rev-parse', '--verify', `${wanted}^{commit}`]).trim();
+    return git(['-C', root, 'rev-parse', '--verify', '--end-of-options', `${wanted}^{commit}`]).trim();
   } catch (e: unknown) {
     throw new GitError(
       `Cannot resolve base ref "${wanted}" in this repository.\n` +
@@ -192,7 +205,11 @@ export function resolveRef(root: string, ref: string): string {
 /** Text of <rel> at <sha>. Throws GitError with a readable reason. */
 export function showAt(root: string, sha: string, rel: string): string {
   try {
-    return git(['-C', root, 'show', `${sha}:${rel}`]);
+    // `sha` is already resolved by resolveRef, so --end-of-options here is defence in
+    // depth rather than a live hole. It is in anyway: the rule is that no ref reaches
+    // git argv without it, and a rule with an exception is not a rule — the next caller
+    // to pass this an unresolved ref should not be the one who discovers that.
+    return git(['-C', root, 'show', '--end-of-options', `${sha}:${rel}`]);
   } catch (e: unknown) {
     const m = (e as Error).message || '';
     if (/exists on disk, but not in|does not exist in|path .* does not exist/i.test(m)) {
@@ -216,7 +233,15 @@ export function showAt(root: string, sha: string, rel: string): string {
 export function commitInfoFor(root: string, ref: string): CommitInfo {
   let out: string;
   try {
-    out = git(['-C', root, 'show', '-s', `--format=${COMMIT_FIELDS}`, `--date=${HUMAN_DATE}`, ref]);
+    // --end-of-options: the signature says `ref`, and a parameter named ref is a ref —
+    // today's only caller happens to hand it a resolved sha, but the guard belongs to
+    // the contract, not to the current caller.
+    out = git([
+      '-C', root, 'show', '-s',
+      `--format=${COMMIT_FIELDS}`,
+      `--date=${HUMAN_DATE}`,
+      '--end-of-options', ref,
+    ]);
   } catch (e: unknown) {
     throw new GitError(`Cannot read commit ${ref}:\n${(e as Error).message}`);
   }
@@ -235,6 +260,11 @@ export function commitInfoFor(root: string, ref: string): CommitInfo {
  *
  * Empty result = the file has never been committed (it is untracked). That is a
  * meaningful answer, not an error, and the caller says so in words.
+ *
+ * THE ONE CALL IN THIS FILE WITH NO `--end-of-options`, deliberately: it passes git no
+ * ref at all, and its only user-derived argument is a PATHSPEC, which the `--` already
+ * terminates options for. `--end-of-options` before a `--` would be noise; after it,
+ * it would be read as a literal path.
  */
 export function fileLog(root: string, rel: string, limit = 50): CommitInfo[] {
   let out: string;

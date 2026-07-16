@@ -1,0 +1,137 @@
+name: Release
+
+# Push a tag, get a DRAFT release carrying the three files Obsidian loads.
+#
+# Draft, not published, on purpose: the tag is the trigger, but a human still decides
+# whether the thing that came out is worth shipping. Publishing is one click in the
+# releases UI, and until then nothing is visible to BRAT or the community store.
+#
+# WHAT INSTALLS FROM THIS: the Obsidian community store and BRAT both fetch main.js,
+# manifest.json and styles.css as RELEASE ASSETS — as loose files, not inside a zip and
+# not from the repo tree. That is why the three are uploaded individually below; a zip
+# here is a release nobody can install.
+# Tag pushes ONLY — deliberately no workflow_dispatch. Every step below reads
+# GITHUB_REF_NAME as a tag; dispatched from a branch it would be a branch name, and the
+# run would either fail the version check for the wrong reason or try to cut a release
+# named "main". A release needs a tag to be a release.
+on:
+  push:
+    tags: ['*']
+
+# Read-only by default. The one job that needs to write says so for itself.
+permissions:
+  contents: read
+
+jobs:
+  # Identical gauntlet to ci.yml, run against the TAG. A tag is not a promise that CI
+  # ever saw this commit — it can be pushed at any commit, including one that never sat
+  # on a branch. So the artifact that gets released is built here, from the tag, rather
+  # than downloaded from an earlier run or taken from the committed plugin-dist/.
+  build:
+    name: build the tagged commit
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: plugin-src
+
+    steps:
+      # Pinned to commit shas for the same reason as ci.yml — a major tag is mutable and
+      # the action author can repoint it at will. Resolve with:
+      #   git ls-remote --tags https://github.com/actions/<name>.git 'refs/tags/v4*'
+      # Never write a sha from memory.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # >= 22.6 for native TypeScript type stripping — see ci.yml.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: plugin-src/package-lock.json
+
+      - name: Tag must match manifest.json's version
+        # THE MISTAKE THIS CATCHES, which is specific to Obsidian: the community store
+        # matches a release to a plugin BY VERSION, and manifest.json is the side that
+        # counts. Tag v0.2.0 against a manifest still saying 0.1.0 and you get a release
+        # that looks fine and installs as nothing. Failing here costs a re-tag; failing
+        # silently costs a published release that no one can install.
+        #
+        # A leading 'v' is accepted and stripped — Obsidian's own docs tag without one,
+        # but both conventions are common and the distinction is not worth a failed run.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST="$(node -p "require('./manifest.json').version")"
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match manifest.json version '${MANIFEST}'. Bump the manifest or re-tag."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches manifest.json version ${MANIFEST}."
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        # Before the tests — bundle.test.ts and invariant.test.ts grade the BUILT
+        # artifact, so building after them would grade a stale bundle. Same order as CI,
+        # and for the same reason.
+        run: node esbuild.config.mjs production
+
+      - name: Test
+        # LGD_REQUIRE_ORACLE=1 makes a missing grain oracle a failure rather than a skip.
+        # A release is the last place to accept a silent skip.
+        run: npm test
+        env:
+          LGD_REQUIRE_ORACLE: '1'
+
+      - name: Read-only invariant gate
+        # The plugin's core promise — it cannot write to a note — asserted against the
+        # exact bundle that is about to be attached to the release.
+        run: npm run gate
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets
+          path: |
+            plugin-dist/main.js
+            plugin-dist/manifest.json
+            plugin-dist/styles.css
+          if-no-files-found: error
+
+  release:
+    name: draft the release
+    needs: build
+    runs-on: ubuntu-latest
+
+    # THE ONLY job with a writable token, and it runs no third-party code: no npm ci, no
+    # build, nothing from the dependency tree. `npm ci` executes lifecycle scripts from
+    # every transitive package, and a token that can write to this repo has no business
+    # being in the environment while that happens. Splitting the build off is what keeps
+    # those two facts apart.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: dist
+
+      - name: Create the draft release
+        # gh is preinstalled on the runner and authenticates with the built-in
+        # GITHUB_TOKEN, so this needs no third-party release action and no PAT — one
+        # fewer dependency with write access to the repo.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --draft \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --repo "${GITHUB_REPOSITORY}" \
+            dist/main.js \
+            dist/manifest.json \
+            dist/styles.css
+          echo "Draft release ${GITHUB_REF_NAME} created. Review it and publish from the releases page."

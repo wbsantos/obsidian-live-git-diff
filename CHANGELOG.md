@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The grain oracle is captured and committed** (`test/fixtures/obsidian-sections.json`),
+  from a live Obsidian 1.12.7. This closes the note below: CI's `LGD_REQUIRE_ORACLE=1`
+  now passes because the oracle exists, not because anything was relaxed. Suite: 109
+  pass, 0 skip.
+- **`manifest.json` and `versions.json` at the repository root.** BRAT resolves a
+  version by reading the manifest from the repo root, so the previous layout — manifest
+  only under `plugin-src/` — meant BRAT could not install this plugin at all, while the
+  README recommended BRAT. They are exact copies of the `plugin-src/` originals and must
+  be kept in sync on release (see CONTRIBUTING).
+- **A tag-triggered release workflow** that builds the plugin and drafts a GitHub release
+  with `main.js`, `manifest.json`, and `styles.css` attached — the three assets BRAT and
+  a manual install both look for.
+
+### Changed
+
+- **`git rev-parse` now runs with `--end-of-options`.** A user-supplied ref was already
+  passed as a single argv element to a process spawned without a shell, so it could never
+  have been a shell injection; `--end-of-options` closes the remaining gap, which is that
+  a ref beginning with `-` could be parsed by git as an **option**.
+- **The original spike moved to the `archive/spike` branch** and is off `main`. It was
+  kept at the repo root for provenance, but it shipped a second, older `manifest.json`
+  (`id: spike2b-gitdiff`) — precisely the thing that confuses BRAT and a reviewer reading
+  the repo for the first time. The history is preserved on the branch, not deleted.
+- **Every repository URL now points at `github.com/jkosturko`.** The previous URLs — in
+  both manifests' `authorUrl`, `package.json`, the README's install links, and this
+  file's compare links — named an account that does not exist and 404s. `authorUrl` now
+  names the author's page rather than the plugin repo, which is what the
+  `obsidian-releases` submission validator requires.
+
 ### Notes
 
 - The grain-oracle test (`test/grain-oracle.test.ts`) **skips** until its fixture is

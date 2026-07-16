@@ -112,6 +112,56 @@ test('resolveRef: HEAD, HEAD~N, sha, short sha, branch, annotated tag', () => {
   }
 });
 
+test('resolveRef: a ref whose name STARTS WITH A DASH resolves, not parsed as an option', () => {
+  // ARGUMENT injection — the class that argv form does NOT close. A ref is a plain argv
+  // element, but git still reads an element beginning with '-' as an OPTION, and the
+  // ref here comes from settings (data.json), which in a shared vault is attacker-
+  // influenced. `--end-of-options` is what makes it a revision again.
+  //
+  // This is also the reason the test can assert something POSITIVE rather than probe for
+  // an exploit: '-x' is a legal ref that git itself will create, so the fix has a
+  // visible right answer. Without --end-of-options in resolveRef, git says
+  // "fatal: Needed a single revision" and this test fails — verified by reverting it.
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo.root, 'a.md'), 'x\n');
+    const sha = repo.commit('init');
+
+    // `git branch -- -x` REFUSES ("'-x' is not a valid branch name"), so the ref is
+    // written straight into the ref store — which is how such a name gets into a real
+    // repo in the first place, and proves git is happy to RESOLVE what it won't create.
+    repo.git('update-ref', 'refs/heads/-x', sha);
+    assert.match(repo.git('show-ref'), /refs\/heads\/-x/, 'the dashed ref really exists');
+
+    assert.equal(resolveRef(repo.root, '-x'), sha, 'a dashed ref resolves to its commit');
+  } finally {
+    repo.cleanup();
+  }
+});
+
+test('resolveRef: an option-shaped ref is refused as a ref, never honoured as an option', () => {
+  // The other half: a dashed ref that is NOT a real ref must still fail as a ref —
+  // --end-of-options must not turn `--output=...` into an option git acts on. If this
+  // ever passes, git took the argument seriously and wrote a file.
+  const repo = makeRepo();
+  const bait = path.join(os.tmpdir(), 'lgd-arginject-probe');
+  try {
+    fs.rmSync(bait, { force: true });
+    fs.writeFileSync(path.join(repo.root, 'a.md'), 'x\n');
+    repo.commit('init');
+
+    assert.throws(
+      () => resolveRef(repo.root, `--output=${bait}`),
+      (e: Error) => e instanceof GitError && /--output=/.test(e.message),
+      'it fails as an unresolvable REF, and the message quotes what was typed'
+    );
+    assert.ok(!fs.existsSync(bait), 'git never treated the ref as an --output option');
+  } finally {
+    fs.rmSync(bait, { force: true });
+    repo.cleanup();
+  }
+});
+
 test('resolveRef: a bogus ref fails loudly, quoting the ref', () => {
   const repo = makeRepo();
   try {
