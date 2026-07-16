@@ -50,9 +50,19 @@ function makeObsidianStub(): Record<string, unknown> {
   class MarkdownView extends Component { }
   class TFile { }
   class WorkspaceLeaf { }
+  // Every class the bundle EXTENDS is evaluated at module scope, so a missing one is a
+  // load-time TypeError rather than a runtime surprise. That is the point of this test:
+  // adding `refPicker.ts` (which extends SuggestModal) broke bundle loading, and this
+  // stub is what noticed.
+  class Modal { constructor(_app: unknown) { } }
+  class SuggestModal extends Modal {
+    emptyStateText = '';
+    setPlaceholder(_s: string): void { /* no-op */ }
+    setInstructions(_i: unknown): void { /* no-op */ }
+  }
   return {
     Component, Plugin, ItemView, PluginSettingTab, Setting, Notice,
-    MarkdownView, TFile, WorkspaceLeaf,
+    MarkdownView, TFile, WorkspaceLeaf, Modal, SuggestModal,
     MarkdownRenderer: { render: async () => undefined },
     apiVersion: '1.4.0',
   };

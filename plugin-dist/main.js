@@ -39,7 +39,7 @@ __export(main_exports, {
   default: () => LiveGitDiffPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/diff/mddiff.ts
 var MOD_MIN_SIMILARITY = 0.5;
@@ -240,6 +240,22 @@ var CLS = {
 };
 var ATTR_ROW = "data-row-index";
 
+// src/log.ts
+var PREFIX = "[live-git-diff]";
+var enabled = false;
+function setDebug(v) {
+  enabled = !!v;
+}
+function debug(...args) {
+  if (enabled) console.log(PREFIX, ...args);
+}
+function warn(...args) {
+  console.warn(PREFIX, ...args);
+}
+function error(...args) {
+  console.error(PREFIX, ...args);
+}
+
 // src/charmarks.ts
 var CHAR_MAX_CHANGED_FRACTION = 0.8;
 var CHAR_MARK_ATTR = "data-lgd-char";
@@ -380,8 +396,8 @@ function wrapRanges(el, ranges, cls) {
     }
   }
   if (el.textContent !== before) {
-    console.error(
-      "[live-git-diff] char-mark wrapping altered textContent \u2014 reverting. This is a bug; marks are disabled for this block rather than risk comment anchors.",
+    error(
+      "char-mark wrapping altered textContent \u2014 reverting. This is a bug; marks are disabled for this block rather than risk annotation anchors.",
       { cls, beforeLen: before ? before.length : 0, afterLen: el.textContent ? el.textContent.length : 0 }
     );
     unwrapCharMarks(el);
@@ -577,10 +593,26 @@ var GitBaseView = class extends import_obsidian.ItemView {
     }
     const sub = header.createDiv({ cls: "lgd-sub" });
     sub.createSpan({ cls: "lgd-sha", text: `base ${session.shortSha}` });
-    sub.createSpan({
-      text: ` (${session.baseRefLabel}) \xB7 ${session.counts.blocks} blocks \xB7 ${session.counts.changed} changed`
+    const c = session.baseCommit;
+    if (c) {
+      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+      sub.createSpan({ cls: "lgd-subject", text: `"${c.subject}"` });
+      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+      const rel = sub.createSpan({ cls: "lgd-age", text: c.relative });
+      rel.setAttr("title", c.date);
+    } else if (session.baseRefLabel) {
+      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+      sub.createSpan({ text: session.baseRefLabel });
+    }
+    if (session.baseReadAs) {
+      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+      sub.createSpan({ cls: "lgd-renamed", text: `was ${session.baseReadAs}` });
+    }
+    const counts = header.createDiv({ cls: "lgd-sub" });
+    counts.createSpan({
+      text: `${session.counts.blocks} blocks \xB7 ${session.counts.changed} changed`
     });
-    this.syncBadgeEl = sub.createSpan({ cls: "lgd-sync" });
+    this.syncBadgeEl = counts.createSpan({ cls: "lgd-sync" });
     this.updateSyncBadge();
     const body = root.createDiv({ cls: "lgd-body markdown-preview-view markdown-rendered" });
     this.bodyEl = body;
@@ -625,6 +657,15 @@ var import_child_process = require("child_process");
 var path = __toESM(require("path"), 1);
 var GitError = class extends Error {
 };
+var US = "";
+var RS = "";
+var HUMAN_DATE = "format:%b %-d, %-I:%M %p";
+var COMMIT_FIELDS = ["%h", "%H", "%ar", "%ad", "%s"].join(US);
+function parseCommitFields(line, path2) {
+  const [shortSha, sha, relative2, date, subject] = line.split(US);
+  if (!sha) return null;
+  return { shortSha, sha, relative: relative2, date, subject: subject || "(no subject)", path: path2 };
+}
 function git(args) {
   try {
     return (0, import_child_process.execFileSync)("git", args, {
@@ -670,14 +711,6 @@ ${e.message}`);
   }
   return { abs, root, rel };
 }
-function headSha(root) {
-  try {
-    return git(["-C", root, "rev-parse", "HEAD"]).trim();
-  } catch (e) {
-    throw new GitError(`Cannot read HEAD \u2014 the repo may have no commits yet.
-${e.message}`);
-  }
-}
 function resolveRef(root, ref) {
   const wanted = String(ref || "").trim();
   if (!wanted) throw new GitError("Base ref is empty. Set one in the plugin settings.");
@@ -708,6 +741,121 @@ The file is untracked, or was added after this base commit \u2014 so there is no
 ${m}`);
   }
 }
+function commitInfoFor(root, ref) {
+  let out;
+  try {
+    out = git(["-C", root, "show", "-s", `--format=${COMMIT_FIELDS}`, `--date=${HUMAN_DATE}`, ref]);
+  } catch (e) {
+    throw new GitError(`Cannot read commit ${ref}:
+${e.message}`);
+  }
+  const info = parseCommitFields(out.split("\n")[0], "");
+  if (!info) throw new GitError(`Cannot read commit ${ref}: git returned no usable output.`);
+  return info;
+}
+function fileLog(root, rel, limit = 50) {
+  let out;
+  try {
+    out = git([
+      "-C",
+      root,
+      "log",
+      "--follow",
+      "--name-only",
+      `--format=${RS}${COMMIT_FIELDS}`,
+      `--date=${HUMAN_DATE}`,
+      "-n",
+      String(limit),
+      "--",
+      rel
+    ]);
+  } catch (e) {
+    throw new GitError(`Cannot read the history of ${rel}:
+${e.message}`);
+  }
+  const commits = [];
+  for (const record of out.split(RS)) {
+    if (!record.trim()) continue;
+    const lines = record.split("\n");
+    const path2 = lines.slice(1).map((l) => l.trim()).find((l) => l.length > 0) || rel;
+    const info = parseCommitFields(lines[0], path2);
+    if (info) commits.push(info);
+  }
+  return commits;
+}
+function readBaseAt(root, rel, sha) {
+  try {
+    return { text: showAt(root, sha, rel), path: rel, renamedFrom: null };
+  } catch (e) {
+    const history = fileLog(root, rel, 500);
+    if (!history.length) {
+      throw new GitError(
+        `Not tracked in git:
+  ${rel}
+
+This file has no commits at all, so there is no earlier version to compare against. Commit it first.`
+      );
+    }
+    const hit = history.find((c) => c.sha === sha || sha.length >= 7 && c.sha.startsWith(sha));
+    if (hit && hit.path !== rel) {
+      return { text: showAt(root, sha, hit.path), path: hit.path, renamedFrom: hit.path };
+    }
+    if (hit) {
+      throw e instanceof GitError ? e : new GitError(String(e.message));
+    }
+    const oldest = history[history.length - 1];
+    throw new GitError(
+      `This file did not exist at ${sha.slice(0, 7)}.
+  ${rel}
+
+Its earliest commit is ${oldest.shortSha} (${oldest.date}) \u2014 ${oldest.subject}
+Pick that commit or a later one. (If you expected it here, the commit may be on a branch that is not an ancestor of this file's history.)`
+    );
+  }
+}
+
+// src/refPicker.ts
+var import_obsidian2 = require("obsidian");
+var CommitPickerModal = class extends import_obsidian2.SuggestModal {
+  constructor(app, fileName, commits, onPick) {
+    super(app);
+    /** The file's path today, so a renamed entry can be flagged. Set by the caller. */
+    this.currentPath = "";
+    this.commits = commits;
+    this.onPick = onPick;
+    this.setPlaceholder(`Review ${fileName} against which version?`);
+    this.emptyStateText = "No commits match. This file may have no history yet.";
+    this.setInstructions([
+      { command: "\u2191\u2193", purpose: "navigate" },
+      { command: "\u21B5", purpose: "pin as base" },
+      { command: "esc", purpose: "cancel" }
+    ]);
+  }
+  getSuggestions(query) {
+    const q = query.trim().toLowerCase();
+    if (!q) return this.commits;
+    return this.commits.filter(
+      (c) => c.subject.toLowerCase().includes(q) || c.sha.toLowerCase().startsWith(q) || c.relative.toLowerCase().includes(q) || c.date.toLowerCase().includes(q)
+    );
+  }
+  renderSuggestion(c, el) {
+    el.addClass("lgd-pick");
+    el.createDiv({ cls: "lgd-pick-subject", text: c.subject });
+    const meta = el.createDiv({ cls: "lgd-pick-meta" });
+    meta.createSpan({ cls: "lgd-pick-rel", text: c.relative });
+    meta.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+    meta.createSpan({ cls: "lgd-pick-date", text: c.date });
+    meta.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+    meta.createSpan({ cls: "lgd-pick-sha", text: c.shortSha });
+    if (c.path && c.path !== this.currentPath) {
+      meta.createSpan({ cls: "lgd-sep", text: " \xB7 " });
+      meta.createSpan({ cls: "lgd-pick-renamed", text: `was ${c.path}` });
+    }
+  }
+  onChooseSuggestion(c) {
+    this.onPick(c);
+  }
+};
 
 // src/session.ts
 function indexSide(list, K) {
@@ -742,7 +890,7 @@ function indexSide(list, K) {
     i = j;
   }
 }
-function buildSession(file, baseText, ctx, sha, baseRefLabel, currentText) {
+function buildSession(file, baseText, ctx, pin, currentText) {
   const headBlocks = blocks(baseText);
   const curBlocks = blocks(currentText);
   const rows = pair(headBlocks, curBlocks);
@@ -766,9 +914,11 @@ function buildSession(file, baseText, ctx, sha, baseRefLabel, currentText) {
   return {
     filePath: file.path,
     fileName: file.name,
-    sha,
-    shortSha: sha.slice(0, 7),
-    baseRefLabel,
+    sha: pin.sha,
+    shortSha: pin.sha.slice(0, 7),
+    baseRefLabel: pin.label,
+    baseCommit: pin.commit,
+    baseReadAs: pin.readAs,
     root: ctx.root,
     rel: ctx.rel,
     rows,
@@ -787,6 +937,8 @@ function errorSession(file, msg) {
     sha: "",
     shortSha: "",
     baseRefLabel: "",
+    baseCommit: null,
+    baseReadAs: null,
     root: "",
     rel: "",
     rows: [],
@@ -797,22 +949,6 @@ function errorSession(file, msg) {
     counts: { blocks: 0, curBlocks: 0, changed: 0 },
     error: msg
   };
-}
-
-// src/log.ts
-var PREFIX = "[live-git-diff]";
-var enabled = false;
-function setDebug(v) {
-  enabled = !!v;
-}
-function debug(...args) {
-  if (enabled) console.log(PREFIX, ...args);
-}
-function warn(...args) {
-  console.warn(PREFIX, ...args);
-}
-function error(...args) {
-  console.error(PREFIX, ...args);
 }
 
 // src/sync.ts
@@ -1387,11 +1523,12 @@ var ViewZones = class {
 };
 
 // src/settings.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 var DEFAULT_SETTINGS = {
   colors: { insBg: "", delBg: "", insRail: "", delRail: "", modRail: "" },
-  baseRefMode: "pinned-head",
+  baseRefMode: "head",
   baseRef: "main",
+  logLimit: 50,
   debug: false
 };
 var CSS_VAR = {
@@ -1454,7 +1591,7 @@ function mergeSettings(loaded) {
     colors: { ...DEFAULT_SETTINGS.colors, ...l.colors || {} }
   };
 }
-var LiveGitDiffSettingTab = class extends import_obsidian2.PluginSettingTab {
+var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1462,19 +1599,35 @@ var LiveGitDiffSettingTab = class extends import_obsidian2.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian2.Setting(containerEl).setName("Base version").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Compare against").setDesc(
-      "Pinned HEAD captures the current commit when you open a review and holds it. That is what stops the diff shrinking to nothing while something else commits to the repo mid-review. Pick a named ref to compare against a branch or tag instead."
+    new import_obsidian3.Setting(containerEl).setName("Base version").setHeading();
+    const pickerNote = containerEl.createEl("p", { cls: "lgd-settings-note" });
+    pickerNote.setText(
+      `To choose a version per review, use the command "Open review against a version\u2026" \u2014 it lists this file's recent commits by subject and age. These settings only decide what the plain "Open git diff review" command compares against.`
+    );
+    new import_obsidian3.Setting(containerEl).setName("Compare against by default").setDesc(
+      "Whichever you pick is resolved to a commit when the review opens, and that commit is then pinned for the session \u2014 so the diff cannot shrink while something else commits to the repo mid-review."
     ).addDropdown(
-      (d) => d.addOption("pinned-head", "Pinned HEAD (recommended)").addOption("named-ref", "A named ref").setValue(this.plugin.settings.baseRefMode).onChange(async (v) => {
+      (d) => d.addOption("head", "The latest commit (HEAD)").addOption("head~1", "One commit before HEAD (HEAD~1)").addOption("file-prev", "This file's previous version").addOption("custom", "A specific ref\u2026").setValue(this.plugin.settings.baseRefMode).onChange(async (v) => {
         this.plugin.settings.baseRefMode = v;
         await this.plugin.saveSettings();
         this.display();
       })
     );
-    if (this.plugin.settings.baseRefMode === "named-ref") {
-      new import_obsidian2.Setting(containerEl).setName("Ref").setDesc(
-        "A branch, tag, or commit \u2014 anything `git rev-parse` accepts: main, origin/main, v1.2, HEAD~5, a sha. It is resolved to a commit when the review opens, and that commit is then pinned for the session."
+    if (this.plugin.settings.baseRefMode === "head") {
+      const warn2 = containerEl.createEl("p", { cls: "lgd-settings-note" });
+      warn2.setText(
+        "Note: comparing against HEAD shows your UNCOMMITTED changes. If your work is already committed, this diff will be empty \u2014 pick a version instead."
+      );
+    }
+    if (this.plugin.settings.baseRefMode === "file-prev") {
+      const note2 = containerEl.createEl("p", { cls: "lgd-settings-note" });
+      note2.setText(
+        'The commit before the most recent one that touched this file \u2014 i.e. "what changed in the last edit to this document", regardless of what else was committed since.'
+      );
+    }
+    if (this.plugin.settings.baseRefMode === "custom") {
+      new import_obsidian3.Setting(containerEl).setName("Ref").setDesc(
+        "Anything git resolves: main, origin/main, v1.2, HEAD~5, a sha, main@{yesterday}."
       ).addText(
         (t) => t.setPlaceholder("main").setValue(this.plugin.settings.baseRef).onChange(async (v) => {
           this.plugin.settings.baseRef = v.trim();
@@ -1482,7 +1635,13 @@ var LiveGitDiffSettingTab = class extends import_obsidian2.PluginSettingTab {
         })
       );
     }
-    new import_obsidian2.Setting(containerEl).setName("Colors").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Versions to list").setDesc("How many commits the version picker shows.").addSlider(
+      (s) => s.setLimits(10, 200, 10).setValue(this.plugin.settings.logLimit).setDynamicTooltip().onChange(async (v) => {
+        this.plugin.settings.logLimit = v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian3.Setting(containerEl).setName("Colors").setHeading();
     const note = containerEl.createEl("p", { cls: "lgd-settings-note" });
     note.setText(
       "Defaults are GitHub's diff palette and follow your light/dark theme. Any CSS color works \u2014 including alpha, which matters: these are washes that sit behind text, and the defaults are translucent on purpose. Leave a field empty to use the default. An override applies to both themes."
@@ -1490,7 +1649,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian2.PluginSettingTab {
     Object.keys(CSS_VAR).forEach((key) => {
       const label = FIELD_LABEL[key];
       let swatch = null;
-      const setting = new import_obsidian2.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
+      const setting = new import_obsidian3.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
         t.setPlaceholder(LIGHT_DEFAULT[key]).setValue(this.plugin.settings.colors[key]).onChange(async (v) => {
           const val = v.trim();
           const ok = isValidColor(val);
@@ -1506,15 +1665,15 @@ var LiveGitDiffSettingTab = class extends import_obsidian2.PluginSettingTab {
       swatch = setting.controlEl.createDiv({ cls: "lgd-swatch", text: "abc" });
       swatch.style.background = this.plugin.settings.colors[key] || LIGHT_DEFAULT[key];
     });
-    new import_obsidian2.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
+    new import_obsidian3.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
       (b) => b.setButtonText("Reset").onClick(async () => {
         this.plugin.settings.colors = { ...DEFAULT_SETTINGS.colors };
         await this.plugin.saveSettings();
         this.display();
       })
     );
-    new import_obsidian2.Setting(containerEl).setName("Advanced").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Debug logging").setDesc(
+    new import_obsidian3.Setting(containerEl).setName("Advanced").setHeading();
+    new import_obsidian3.Setting(containerEl).setName("Debug logging").setDesc(
       "Verbose console output, and extra detail in the alignment report. Warnings and errors are logged regardless of this setting."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.debug).onChange(async (v) => {
@@ -1526,7 +1685,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian2.PluginSettingTab {
 };
 
 // src/main.ts
-var LiveGitDiffPlugin = class extends import_obsidian3.Plugin {
+var LiveGitDiffPlugin = class extends import_obsidian4.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -1555,27 +1714,59 @@ var LiveGitDiffPlugin = class extends import_obsidian3.Plugin {
     this.addCommand({
       id: "open-review",
       name: "Open git diff review for this file",
-      callback: () => void this.openReview()
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) void this.openReview();
+        return true;
+      }
+    });
+    this.addCommand({
+      id: "open-review-against-ref",
+      name: "Open review against a version\u2026",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) void this.pickBaseAndOpen();
+        return true;
+      }
     });
     this.addCommand({
       id: "close-review",
       name: "Close review",
-      callback: () => this.closeReview()
+      checkCallback: (checking) => {
+        if (!this.session) return false;
+        if (!checking) this.closeReview();
+        return true;
+      }
     });
     this.addCommand({
       id: "refresh-review",
       name: "Refresh review (re-pin the base version)",
-      callback: () => void this.openReview(true)
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md") return false;
+        if (!checking) void this.openReview({ repin: true });
+        return true;
+      }
     });
     this.addCommand({
       id: "toggle-scroll-sync",
       name: "Toggle scroll sync",
-      callback: () => this.toggleSync()
+      checkCallback: (checking) => {
+        if (!this.session || this.session.error) return false;
+        if (!checking) this.toggleSync();
+        return true;
+      }
     });
     this.addCommand({
       id: "copy-alignment-report",
       name: "Copy alignment report to clipboard",
-      callback: () => void this.reportAlignment()
+      checkCallback: (checking) => {
+        if (!this.session || this.session.error) return false;
+        if (!checking) void this.reportAlignment();
+        return true;
+      }
     });
     this.registerMarkdownPostProcessor((el, ctx) => {
       try {
@@ -1616,7 +1807,6 @@ var LiveGitDiffPlugin = class extends import_obsidian3.Plugin {
     }
     clearColors();
     this.session = null;
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
   /* ---------------------------------------------------------------- *
    * settings                                                          *
@@ -1643,7 +1833,7 @@ var LiveGitDiffPlugin = class extends import_obsidian3.Plugin {
     if (!session || session.error) return null;
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (!(view instanceof import_obsidian3.MarkdownView)) continue;
+      if (!(view instanceof import_obsidian4.MarkdownView)) continue;
       if (!view.file || view.file.path !== session.filePath) continue;
       if (typeof view.getMode === "function" && view.getMode() !== "preview") continue;
       const scroller = findPreviewScroller(view);
@@ -1748,45 +1938,121 @@ var LiveGitDiffPlugin = class extends import_obsidian3.Plugin {
     this.sync.enabled = !this.sync.enabled;
     const v = this.baseView();
     if (v instanceof GitBaseView) v.updateSyncBadge();
-    new import_obsidian3.Notice(`Scroll sync ${this.sync.enabled ? "on" : "off"}`);
+    new import_obsidian4.Notice(`Scroll sync ${this.sync.enabled ? "on" : "off"}`);
     if (this.sync.enabled) this.sync.syncNoteToBase();
   }
   /**
    * Resolve which commit to use as the base, honouring the settings.
-   * Returns the sha plus a human LABEL — "HEAD" and "main" are different answers to
-   * "what am I looking at?", and a sha alone cannot tell them apart in the header.
+   *
+   * Returns the sha plus a human LABEL, because "HEAD" and "main" are different answers
+   * to "what am I looking at?" and a sha alone cannot tell them apart in the header.
    */
-  resolveBase(root) {
-    if (this.settings.baseRefMode === "named-ref") {
+  resolveBase(ctx) {
+    const mode = this.settings.baseRefMode;
+    if (mode === "custom") {
       const ref = this.settings.baseRef;
-      return { sha: resolveRef(root, ref), label: ref };
+      return { sha: resolveRef(ctx.root, ref), label: ref };
     }
-    return { sha: headSha(root), label: "HEAD" };
+    if (mode === "file-prev") {
+      const log = fileLog(ctx.root, ctx.rel, 2);
+      if (!log.length) {
+        throw new GitError(
+          `Not tracked in git:
+  ${ctx.rel}
+
+This file has no commits, so it has no previous version.`
+        );
+      }
+      if (log.length < 2) {
+        throw new GitError(
+          `This file has only one commit (${log[0].shortSha} \u2014 ${log[0].subject}),
+so there is no previous version of it to compare against.`
+        );
+      }
+      return { sha: log[1].sha, label: "previous version" };
+    }
+    if (mode === "head~1") return { sha: resolveRef(ctx.root, "HEAD~1"), label: "HEAD~1" };
+    return { sha: resolveRef(ctx.root, "HEAD"), label: "HEAD" };
   }
-  /** Open (or re-pin) a review for the active markdown file. */
-  async openReview(repin = false) {
+  /**
+   * Ask which version to review against, then open it.
+   *
+   * THE COMMAND THIS PLUGIN NEEDED. Pinning to HEAD assumes the changes under review are
+   * sitting uncommitted in the working tree. When commits are frequent and deliberate —
+   * an agent checkpointing so that reverting stays cheap — the changes are already
+   * committed by the time anyone reads them, often spread over several commits, and
+   * HEAD-vs-working-tree shows nothing at all.
+   *
+   * Note what does NOT change: the base ref moves, the NOTE PANE DOES NOT. It stays the
+   * real file in a real markdown leaf. Diffing two arbitrary commits against each other
+   * would make both panes synthetic, and a synthetic right-hand pane detaches every
+   * annotation and TTS plugin — which is the one property this whole design exists to
+   * protect. One version is chosen; the other is always what is on disk.
+   */
+  async pickBaseAndOpen() {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || !(file instanceof import_obsidian4.TFile)) return;
+    try {
+      const ctx = resolveGit(this.app, file);
+      const commits = fileLog(ctx.root, ctx.rel, this.settings.logLimit);
+      if (!commits.length) {
+        new import_obsidian4.Notice(`${file.name} has no commits yet \u2014 there is no earlier version to compare against.`, 8e3);
+        return;
+      }
+      const modal = new CommitPickerModal(this.app, file.name, commits, (c) => {
+        void this.openReview({ ref: c.sha, label: c.shortSha });
+      });
+      modal.currentPath = ctx.rel;
+      modal.open();
+    } catch (e) {
+      const msg = e instanceof GitError ? e.message : `Unexpected error:
+${e.message}`;
+      new import_obsidian4.Notice(String(msg).split("\n")[0], 8e3);
+      error("could not list versions", e);
+    }
+  }
+  /**
+   * Open (or re-pin) a review for the active markdown file.
+   * @param opts.repin drop the pinned base and re-resolve from settings
+   * @param opts.ref   pin this exact ref (from the picker), overriding settings
+   */
+  async openReview(opts = {}) {
     const file = this.app.workspace.getActiveFile();
     if (!file) {
-      new import_obsidian3.Notice("No active file.");
+      new import_obsidian4.Notice("No active file.");
       return;
     }
-    if (!(file instanceof import_obsidian3.TFile) || file.extension !== "md") {
-      new import_obsidian3.Notice("Not a markdown file.");
+    if (!(file instanceof import_obsidian4.TFile) || file.extension !== "md") {
+      new import_obsidian4.Notice("Not a markdown file.");
       return;
     }
     try {
       const ctx = resolveGit(this.app, file);
-      const keep = !repin && this.session && this.session.filePath === file.path && !this.session.error ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
-      const base = keep || this.resolveBase(ctx.root);
-      const baseText = showAt(ctx.root, base.sha, ctx.rel);
+      const keep = !opts.repin && !opts.ref && this.session && this.session.filePath === file.path && !this.session.error ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
+      const base = keep || (opts.ref ? { sha: resolveRef(ctx.root, opts.ref), label: opts.label || opts.ref } : this.resolveBase(ctx));
+      const read = readBaseAt(ctx.root, ctx.rel, base.sha);
+      const commit = commitInfoFor(ctx.root, base.sha);
       const currentText = await this.app.vault.cachedRead(file);
-      this.session = buildSession(file, baseText, ctx, base.sha, base.label, currentText);
+      const pin = {
+        sha: base.sha,
+        label: base.label,
+        commit,
+        readAs: read.renamedFrom
+      };
+      this.session = buildSession(file, read.text, ctx, pin, currentText);
       this.zones.reset();
       this.charMarks.reset();
       this.warnedNoScroller = false;
-      new import_obsidian3.Notice(
-        `Base ${this.session.shortSha} (${base.label}) \xB7 ${this.session.counts.changed} changed block(s)`
-      );
+      if (this.session.counts.changed === 0) {
+        new import_obsidian4.Notice(
+          `No changes against ${base.label} (${this.session.shortSha}).` + (base.label === "HEAD" ? ' Your work is committed \u2014 use "Open review against a version\u2026" to pick an earlier one.' : ""),
+          8e3
+        );
+      } else {
+        new import_obsidian4.Notice(
+          `Base ${this.session.shortSha} \xB7 "${commit.subject}" \xB7 ${commit.relative} \u2014 ${this.session.counts.changed} changed block(s)`
+        );
+      }
     } catch (e) {
       const msg = e instanceof GitError ? e.message : `Unexpected error:
 ${e.message}`;
@@ -1794,7 +2060,7 @@ ${e.message}`;
       this.zones.reset();
       this.charMarks.reset();
       this.clearNoteDecorations();
-      new import_obsidian3.Notice(String(msg).split("\n")[0], 8e3);
+      new import_obsidian4.Notice(String(msg).split("\n")[0], 8e3);
       error("open review failed", e);
     }
     await this.revealView();
@@ -1809,7 +2075,7 @@ ${e.message}`;
     this.charMarks.reset();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
     this.rerenderPreviews();
-    new import_obsidian3.Notice("Review closed.");
+    new import_obsidian4.Notice("Review closed.");
   }
   /**
    * Hand the note pane's blocks back exactly as we found them — zone padding removed AND
@@ -1863,7 +2129,7 @@ ${e.message}`;
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
       try {
         const view = leaf.view;
-        if (view instanceof import_obsidian3.MarkdownView && view.previewMode && typeof view.previewMode.rerender === "function") {
+        if (view instanceof import_obsidian4.MarkdownView && view.previewMode && typeof view.previewMode.rerender === "function") {
           view.previewMode.rerender(true);
         }
       } catch (e) {
@@ -1893,7 +2159,7 @@ ${e.message}`;
   async reportAlignment() {
     const session = this.session;
     if (!session || session.error) {
-      new import_obsidian3.Notice("No active review session to report on.");
+      new import_obsidian4.Notice("No active review session to report on.");
       return;
     }
     const note = this.notePane();
@@ -1997,11 +2263,11 @@ ${e.message}`;
     const json = JSON.stringify(report, null, 2);
     try {
       await navigator.clipboard.writeText(json);
-      new import_obsidian3.Notice(`Alignment report copied (deltaPx=${deltaPx == null ? "n/a" : deltaPx})`, 6e3);
+      new import_obsidian4.Notice(`Alignment report copied (deltaPx=${deltaPx == null ? "n/a" : deltaPx})`, 6e3);
     } catch (e) {
       warn("clipboard unavailable \u2014 report follows", e);
       console.log(json);
-      new import_obsidian3.Notice("Clipboard unavailable \u2014 alignment report logged to the console.", 8e3);
+      new import_obsidian4.Notice("Clipboard unavailable \u2014 alignment report logged to the console.", 8e3);
     }
     debug("alignment report", report);
   }

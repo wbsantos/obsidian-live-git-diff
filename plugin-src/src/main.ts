@@ -40,11 +40,13 @@ import {
 import { CharMarkLayer, unwrapCharMarks } from './charmarks.ts';
 import { findPreviewScroller, topmostVisible } from './dom.ts';
 import { GitBaseView, VIEW_TYPE } from './baseView.ts';
-import { GitError, headSha, resolveGit, resolveRef, showAt } from './git.ts';
+import { GitError, commitInfoFor, fileLog, readBaseAt, resolveGit, resolveRef } from './git.ts';
+import type { CommitInfo, GitContext } from './git.ts';
+import { CommitPickerModal } from './refPicker.ts';
 import { ATTR_ROW, CLS } from './panes.ts';
 import type { BasePaneLike, NotePane } from './panes.ts';
 import { buildSession, errorSession } from './session.ts';
-import type { Row, Session } from './session.ts';
+import type { BasePin, Row, Session } from './session.ts';
 import { ScrollSync } from './sync.ts';
 import type { SyncHost } from './sync.ts';
 import { ViewZones } from './viewzones.ts';
@@ -97,33 +99,75 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
 
     /* ---- commands -------------------------------------------------------- *
-     * Sentence case, and NOT prefixed with the plugin name: Obsidian prefixes it
-     * automatically in the command palette, so "Live Git Diff: Live Git Diff: …" is
-     * what you get if you add it yourself. */
+     * Two conventions, both from Obsidian's plugin guidelines:
+     *
+     *  1. Sentence case, and NOT prefixed with the plugin name — Obsidian prefixes it
+     *     automatically in the palette, so adding it yourself yields
+     *     "Live Git Diff: Live Git Diff: …".
+     *  2. `checkCallback`, not `callback`, wherever the command has a precondition. It
+     *     lets Obsidian HIDE a command that cannot run, instead of offering it and then
+     *     answering with a Notice explaining why it didn't. The palette stops listing
+     *     "Close review" when there is no review to close.
+     *
+     * No default hotkeys: the guidelines ask plugins not to claim them, since every
+     * plugin wanting one is how a user's keymap gets taken from them.
+     */
     this.addCommand({
       id: 'open-review',
       name: 'Open git diff review for this file',
-      callback: () => void this.openReview(),
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== 'md') return false;
+        if (!checking) void this.openReview();
+        return true;
+      },
+    });
+    this.addCommand({
+      id: 'open-review-against-ref',
+      name: 'Open review against a version…',
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== 'md') return false;
+        if (!checking) void this.pickBaseAndOpen();
+        return true;
+      },
     });
     this.addCommand({
       id: 'close-review',
       name: 'Close review',
-      callback: () => this.closeReview(),
+      checkCallback: (checking: boolean) => {
+        if (!this.session) return false;
+        if (!checking) this.closeReview();
+        return true;
+      },
     });
     this.addCommand({
       id: 'refresh-review',
       name: 'Refresh review (re-pin the base version)',
-      callback: () => void this.openReview(true),
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== 'md') return false;
+        if (!checking) void this.openReview({ repin: true });
+        return true;
+      },
     });
     this.addCommand({
       id: 'toggle-scroll-sync',
       name: 'Toggle scroll sync',
-      callback: () => this.toggleSync(),
+      checkCallback: (checking: boolean) => {
+        if (!this.session || this.session.error) return false;
+        if (!checking) this.toggleSync();
+        return true;
+      },
     });
     this.addCommand({
       id: 'copy-alignment-report',
       name: 'Copy alignment report to clipboard',
-      callback: () => void this.reportAlignment(),
+      checkCallback: (checking: boolean) => {
+        if (!this.session || this.session.error) return false;
+        if (!checking) void this.reportAlignment();
+        return true;
+      },
     });
 
     // NOTE pane decoration. Classes only — never text.
@@ -201,11 +245,21 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
   onunload(): void {
     this.sync.dispose();
     this.zones.dispose();
-    // Unloading the plugin must leave no trace in the note pane either.
+    // Unloading the plugin must leave no trace in the note pane either: zone padding
+    // removed, word-mark spans unwrapped, color overrides cleared.
     try { this.clearNoteDecorations(); } catch { /* workspace already torn down */ }
     clearColors();
     this.session = null;
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+
+    // DELIBERATELY NOT detaching our leaves here. The spike did
+    // (`detachLeavesOfType(VIEW_TYPE)`), and it looks like good hygiene, but Obsidian's
+    // plugin guidelines say not to: unload runs on every plugin UPDATE and reload, and
+    // detaching destroys the user's layout — the pane does not come back when the plugin
+    // re-enables. Obsidian handles an orphaned leaf itself (a placeholder until the view
+    // type re-registers), which is the behaviour a user actually wants.
+    // See https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines
+    // ("Don't detach leaves in onunload"). `closeReview` still detaches, because there
+    // the user asked for it.
   }
 
   /* ---------------------------------------------------------------- *
@@ -355,19 +409,81 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
 
   /**
    * Resolve which commit to use as the base, honouring the settings.
-   * Returns the sha plus a human LABEL — "HEAD" and "main" are different answers to
-   * "what am I looking at?", and a sha alone cannot tell them apart in the header.
+   *
+   * Returns the sha plus a human LABEL, because "HEAD" and "main" are different answers
+   * to "what am I looking at?" and a sha alone cannot tell them apart in the header.
    */
-  private resolveBase(root: string): { sha: string; label: string } {
-    if (this.settings.baseRefMode === 'named-ref') {
+  private resolveBase(ctx: GitContext): { sha: string; label: string } {
+    const mode = this.settings.baseRefMode;
+    if (mode === 'custom') {
       const ref = this.settings.baseRef;
-      return { sha: resolveRef(root, ref), label: ref };
+      return { sha: resolveRef(ctx.root, ref), label: ref };
     }
-    return { sha: headSha(root), label: 'HEAD' };
+    if (mode === 'file-prev') {
+      // "What changed in the last edit to THIS document" — which is a different question
+      // from HEAD~1, and usually the one being asked. HEAD~1 is the previous commit to
+      // the REPO, which may not have touched this file at all.
+      const log = fileLog(ctx.root, ctx.rel, 2);
+      if (!log.length) {
+        throw new GitError(
+          `Not tracked in git:\n  ${ctx.rel}\n\nThis file has no commits, so it has no previous version.`
+        );
+      }
+      if (log.length < 2) {
+        throw new GitError(
+          `This file has only one commit (${log[0].shortSha} — ${log[0].subject}),\n` +
+          `so there is no previous version of it to compare against.`
+        );
+      }
+      return { sha: log[1].sha, label: 'previous version' };
+    }
+    if (mode === 'head~1') return { sha: resolveRef(ctx.root, 'HEAD~1'), label: 'HEAD~1' };
+    return { sha: resolveRef(ctx.root, 'HEAD'), label: 'HEAD' };
   }
 
-  /** Open (or re-pin) a review for the active markdown file. */
-  async openReview(repin = false): Promise<void> {
+  /**
+   * Ask which version to review against, then open it.
+   *
+   * THE COMMAND THIS PLUGIN NEEDED. Pinning to HEAD assumes the changes under review are
+   * sitting uncommitted in the working tree. When commits are frequent and deliberate —
+   * an agent checkpointing so that reverting stays cheap — the changes are already
+   * committed by the time anyone reads them, often spread over several commits, and
+   * HEAD-vs-working-tree shows nothing at all.
+   *
+   * Note what does NOT change: the base ref moves, the NOTE PANE DOES NOT. It stays the
+   * real file in a real markdown leaf. Diffing two arbitrary commits against each other
+   * would make both panes synthetic, and a synthetic right-hand pane detaches every
+   * annotation and TTS plugin — which is the one property this whole design exists to
+   * protect. One version is chosen; the other is always what is on disk.
+   */
+  private async pickBaseAndOpen(): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || !(file instanceof TFile)) return;
+    try {
+      const ctx = resolveGit(this.app, file);
+      const commits = fileLog(ctx.root, ctx.rel, this.settings.logLimit);
+      if (!commits.length) {
+        new Notice(`${file.name} has no commits yet — there is no earlier version to compare against.`, 8000);
+        return;
+      }
+      const modal = new CommitPickerModal(this.app, file.name, commits, (c: CommitInfo) => {
+        void this.openReview({ ref: c.sha, label: c.shortSha });
+      });
+      modal.currentPath = ctx.rel;
+      modal.open();
+    } catch (e) {
+      const msg = e instanceof GitError ? e.message : `Unexpected error:\n${(e as Error).message}`;
+      new Notice(String(msg).split('\n')[0], 8000);
+      log.error('could not list versions', e);
+    }
+  }
+
+  /**
+   * Open (or re-pin) a review for the active markdown file.
+   * @param opts.repin drop the pinned base and re-resolve from settings
+   * @param opts.ref   pin this exact ref (from the picker), overriding settings
+   */
+  async openReview(opts: { repin?: boolean; ref?: string; label?: string } = {}): Promise<void> {
     const file = this.app.workspace.getActiveFile();
     if (!file) {
       new Notice('No active file.');
@@ -380,25 +496,56 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
 
     try {
       const ctx = resolveGit(this.app, file);
-      // Pin the base ONCE per review session (or on explicit re-pin). See session.ts.
+
+      // Pin the base ONCE per review session (or on explicit re-pin / explicit ref).
+      // See session.ts for why pinning is load-bearing.
       const keep =
-        !repin && this.session && this.session.filePath === file.path && !this.session.error
+        !opts.repin && !opts.ref && this.session &&
+        this.session.filePath === file.path && !this.session.error
           ? { sha: this.session.sha, label: this.session.baseRefLabel }
           : null;
-      const base = keep || this.resolveBase(ctx.root);
+      const base = keep ||
+        (opts.ref
+          ? { sha: resolveRef(ctx.root, opts.ref), label: opts.label || opts.ref }
+          : this.resolveBase(ctx));
 
-      const baseText = showAt(ctx.root, base.sha, ctx.rel);
+      // Rename-aware: a commit from before a rename does not know this file by its
+      // current name, and `git show <sha>:<current-path>` fails there. readBaseAt
+      // resolves it rather than letting an empty pane read as "the whole file is new".
+      const read = readBaseAt(ctx.root, ctx.rel, base.sha);
+      const commit = commitInfoFor(ctx.root, base.sha);
       const currentText = await this.app.vault.cachedRead(file); // read-only
 
-      this.session = buildSession(file, baseText, ctx, base.sha, base.label, currentText);
+      const pin: BasePin = {
+        sha: base.sha,
+        label: base.label,
+        commit,
+        readAs: read.renamedFrom,
+      };
+      this.session = buildSession(file, read.text, ctx, pin, currentText);
       // Row indices are session-local: a re-pin re-pairs everything, so yesterday's
       // heights and word-ranges would be filed under today's unrelated rows. Drop them.
       this.zones.reset();
       this.charMarks.reset();
       this.warnedNoScroller = false;
-      new Notice(
-        `Base ${this.session.shortSha} (${base.label}) · ${this.session.counts.changed} changed block(s)`
-      );
+
+      // The empty diff is the confusing case, so it gets its own sentence rather than
+      // "0 changed block(s)" — which looks like the plugin failed. It is instead a
+      // correct answer to a question the reader probably didn't mean to ask.
+      if (this.session.counts.changed === 0) {
+        new Notice(
+          `No changes against ${base.label} (${this.session.shortSha}).` +
+          (base.label === 'HEAD'
+            ? ' Your work is committed — use "Open review against a version…" to pick an earlier one.'
+            : ''),
+          8000
+        );
+      } else {
+        new Notice(
+          `Base ${this.session.shortSha} · "${commit.subject}" · ${commit.relative} — ` +
+          `${this.session.counts.changed} changed block(s)`
+        );
+      }
     } catch (e) {
       const msg = e instanceof GitError ? e.message : `Unexpected error:\n${(e as Error).message}`;
       // Loud, and explicit in the pane — an empty base pane must never be the only

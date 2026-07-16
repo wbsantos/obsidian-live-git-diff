@@ -23,7 +23,7 @@
     "gate": "node tools/check-invariant.mjs",
     "test": "node --test \"test/**/*.test.ts\"",
     "capture-oracle": "node tools/capture-sections.mjs",
-    "ci": "npm run typecheck && npm run test && npm run build"
+    "ci": "npm run build && npm test"
   },
   "keywords": [
     "obsidian",

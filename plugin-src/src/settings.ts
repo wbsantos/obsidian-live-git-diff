@@ -41,7 +41,19 @@ export interface DiffColors {
   modRail: string;
 }
 
-export type BaseRefMode = 'pinned-head' | 'named-ref';
+/**
+ * Which commit a review defaults to.
+ *
+ * `head` was the only option in v1, and it assumed the changes under review are sitting
+ * UNCOMMITTED in the working tree. That assumption breaks for the workflow this plugin
+ * was actually built for: when an agent commits constantly (so that reverting is cheap),
+ * the changes are already committed by the time anyone reviews them — often across
+ * several commits — and a working-tree-vs-HEAD diff shows precisely nothing.
+ *
+ * Hence `file-prev` and `custom`, and hence the commit picker, which is the primary way
+ * to answer this per-review. These settings only choose the DEFAULT.
+ */
+export type BaseRefMode = 'head' | 'head~1' | 'file-prev' | 'custom';
 
 export interface LiveGitDiffSettings {
   /**
@@ -50,22 +62,21 @@ export interface LiveGitDiffSettings {
    * value that applies in BOTH themes — see README "Known limitations".
    */
   colors: DiffColors;
-  /**
-   * 'pinned-head' — pin to HEAD at the moment the review opens (the default, and the
-   *   behaviour the spike shipped: it survives commits landing mid-review).
-   * 'named-ref'  — diff against `baseRef` (a branch, tag, or sha) instead.
-   */
+  /** Which commit a plain "Open git diff review" pins. See BaseRefMode. */
   baseRefMode: BaseRefMode;
-  /** Used only when baseRefMode === 'named-ref'. */
+  /** Used only when baseRefMode === 'custom'. */
   baseRef: string;
+  /** How many commits the picker lists. */
+  logLimit: number;
   /** Verbose console logging. Warnings and errors are always on regardless. */
   debug: boolean;
 }
 
 export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
   colors: { insBg: '', delBg: '', insRail: '', delRail: '', modRail: '' },
-  baseRefMode: 'pinned-head',
+  baseRefMode: 'head',
   baseRef: 'main',
+  logLimit: 50,
   debug: false,
 };
 
@@ -190,17 +201,26 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
     /* ---- base version ---------------------------------------------------- */
     new Setting(containerEl).setName('Base version').setHeading();
 
+    const pickerNote = containerEl.createEl('p', { cls: 'lgd-settings-note' });
+    pickerNote.setText(
+      'To choose a version per review, use the command "Open review against a version…" — ' +
+      'it lists this file\'s recent commits by subject and age. These settings only decide ' +
+      'what the plain "Open git diff review" command compares against.'
+    );
+
     new Setting(containerEl)
-      .setName('Compare against')
+      .setName('Compare against by default')
       .setDesc(
-        'Pinned HEAD captures the current commit when you open a review and holds it. ' +
-        'That is what stops the diff shrinking to nothing while something else commits ' +
-        'to the repo mid-review. Pick a named ref to compare against a branch or tag instead.'
+        'Whichever you pick is resolved to a commit when the review opens, and that commit ' +
+        'is then pinned for the session — so the diff cannot shrink while something else ' +
+        'commits to the repo mid-review.'
       )
       .addDropdown((d) =>
         d
-          .addOption('pinned-head', 'Pinned HEAD (recommended)')
-          .addOption('named-ref', 'A named ref')
+          .addOption('head', 'The latest commit (HEAD)')
+          .addOption('head~1', 'One commit before HEAD (HEAD~1)')
+          .addOption('file-prev', 'This file\'s previous version')
+          .addOption('custom', 'A specific ref…')
           .setValue(this.plugin.settings.baseRefMode)
           .onChange(async (v) => {
             this.plugin.settings.baseRefMode = v as BaseRefMode;
@@ -209,12 +229,30 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
           })
       );
 
-    if (this.plugin.settings.baseRefMode === 'named-ref') {
+    if (this.plugin.settings.baseRefMode === 'head') {
+      const warn = containerEl.createEl('p', { cls: 'lgd-settings-note' });
+      // Said out loud because it is the single most confusing outcome this plugin has:
+      // a clean working tree against HEAD is an empty diff, which looks like the plugin
+      // is broken rather than like a correct answer to the question that was asked.
+      warn.setText(
+        'Note: comparing against HEAD shows your UNCOMMITTED changes. If your work is ' +
+        'already committed, this diff will be empty — pick a version instead.'
+      );
+    }
+
+    if (this.plugin.settings.baseRefMode === 'file-prev') {
+      const note = containerEl.createEl('p', { cls: 'lgd-settings-note' });
+      note.setText(
+        'The commit before the most recent one that touched this file — i.e. "what changed ' +
+        'in the last edit to this document", regardless of what else was committed since.'
+      );
+    }
+
+    if (this.plugin.settings.baseRefMode === 'custom') {
       new Setting(containerEl)
         .setName('Ref')
         .setDesc(
-          'A branch, tag, or commit — anything `git rev-parse` accepts: main, origin/main, v1.2, HEAD~5, a sha. ' +
-          'It is resolved to a commit when the review opens, and that commit is then pinned for the session.'
+          'Anything git resolves: main, origin/main, v1.2, HEAD~5, a sha, main@{yesterday}.'
         )
         .addText((t) =>
           t
@@ -226,6 +264,20 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
             })
         );
     }
+
+    new Setting(containerEl)
+      .setName('Versions to list')
+      .setDesc('How many commits the version picker shows.')
+      .addSlider((s) =>
+        s
+          .setLimits(10, 200, 10)
+          .setValue(this.plugin.settings.logLimit)
+          .setDynamicTooltip()
+          .onChange(async (v) => {
+            this.plugin.settings.logLimit = v;
+            await this.plugin.saveSettings();
+          })
+      );
 
     /* ---- colors --------------------------------------------------------- */
     new Setting(containerEl).setName('Colors').setHeading();

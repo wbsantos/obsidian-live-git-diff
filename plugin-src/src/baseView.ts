@@ -94,15 +94,40 @@ export class GitBaseView extends ItemView {
       return;
     }
 
+    // THE HEADER HAS TO IDENTIFY THE BASE IN WORDS.
+    // While the base was always HEAD, "base a1b2c3d" was enough. Now that any commit can
+    // be pinned, a sha alone cannot answer the first question a surprising diff raises —
+    // "which version am I actually looking at?" — so the subject and the age carry it:
+    //   base 3c9d151 · "apply review round 1" · 7 hours ago
     const sub = header.createDiv({ cls: 'lgd-sub' });
     sub.createSpan({ cls: 'lgd-sha', text: `base ${session.shortSha}` });
-    // The ref LABEL as well as the sha: "base a1b2c3d" alone cannot answer "am I
-    // diffing against HEAD or against main?", which is the first question a wrong-looking
-    // diff raises now that the ref is configurable.
-    sub.createSpan({
-      text: ` (${session.baseRefLabel}) · ${session.counts.blocks} blocks · ${session.counts.changed} changed`,
+
+    const c = session.baseCommit;
+    if (c) {
+      sub.createSpan({ cls: 'lgd-sep', text: ' · ' });
+      sub.createSpan({ cls: 'lgd-subject', text: `"${c.subject}"` });
+      sub.createSpan({ cls: 'lgd-sep', text: ' · ' });
+      // Relative age answers "how far back am I?" at a glance; the absolute local time
+      // (AM/PM, never 24h or ISO) is the precision behind it, on hover.
+      const rel = sub.createSpan({ cls: 'lgd-age', text: c.relative });
+      rel.setAttr('title', c.date);
+    } else if (session.baseRefLabel) {
+      sub.createSpan({ cls: 'lgd-sep', text: ' · ' });
+      sub.createSpan({ text: session.baseRefLabel });
+    }
+
+    // A rename is worth naming: without this the base pane silently shows a file under a
+    // name that no longer exists, which looks like a bug rather than like history.
+    if (session.baseReadAs) {
+      sub.createSpan({ cls: 'lgd-sep', text: ' · ' });
+      sub.createSpan({ cls: 'lgd-renamed', text: `was ${session.baseReadAs}` });
+    }
+
+    const counts = header.createDiv({ cls: 'lgd-sub' });
+    counts.createSpan({
+      text: `${session.counts.blocks} blocks · ${session.counts.changed} changed`,
     });
-    this.syncBadgeEl = sub.createSpan({ cls: 'lgd-sync' });
+    this.syncBadgeEl = counts.createSpan({ cls: 'lgd-sync' });
     this.updateSyncBadge();
 
     // 'markdown-preview-view markdown-rendered' are Obsidian's own reading-view classes.

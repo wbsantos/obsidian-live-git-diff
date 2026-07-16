@@ -20,6 +20,69 @@ export interface GitContext {
   rel: string;
 }
 
+/** One commit from a file's history, as shown in the picker and the base pane header. */
+export interface CommitInfo {
+  /** Abbreviated sha, for display. */
+  shortSha: string;
+  /** Full sha. This is what gets pinned — an abbreviation can become ambiguous. */
+  sha: string;
+  /** Relative age from git's `%ar`, e.g. "8 days ago". */
+  relative: string;
+  /** Absolute local time from git's `%ad`, e.g. "Jul 7, 2:10 PM". */
+  date: string;
+  /** Commit subject (first line). */
+  subject: string;
+  /**
+   * The file's path AS OF this commit. Differs from the current path across a rename,
+   * which is why it is captured here rather than assumed — see `fileLog`.
+   */
+  path: string;
+}
+
+/**
+ * Field and record separators for git's --format: ASCII US (0x1f) between fields, RS
+ * (0x1e) before each record.
+ *
+ * WHY NOT TABS AND NEWLINES: a commit subject can contain a tab, and `--name-only`
+ * appends its own lines after the format string. US/RS are the control codes that mean
+ * exactly this, and neither can occur in a subject or a path — so the parse needs no
+ * escaping rules and has no ambiguity.
+ *
+ * WHY NOT NUL (0x00) AS THE RECORD SEPARATOR, which is git's own convention (-z) and
+ * the obvious choice: **node refuses to spawn a process with a NUL in any argv element**
+ * ("The argument 'args[5]' must be a string without null bytes"). It works when you type
+ * it into a shell, which is exactly how it survived a manual probe and then failed on
+ * the first real call. RS is the correct byte that also survives the transport.
+ */
+const US = '\x1f';
+const RS = '\x1e';
+
+/**
+ * How every commit time this plugin shows a human is formatted.
+ *
+ * AM/PM, LOCAL, leading zeros stripped: "Jul 7, 2:10 PM". Verified on this platform:
+ *   %-d / %-I  strip the zeros ("Jul 7, 2:10 PM", not "Jul 07, 02:10 PM")
+ *   %-I        is 12 at both midnight and noon, never 0
+ *
+ * NO TIMEZONE CONVERSION, and no %Z. git already emits the committer's LOCAL time, so
+ * the value is correct as-is; adding a conversion would be the bug. %Z was tried and
+ * renders EMPTY here (leaving a trailing space), so it is deliberately omitted — the
+ * time is local and unambiguous in context.
+ *
+ * ISO timestamps are for machines. The alignment report (JSON) keeps one; nothing a
+ * person reads does.
+ */
+const HUMAN_DATE = 'format:%b %-d, %-I:%M %p';
+
+/** shortSha, sha, relative, absolute, subject — the fields every CommitInfo needs. */
+const COMMIT_FIELDS = ['%h', '%H', '%ar', '%ad', '%s'].join(US);
+
+function parseCommitFields(line: string, path: string): CommitInfo | null {
+  const [shortSha, sha, relative, date, subject] = line.split(US);
+  if (!sha) return null;
+  return { shortSha, sha, relative, date, subject: subject || '(no subject)', path };
+}
+
 /**
  * Run git with argv (never a shell string — paths here contain spaces).
  *
@@ -140,5 +203,119 @@ export function showAt(root: string, sha: string, rel: string): string {
       );
     }
     throw new GitError(`git show failed for ${rel} at ${sha.slice(0, 7)}:\n${m}`);
+  }
+}
+
+/**
+ * Commit metadata for any ref. Feeds the base pane header.
+ *
+ * Needed because a sha alone is meaningless once the base is arbitrary: "base d308280"
+ * cannot answer "which version am I looking at?", but
+ * `base d308280 · "apply review round 1" · 7 hours ago` can.
+ */
+export function commitInfoFor(root: string, ref: string): CommitInfo {
+  let out: string;
+  try {
+    out = git(['-C', root, 'show', '-s', `--format=${COMMIT_FIELDS}`, `--date=${HUMAN_DATE}`, ref]);
+  } catch (e: unknown) {
+    throw new GitError(`Cannot read commit ${ref}:\n${(e as Error).message}`);
+  }
+  const info = parseCommitFields(out.split('\n')[0], '');
+  if (!info) throw new GitError(`Cannot read commit ${ref}: git returned no usable output.`);
+  return info;
+}
+
+/**
+ * The commits that touched `rel`, most recent first — the picker's list.
+ *
+ * `--follow` so history survives a RENAME, and `--name-only` because that is what makes
+ * each entry carry the file's path AS OF that commit. Verified against a repo with a
+ * real rename in it: the same call yields both the list and the rename map, so resolving
+ * "what was this file called at that commit?" costs no extra git invocation.
+ *
+ * Empty result = the file has never been committed (it is untracked). That is a
+ * meaningful answer, not an error, and the caller says so in words.
+ */
+export function fileLog(root: string, rel: string, limit = 50): CommitInfo[] {
+  let out: string;
+  try {
+    out = git([
+      '-C', root, 'log',
+      '--follow',
+      '--name-only',
+      `--format=${RS}${COMMIT_FIELDS}`,
+      `--date=${HUMAN_DATE}`,
+      '-n', String(limit),
+      '--', rel,
+    ]);
+  } catch (e: unknown) {
+    throw new GitError(`Cannot read the history of ${rel}:\n${(e as Error).message}`);
+  }
+
+  const commits: CommitInfo[] = [];
+  for (const record of out.split(RS)) {
+    if (!record.trim()) continue;
+    const lines = record.split('\n');
+    // Everything after the format line is --name-only output: a blank line, then the
+    // path(s). A merge commit can list none, in which case fall back to the current
+    // path — the commit should still be selectable.
+    const path = lines.slice(1).map((l) => l.trim()).find((l) => l.length > 0) || rel;
+    const info = parseCommitFields(lines[0], path);
+    if (info) commits.push(info);
+  }
+  return commits;
+}
+
+/**
+ * Read `rel` as it existed at `sha`, following renames.
+ *
+ * WHY THIS IS NOT JUST `showAt`. A chosen commit may predate a rename, and
+ * `git show <old-sha>:<current-path>` fails there with "exists on disk, but not in
+ * <sha>" — which, rendered as an empty base pane, reads as "the whole file is new".
+ * That is the wrong-but-plausible failure this codebase works hardest to avoid, so the
+ * rename is resolved instead: the file's --follow history already knows what the path
+ * was at that commit.
+ *
+ * The two ways this legitimately fails are told apart in words, because "you picked a
+ * commit from before this file existed" and "this file has never been committed" want
+ * completely different reactions from the reader.
+ */
+export function readBaseAt(
+  root: string,
+  rel: string,
+  sha: string
+): { text: string; path: string; renamedFrom: string | null } {
+  try {
+    return { text: showAt(root, sha, rel), path: rel, renamedFrom: null };
+  } catch (e: unknown) {
+    // Fall through to the rename/absent analysis below.
+    const history = fileLog(root, rel, 500);
+
+    if (!history.length) {
+      throw new GitError(
+        `Not tracked in git:\n  ${rel}\n\n` +
+        `This file has no commits at all, so there is no earlier version to compare ` +
+        `against. Commit it first.`
+      );
+    }
+
+    const hit = history.find((c) => c.sha === sha || (sha.length >= 7 && c.sha.startsWith(sha)));
+    if (hit && hit.path !== rel) {
+      // The picked commit IS in this file's history — it just knew the file by a
+      // different name. Read it under that name.
+      return { text: showAt(root, sha, hit.path), path: hit.path, renamedFrom: hit.path };
+    }
+    if (hit) {
+      // In history, same path, yet `show` failed: not a rename. Surface git verbatim.
+      throw e instanceof GitError ? e : new GitError(String((e as Error).message));
+    }
+
+    const oldest = history[history.length - 1];
+    throw new GitError(
+      `This file did not exist at ${sha.slice(0, 7)}.\n  ${rel}\n\n` +
+      `Its earliest commit is ${oldest.shortSha} (${oldest.date}) — ${oldest.subject}\n` +
+      `Pick that commit or a later one. (If you expected it here, the commit may be on ` +
+      `a branch that is not an ancestor of this file's history.)`
+    );
   }
 }

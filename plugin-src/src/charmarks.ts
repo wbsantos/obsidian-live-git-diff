@@ -27,6 +27,7 @@ import { opcodes } from './diff/mddiff.ts';
 import { CLS } from './panes.ts';
 import type { PaneHost } from './panes.ts';
 import type { Row } from './session.ts';
+import * as log from './log.ts';
 
 /**
  * Above this fraction of changed words, marks are suppressed and the block keeps
@@ -258,9 +259,12 @@ export function wrapRanges(el: Element, ranges: CharRange[], cls: string): numbe
   // announces itself instead of silently poisoning the user's comment anchors — a
   // failure that would otherwise surface days later as "my comments moved".
   if (el.textContent !== before) {
-    console.error(
-      '[live-git-diff] char-mark wrapping altered textContent — reverting. This is a bug; ' +
-      'marks are disabled for this block rather than risk comment anchors.',
+    // log.error, not log.debug: this must NOT be behind the debug toggle. It means text
+    // integrity failed, which is the one thing that could silently damage a user's
+    // annotation anchors — they need to see it whether or not they opted into logging.
+    log.error(
+      'char-mark wrapping altered textContent — reverting. This is a bug; ' +
+      'marks are disabled for this block rather than risk annotation anchors.',
       { cls, beforeLen: before ? before.length : 0, afterLen: el.textContent ? el.textContent.length : 0 }
     );
     unwrapCharMarks(el);

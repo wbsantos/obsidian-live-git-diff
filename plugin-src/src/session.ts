@@ -8,6 +8,7 @@
  */
 import type { Block, PairRow, PairKind } from './diff/mddiff.ts';
 import { blocks, pair } from './diff/mddiff.ts';
+import type { CommitInfo } from './git.ts';
 
 /**
  * Per-pane index for one row: where it sits in that pane's document order, the
@@ -39,8 +40,20 @@ export interface Session {
   fileName: string;
   sha: string;
   shortSha: string;
-  /** Human label for where the base came from: 'HEAD', 'main', 'v1.2'… */
+  /** Human label for where the base came from: 'HEAD', 'main', 'v1.2', a picked sha… */
   baseRefLabel: string;
+  /**
+   * Subject + age of the pinned commit, for the header.
+   * Load-bearing once the base is arbitrary: `base d308280` cannot answer "which version
+   * am I looking at?" — `base d308280 · "apply review round 1" · 7 hours ago` can.
+   */
+  baseCommit: CommitInfo | null;
+  /**
+   * The path the base was read under, when a rename means it differs from the note's
+   * current path. null = same path. Surfaced so a base pane that legitimately shows a
+   * file under an old name says so, rather than looking like a bug.
+   */
+  baseReadAs: string | null;
   root: string;
   rel: string;
   rows: Row[];
@@ -101,12 +114,19 @@ function indexSide(list: Row[], K: 'pn' | 'pb'): void {
  * to "finish itself". The base sha is captured by the caller and every later
  * `git show` uses it. Re-pinning is an explicit user command.
  */
+export interface BasePin {
+  sha: string;
+  label: string;
+  commit: CommitInfo | null;
+  /** Set only when a rename means the base was read under a different path. */
+  readAs: string | null;
+}
+
 export function buildSession(
   file: { path: string; name: string },
   baseText: string,
   ctx: { root: string; rel: string },
-  sha: string,
-  baseRefLabel: string,
+  pin: BasePin,
   currentText: string
 ): Session {
   const headBlocks: Block[] = blocks(baseText);
@@ -140,9 +160,11 @@ export function buildSession(
   return {
     filePath: file.path,
     fileName: file.name,
-    sha,
-    shortSha: sha.slice(0, 7),
-    baseRefLabel,
+    sha: pin.sha,
+    shortSha: pin.sha.slice(0, 7),
+    baseRefLabel: pin.label,
+    baseCommit: pin.commit,
+    baseReadAs: pin.readAs,
     root: ctx.root,
     rel: ctx.rel,
     rows,
@@ -170,6 +192,8 @@ export function errorSession(file: { path: string; name: string }, msg: string):
     sha: '',
     shortSha: '',
     baseRefLabel: '',
+    baseCommit: null,
+    baseReadAs: null,
     root: '',
     rel: '',
     rows: [],

@@ -174,6 +174,55 @@ body.theme-dark {
   color: var(--text-normal);
 }
 
+/* The header identifies the pinned base IN WORDS. Once any commit can be the base, a
+   sha alone cannot answer "which version am I looking at?" — the subject can. */
+.lgd-sep { color: var(--text-faint); }
+
+.lgd-subject {
+  color: var(--text-normal);
+  font-style: italic;
+}
+
+.lgd-age { color: var(--text-muted); }
+
+/* Shown only across a rename, where the base pane is legitimately reading a file under
+   a name that no longer exists. Unflagged, that looks like a bug. */
+.lgd-renamed,
+.lgd-pick-renamed {
+  color: var(--text-accent);
+}
+
+/* ---- version picker (SuggestModal) ----
+   The SUBJECT leads because that is the only field anyone recognises; the sha and dates
+   are the supporting detail, not the identifier. */
+.lgd-pick {
+  /* Two lines per row, so let them breathe without the list getting tall enough that
+     only three commits fit on screen. */
+  line-height: 1.35;
+}
+
+.lgd-pick-subject {
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lgd-pick-meta {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.lgd-pick-rel { color: var(--text-muted); }
+
+.lgd-pick-date { color: var(--text-faint); }
+
+.lgd-pick-sha {
+  font-family: var(--font-monospace);
+  color: var(--text-faint);
+}
+
 .lgd-empty {
   padding: 24px 16px;
   color: var(--text-muted);
