@@ -307,3 +307,45 @@ test('pair: cost is sane on the corpus', () => {
   const ms = (performance.now() - t0) / 20;
   assert.ok(ms < 100, `blocks+pair averaged ${ms.toFixed(1)}ms (budget 100ms)`);
 });
+
+/**
+ * Row order must never contradict the note's own document order.
+ *
+ * The 'replace' branch defers insert rows to the end of the run so del/ins stay grouped.
+ * When a 'mod' lands between a del and its deferred ins, that deferral used to emit the
+ * mod BEFORE text that is physically above it — rows carried note-side lines
+ * 294, 295, 303, 301. The base pane renders in ROW order and the note in DOCUMENT order,
+ * so the panes disagreed by the height of the deferred block: a paired block, word-marks
+ * present on both sides, sitting 249px out of line. It read as an alignment bug and was an
+ * ordering one.
+ */
+test('rows never claim an order the note contradicts (deferred ins vs mod)', () => {
+  // Two blocks replaced: the first rewritten past recognition (-> del + ins), the second
+  // only edited (-> mod). Exactly the shape from the reference corpus at line 299.
+  const base = [
+    '# H',
+    '',
+    'The principle: make fallback bidirectional and expand the triggers to include timeouts.',
+    '',
+    'Observed incident: a provider outage caused fifty two minutes of chat unavailability.',
+  ].join('\n');
+  const cur = [
+    '# H',
+    '',
+    'Two fixes carry the weight here: symmetry, and treating timeouts as a fallback trigger.',
+    '',
+    'Observed incident: a provider outage caused fifty two minutes of chat unavailability today.',
+  ].join('\n');
+
+  const rows = pair(blocks(base), blocks(cur));
+  const noteLines = rows.filter((r) => r.b).map((r) => r.b!.lineStart);
+  for (let i = 1; i < noteLines.length; i++) {
+    assert.ok(noteLines[i] > noteLines[i - 1],
+      `note-side line ${noteLines[i]} appears after ${noteLines[i - 1]} in row order — ` +
+      `the rows disagree with the file, and the panes will too. Order: ${noteLines.join(', ')}`);
+  }
+  const baseLines = rows.filter((r) => r.a).map((r) => r.a!.lineStart);
+  for (let i = 1; i < baseLines.length; i++) {
+    assert.ok(baseLines[i] > baseLines[i - 1], 'base-side order must be ascending too');
+  }
+});

@@ -24,6 +24,36 @@ export interface BaseViewHost {
   sync: { enabled: boolean; attach(): void };
 }
 
+/**
+ * Give a base block the `el-<tag>` class Obsidian's own reading view puts on its sections.
+ *
+ * WHY THIS IS NOT COSMETIC. Every bit of heading spacing in Obsidian comes from exactly one
+ * rule (one hit for `var(--heading-spacing)` in the whole of app.css), and both of its
+ * selector forms demand SIBLING ADJACENCY against an el-classed div:
+ *
+ *   .markdown-rendered :is(p,pre,table,ul,ol) + :is(h1..h6),
+ *   .markdown-rendered div:is(.el-blockquote,.el-p,.el-pre,.el-table,.el-ul,.el-ol) + div > :is(h1..h6)
+ *       { margin-top: var(--heading-spacing) }
+ *
+ * In the note pane the section div IS the el-classed div, so the rule matches. Our blocks
+ * were bare `.lgd-block` divs, so NEITHER selector could match and every base heading fell
+ * back to the UA default. Measured on a live pane: note headings 40px, base headings 16px —
+ * our pane silently lost 24px at EVERY heading, which on an 8-heading document is ~190px of
+ * real advance drift. Not a compensation problem: a rendering-parity bug in our own pane,
+ * and the reason to fix it at the source rather than pad around it.
+ *
+ * The class is derived from what the renderer actually produced rather than from the row's
+ * markdown, because the renderer is the authority on what it made. A row that renders to
+ * anything other than exactly one element keeps today's behaviour — no guess is better than
+ * a wrong guess, and the fallback is what we already shipped.
+ */
+function tagElClass(el: HTMLElement): void {
+  if (el.children.length !== 1) return;
+  const only = el.firstElementChild;
+  if (!only) return;
+  el.addClass('el-' + only.tagName.toLowerCase());
+}
+
 export class GitBaseView extends ItemView {
   private host: BaseViewHost;
 
@@ -182,6 +212,7 @@ export class GitBaseView extends ItemView {
         // processors no-op here. Verified live: no stray comment marks on the old version.
         // Cost: relative links/embeds in the base pane won't resolve. See README.
         await MarkdownRenderer.render(this.app, row.a.text, el, '', this);
+        tagElClass(el);
       }
     } finally {
       // TRAILING VIEW ZONE. The note pane's sizer carries scroll-past-the-end room that

@@ -245,6 +245,17 @@ export function pair(blocksA: Block[], blocksB: Block[]): PairRow[] {
         const b = (j1 + p < j2) ? Bs[j1 + p] : null;
         if (a && b) {
           if (similarity(NA[i1 + p], NB[j1 + p]) >= MOD_MIN_SIMILARITY) {
+            // FLUSH FIRST. Held-back inserts sit ABOVE this pair in the note (their
+            // b-side lines are all < this one's), and a 'mod' is anchored to a real note
+            // block. Emitting the mod ahead of them would claim a row order the note
+            // itself contradicts — and the base pane renders in ROW order while the note
+            // renders in DOCUMENT order, so the two panes disagree by exactly the height
+            // of whatever was deferred past it. Measured: rows carried note lines
+            // 294, 295, 303, 301 — 303 before 301 — and the paired block it belonged to
+            // sat 249px out of line, with its word-marks intact on both sides, which is
+            // what made it look like an alignment bug rather than an ordering one.
+            for (let q = 0; q < pending.length; q++) rows.push(pending[q]);
+            pending.length = 0;
             rows.push({ kind: 'mod', a, b });
           } else {
             // Not actually a modification of each other — show as separate ops.

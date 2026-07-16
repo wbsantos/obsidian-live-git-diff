@@ -32,6 +32,29 @@ import type { PaneHost } from './panes.ts';
 import type { Row } from './session.ts';
 import * as log from './log.ts';
 
+/**
+ * How tall the trailing zone must be so the base can reach anything sync asks for.
+ *
+ * EXPORTED so the test and styleEndPad import the SAME symbol. The previous test
+ * re-declared this arithmetic locally and asserted it against itself — deleting
+ * styleEndPad's body could not have failed it, and one of its cases asserted
+ * f(args) === f(args) of a pure function, which is true of every function ever written. A
+ * test that cannot fail is worse than no test: it reports green.
+ *
+ * @param noteRange  the note scroller's max scrollTop
+ * @param extra      H + dp: how much further sync asks the base to go than the note,
+ *                   because the base scroller starts lower on screen (our header) — see
+ *                   styleEndPad. Callers pass max(0, …).
+ * @param baseClient the base scroller's clientHeight
+ * @param contentPx  the base pane's height EXCLUDING this pad — the pad is an output,
+ *                   never an input, which is what makes this safe to re-run forever.
+ */
+export function endPadPx(
+  noteRange: number, extra: number, baseClient: number, contentPx: number
+): number {
+  return Math.max(0, Math.round(noteRange + extra + baseClient - contentPx));
+}
+
 export class ViewZones {
   private host: PaneHost;
 
@@ -255,9 +278,40 @@ export class ViewZones {
     const pad = view.endPadEl;
     const contentPx = base.scrollHeight - pad.getBoundingClientRect().height;
     const noteRange = note.scroller.scrollHeight - note.scroller.clientHeight;
+
+    // THE SCREEN-SPACE TERM. Matching the two panes' scroller-LOCAL ranges is not enough,
+    // because the law sync actually obeys is screen-space (sync.ts): expanding its
+    //     want = base.scrollTop + (baseEl.rect.top - noteEl.rect.top)
+    // gives  want = note.scrollTop + H + dp - D_above,  where
+    //     H  = base scroller's screen top - note scroller's (our header lives ABOVE the
+    //          base scroller, so H is positive — measured ~88px),
+    //     dp = base sizer padding-top - note sizer padding-top,
+    //     D_above = note-minus-base content surplus above the anchor.
+    // An earlier version solved maxScroll(base) = noteRange, i.e. dropped H + dp entirely,
+    // so sync could still ask for ~90px the base cannot reach.
+    //
+    // It was invisible because a SECOND defect hid it: the base pane was ~400px short of
+    // content (its headings lost 24px each to a selector-parity break), D_above swallowed
+    // H + dp whole, and the clamp never bound. Fixing the parity dropped D_above to ~50px
+    // and this surfaced — one defect masking another, and the reason this term ships in
+    // the same breath as the parity fix rather than "later".
+    //
+    // MEASURED, never the constant 88: the header's height is content- and theme-dependent
+    // (a rename adds a line), and a hard-coded 88 would be right on one machine on one day.
+    const H = base.getBoundingClientRect().top - note.scroller.getBoundingClientRect().top;
+    const padTop = (el: Element | null): number =>
+      el ? parseFloat(el.ownerDocument.defaultView!.getComputedStyle(el).paddingTop) || 0 : 0;
+    const dp = padTop(base.querySelector('.markdown-preview-sizer')) -
+               padTop(note.scroller.querySelector('.markdown-preview-sizer'));
+    // max(0, …): over-provisioning is BENIGN — wants are anchor-driven, so the extra room
+    // simply never gets asked for. Under-provisioning is the defect. Never trade the second
+    // for the first to make a number look tidy.
+    const extra = Math.max(0, H + dp);
+
     // scrollHeight = contentPx + pad  =>  maxScroll = contentPx + pad - clientHeight.
-    // Solving maxScroll = noteRange gives:
-    const want = Math.max(0, Math.round(noteRange + base.clientHeight - contentPx));
+    // Solving maxScroll = noteRange + extra is endPadPx — the one exported symbol the test
+    // also imports, so a regression here cannot pass unnoticed.
+    const want = endPadPx(noteRange, extra, base.clientHeight, contentPx);
 
     const px = want + 'px';
     // Compare before assigning: an identical write still dirties layout, and this runs
@@ -395,6 +449,19 @@ export class ViewZones {
     // identical assignment still invalidates layout.
     if (el.style.paddingBottom !== bpx) el.style.paddingBottom = bpx;
     if (el.style.paddingTop !== tpx) el.style.paddingTop = tpx;
+
+    // A zone is RESERVED SPACE, not content — but padding lives inside the border box, so
+    // a washed block paints its wash straight across the reservation. On a 'mod' block
+    // that put a 76px green rectangle under a table and told the reader "this is new
+    // text", when the space stands in for text that was DELETED. Tag the block so the
+    // wash can stop at the content edge (see .lgd-haspad in styles.css).
+    //
+    // A class rather than a blanket rule on .lgd-nblock: this must key off OUR padding
+    // specifically. Blanket-clipping every note block would also crop the wash by any
+    // padding a THEME puts on a section, shrinking the highlight for reasons unrelated to
+    // a zone. Measured here: every block without a zone has padding 0, so the class marks
+    // exactly the blocks that need it.
+    el.toggleClass(CLS.haspad, bottom > 0 || top > 0);
   }
 
   /** Diagnostic snapshot for the alignment report. */

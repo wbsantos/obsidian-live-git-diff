@@ -43,8 +43,12 @@ export class ScrollSync {
 
   /** Master switch. Default ON; toggled by command. Never persisted — a review is a session. */
   enabled = true;
-  /** Re-entrancy guard: true while WE are moving a pane (see `scrollLock`). */
-  private syncing = false;
+  /**
+   * Which pane WE are currently moving, if any — see `scrollLock`. Null when idle.
+   * DIRECTIONAL on purpose: an echo arrives on the pane we moved, never on the other one,
+   * so blocking both is what made the base lag behind a live scroll.
+   */
+  private syncingSide: 'note' | 'base' | null = null;
   /** Timer that clears `syncing` after a programmatic scroll. */
   private syncTimer: number | null = null;
   /** rAF throttle token; one pending frame at a time, whichever pane fired. */
@@ -103,12 +107,20 @@ export class ScrollSync {
    * is set and dispatched after.
    */
   private onScroll(side: 'note' | 'base'): void {
-    if (!this.enabled || this.syncing) return;
+    if (!this.enabled) return;
+    // Ignore only OUR OWN ECHO, and only on the pane we moved. A scroll on the OTHER pane
+    // is the reader, and dropping it is what made the base fall behind: the lock used to
+    // be direction-blind, so every event on both panes was discarded for 120ms after each
+    // programmatic move. Under a continuous scroll that meant sync ran once per window and
+    // the base trailed by however far the reader had travelled — ~300-600px at a flick,
+    // snapping into place the moment they stopped. Measured: the anchor was off at 33 of
+    // 60 wheel steps, worst 624px, and 0px once settled.
+    if (this.syncingSide === side) return;
     if (this.rafPending) return;
     this.rafPending = true;
     window.requestAnimationFrame(() => {
       this.rafPending = false;
-      if (!this.enabled || this.syncing) return;
+      if (!this.enabled || this.syncingSide === side) return;
       try {
         if (side === 'note') this.syncNoteToBase();
         else this.syncBaseToNote();
@@ -126,18 +138,26 @@ export class ScrollSync {
    * note -> base -> note -> ... judder. Obsidian's own one-shot boolean has the mirror
    * problem — it swallows the next real scroll when a programmatic scroll emits zero
    * events. So the flag is a TIME-BASED owner token: held for a short window (120ms)
-   * AFTER the move, and every nested call pushes the window out. Cost: a genuine user
-   * scroll started within 120ms of a programmatic one is ignored. That is invisible in
-   * practice and strictly better than an oscillation.
+   * AFTER the move, and every nested call pushes the window out.
+   *
+   * `side` is the pane being MOVED, and it is what makes the window affordable. An earlier
+   * version held the token against BOTH panes and reasoned: "a genuine user scroll started
+   * within 120ms of a programmatic one is ignored — that is invisible in practice." It is
+   * not invisible. Under a continuous scroll EVERY window overlaps the reader's next
+   * event, so sync ran at most once per 120ms and the base trailed by however far they had
+   * moved — 300-600px at a flick, snapping true the instant they stopped. The oscillation
+   * this guards against is note -> base -> note, which can only arrive as an echo on the
+   * pane we just moved; the other pane's events are always the reader's, and they must get
+   * through.
    */
-  private scrollLock(fn: () => void): void {
-    this.syncing = true;
+  private scrollLock(side: 'note' | 'base', fn: () => void): void {
+    this.syncingSide = side;
     try {
       fn();
     } finally {
       if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
       this.syncTimer = window.setTimeout(() => {
-        this.syncing = false;
+        this.syncingSide = null;
         this.syncTimer = null;
       }, 120);
     }
@@ -145,7 +165,7 @@ export class ScrollSync {
 
   /** True while a programmatic scroll is in flight — callers must not re-anchor. */
   get busy(): boolean {
-    return this.syncing;
+    return this.syncingSide !== null;
   }
 
   /* ---------------------------------------------------------------- *
@@ -289,7 +309,7 @@ export class ScrollSync {
       if (Math.abs(delta) < 1) return; // already aligned; don't churn
       const want = clamp(base.scrollTop + delta, 0, maxScroll(base));
       if (Math.abs(base.scrollTop - want) < 1) return;
-      this.scrollLock(() => { base.scrollTop = want; });
+      this.scrollLock('base', () => { base.scrollTop = want; });
       return;
     }
 
@@ -298,7 +318,7 @@ export class ScrollSync {
     const target = this.baseScrollTopFor(row, hit.frac);
     if (target == null) return;
     if (Math.abs(base.scrollTop - target) < 1) return; // already there; don't churn
-    this.scrollLock(() => { base.scrollTop = target; });
+    this.scrollLock('base', () => { base.scrollTop = target; });
   }
 
   /**
@@ -331,7 +351,7 @@ export class ScrollSync {
 
     const line = this.noteLineFor(row, hit.frac);
     if (line == null || !isFinite(line)) return;
-    this.scrollLock(() => { this.applyNoteScroll(note.view, line); });
+    this.scrollLock('note', () => { this.applyNoteScroll(note.view, line); });
   }
 
   /**

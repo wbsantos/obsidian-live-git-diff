@@ -1,58 +1,73 @@
 /**
- * endpad.test.ts — the trailing view zone's arithmetic.
+ * endpad.test.ts — the trailing zone's arithmetic, imported from the shipped code.
  *
- * The rule it encodes: the base pane's max scrollTop must equal the note's, or sync asks
- * for a scrollTop the base cannot reach and the panes drift apart by the shortfall. This
- * bit the demo fixture hard (note 1100/1469, base pinned 558/558, anchor 337px out) and
- * costs a few hundred px at the bottom of a long document, which is how it went unseen.
+ * The property under test is NOT "maxScroll == noteRange". That was the previous version's
+ * assertion and it is provably insufficient: sync's law is screen-space, so it asks the
+ * base for `note.scrollTop + H + dp`, where H is how far the base scroller starts BELOW the
+ * note's (our header, ~88px). A base whose range merely equals noteRange still under-reaches
+ * by H + dp at the bottom, silently, with the badge reading "sync on".
  *
- * Pure arithmetic, so it needs no DOM: styleEndPad's whole content is this equation.
+ * The property IS: the base's max scrollTop can satisfy the largest ask sync can make.
+ *
+ * This file imports endPadPx from viewzones.ts rather than re-declaring it. The previous
+ * version re-declared the equation and asserted it against itself — deleting styleEndPad's
+ * body could not fail it — and one case asserted f(x) === f(x) of a pure function, true of
+ * every function ever written. That is how the H term shipped missing.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-/** The equation from ViewZones.styleEndPad, extracted verbatim. */
-const wantPad = (noteScrollHeight: number, noteClientHeight: number,
-                 baseContentPx: number, baseClientHeight: number): number =>
-  Math.max(0, Math.round((noteScrollHeight - noteClientHeight) + baseClientHeight - baseContentPx));
+import { endPadPx } from '../src/viewzones.ts';
 
-/** What the base's max scrollTop becomes once the pad is applied. */
-const baseMaxScroll = (baseContentPx: number, pad: number, baseClientHeight: number): number =>
-  baseContentPx + pad - baseClientHeight;
+/** maxScroll = contentPx + pad - clientHeight — the identity styleEndPad inverts. */
+const baseMaxScroll = (contentPx: number, pad: number, baseClient: number): number =>
+  contentPx + pad - baseClient;
 
-test('the base ends up with exactly the note\'s scroll range', () => {
-  // The real measurement from the demo that exposed this.
-  const noteScrollHeight = 2762, noteClientHeight = 1414;
-  const baseContentPx = 1295, baseClientHeight = 1295;
-  const pad = wantPad(noteScrollHeight, noteClientHeight, baseContentPx, baseClientHeight);
-  assert.equal(baseMaxScroll(baseContentPx, pad, baseClientHeight), noteScrollHeight - noteClientHeight);
+/** The largest scrollTop sync can ask the base for, given the panes' screen offset. */
+const biggestAsk = (noteRange: number, extra: number): number => noteRange + extra;
+
+test('the base can reach the biggest ask sync can make — H included', () => {
+  // Real geometry: note scroller 1414 tall, base 1295 (our 88px header + 12px sizer pad
+  // sit above it), base content 1295.
+  const noteRange = 2762 - 1414, extra = 88 + 12;
+  const pad = endPadPx(noteRange, extra, 1295, 1295);
+  assert.ok(baseMaxScroll(1295, pad, 1295) >= biggestAsk(noteRange, extra),
+    'a base that cannot reach the ask is the defect this zone exists to prevent');
 });
 
-test('a base that was pinned at its ceiling can now follow the note to the end', () => {
-  // note 1469 of range, base could only do 558 -> 911px of drift at the bottom.
-  const pad = wantPad(1469 + 700, 700, 558 + 700, 700);
-  assert.equal(baseMaxScroll(558 + 700, pad, 700), 1469, 'base range must reach the note\'s');
+test('WITHOUT the H term the base under-reaches — the defect, pinned', () => {
+  // extra = 0 is exactly what the first version computed. Kept as a test so nobody
+  // "simplifies" the term away again: it costs ~90px of silent bottom-of-document drift.
+  const noteRange = 1469, H = 88, dp = 12;
+  const short = endPadPx(noteRange, 0, 700, 900);
+  assert.ok(baseMaxScroll(900, short, 700) < biggestAsk(noteRange, H + dp),
+    'omitting H must leave the base short — if this passes, the term is not load-bearing');
+
+  const right = endPadPx(noteRange, H + dp, 700, 900);
+  assert.ok(baseMaxScroll(900, right, 700) >= biggestAsk(noteRange, H + dp));
 });
 
-test('never negative: a base already taller than the note asks for no pad', () => {
-  // A big deletion run makes the base the long side. Padding it further would let it
-  // scroll past content the note cannot reach — the mirror of the bug being fixed.
-  assert.equal(wantPad(1000, 800, 5000, 800), 0);
+test('the pad is an output, never an input — re-running cannot grow it', () => {
+  // styleEndPad passes contentPx = scrollHeight MINUS the pad's own height, so the second
+  // call sees the same contentPx. A version that read scrollHeight raw would diverge here.
+  const args = [1348, 100, 1295, 1295] as const;
+  const first = endPadPx(...args);
+  const scrollHeightAfter = 1295 + first;           // what the DOM now reports
+  const contentPxRecomputed = scrollHeightAfter - first;  // what styleEndPad derives
+  assert.equal(contentPxRecomputed, 1295, 'contentPx must be pad-free');
+  assert.equal(endPadPx(1348, 100, 1295, contentPxRecomputed), first, 'fixed point after pass 1');
 });
 
-test('idempotent — recomputing from content height cannot feed back on itself', () => {
-  const args = [2762, 1414, 1295, 1295] as const;
-  const first = wantPad(...args);
-  // styleEndPad subtracts the pad's own height before measuring, so the second call sees
-  // the same contentPx and returns the same answer. A version that read scrollHeight
-  // raw would grow without bound here.
-  assert.equal(wantPad(...args), first);
+test('never negative: a base already longer than the note asks for no pad', () => {
+  // A big deletion run makes the base the long side. Padding further would let it scroll
+  // past content the note cannot reach — the mirror of the bug being fixed.
+  assert.equal(endPadPx(1000, 100, 800, 5000), 0);
 });
 
-test('a document that fits on screen still gets the note\'s full range', () => {
-  // The short-file case: the note's range is ~all end-padding, and the base's content is
-  // shorter than its own viewport (contentPx < clientHeight), so pad carries it alone.
-  const pad = wantPad(2000, 1400, 800, 1300);
-  assert.equal(baseMaxScroll(800, pad, 1300), 600);
+test('a short note still gets room — the case the whole zone exists for', () => {
+  // The note fits on screen; its range is almost all of Obsidian's scroll-past-end padding,
+  // and the base's content is shorter than its own viewport.
+  const pad = endPadPx(2000 - 1400, 100, 1300, 800);
   assert.ok(pad > 0, 'a short base must still receive room to follow');
+  assert.ok(baseMaxScroll(800, pad, 1300) >= biggestAsk(600, 100));
 });

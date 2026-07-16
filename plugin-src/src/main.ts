@@ -625,21 +625,31 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
   }
 
   /**
-   * Show the base pane beside the active note.
+   * Show the base pane beside the active note — on the LEFT.
    *
-   * CHOICE: `getLeaf('split', 'vertical')` — a real editor-area split, full height, same
-   * width class as the note. The left SIDEBAR (getLeftLeaf) is genuinely on the left but
-   * is a narrow utility rail; rendered prose is unreadable in it, and side-by-side
-   * reading is the entire point.
-   * TRADE-OFF: Obsidian places a new split AFTER the active leaf, so the base pane lands
-   * to the RIGHT of the note by default. Drag its tab across once to swap. See README
-   * "Known limitations".
+   * Old on the left, new on the right, is the convention every diff tool shares (git, VS
+   * Code, GitHub), and reading a change right-to-left inverts a habit nobody should have
+   * to suspend to review a document.
+   *
+   * `createLeafBySplit(active, 'vertical', true)` — the third argument is `before`, and it
+   * is the whole reason this is one call rather than a caveat. `getLeaf('split')` always
+   * inserts AFTER the active leaf, so the base landed on the right and the README carried
+   * an apology telling readers to drag the tab across once.
+   *
+   * CHOICE: a real editor-area split, not the left SIDEBAR (getLeftLeaf). The sidebar is
+   * genuinely on the left but is a narrow utility rail; rendered prose is unreadable in it,
+   * and side-by-side reading is the entire point.
    */
   private async revealView(): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     let leaf: WorkspaceLeaf | null = existing[0];
     if (!leaf) {
-      leaf = this.app.workspace.getLeaf('split', 'vertical');
+      // Split from the NOTE's leaf, not "the active one": by the time this runs the active
+      // leaf is whatever the reader last touched, and splitting the wrong pane puts the
+      // base somewhere unrelated.
+      const host = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf
+        ?? this.app.workspace.getLeaf(false);
+      leaf = this.app.workspace.createLeafBySplit(host, 'vertical', true);
       await leaf.setViewState({ type: VIEW_TYPE, active: false });
     }
     this.app.workspace.revealLeaf(leaf);

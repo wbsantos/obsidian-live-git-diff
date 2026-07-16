@@ -206,6 +206,8 @@ function pair(blocksA, blocksB) {
         const b = j1 + p < j2 ? Bs[j1 + p] : null;
         if (a && b) {
           if (similarity(NA[i1 + p], NB[j1 + p]) >= MOD_MIN_SIMILARITY) {
+            for (let q = 0; q < pending.length; q++) rows.push(pending[q]);
+            pending.length = 0;
             rows.push({ kind: "mod", a, b });
           } else {
             rows.push({ kind: "del", a, b: null });
@@ -231,6 +233,8 @@ var CLS = {
   spacer: "lgd-spacer",
   /** The TRAILING view zone: the base pane's stand-in for Obsidian's scroll-past-end room. */
   endpad: "lgd-endpad",
+  /** A NOTE block carrying our deletion-zone padding — its wash must not paint the zone. */
+  haspad: "lgd-haspad",
   /** A section in the NOTE pane that we have tagged (every section, not just changed). */
   nblock: "lgd-nblock",
   ins: "lgd-ins",
@@ -238,7 +242,11 @@ var CLS = {
   mod: "lgd-mod",
   same: "lgd-same",
   charIns: "lgd-char-ins",
-  charDel: "lgd-char-del"
+  charDel: "lgd-char-del",
+  /** A 'mod' block whose changes are confined to table ROWS — wash the rows, not the slab. */
+  rowwise: "lgd-rowwise",
+  /** A <tr> the diff touched. Only meaningful inside .lgd-rowwise. */
+  rowchanged: "lgd-rowchanged"
 };
 var ATTR_ROW = "data-row-index";
 var NOTE_KIND_CLASSES = [CLS.ins, CLS.mod];
@@ -349,6 +357,12 @@ function inSkippedContext(node, root) {
   }
   return false;
 }
+function isTableStructureWhitespace(t) {
+  const p = t.parentElement;
+  if (!p) return false;
+  const tag = p.tagName;
+  return tag === "TR" || tag === "TABLE" || tag === "THEAD" || tag === "TBODY" || tag === "TFOOT";
+}
 function collectTextNodes(root) {
   const doc = root.ownerDocument;
   const walker = doc.createTreeWalker(root, 4, null);
@@ -358,12 +372,21 @@ function collectTextNodes(root) {
   while (n = walker.nextNode()) {
     const t = n;
     const len = t.nodeValue ? t.nodeValue.length : 0;
-    out.push({ node: t, start: off, end: off + len, skip: inSkippedContext(t, root) });
+    out.push({
+      node: t,
+      start: off,
+      end: off + len,
+      skip: inSkippedContext(t, root) || isTableStructureWhitespace(t)
+    });
     off += len;
   }
   return out;
 }
 function unwrapCharMarks(el) {
+  el.removeClass(CLS.rowwise);
+  for (const tr of Array.from(el.querySelectorAll("tr." + CLS.rowchanged))) {
+    tr.removeClass(CLS.rowchanged);
+  }
   const marks = el.querySelectorAll("[" + CHAR_MARK_ATTR + "]");
   for (const span of Array.from(marks)) {
     const parent = span.parentNode;
@@ -373,6 +396,17 @@ function unwrapCharMarks(el) {
   }
   if (marks.length) el.normalize();
   return marks.length;
+}
+function markTableRows(el) {
+  const tbl = el.querySelector("table");
+  if (!tbl) return false;
+  let any = false;
+  for (const tr of Array.from(tbl.querySelectorAll("tr"))) {
+    const changed = !!tr.querySelector("[" + CHAR_MARK_ATTR + "]");
+    tr.toggleClass(CLS.rowchanged, changed);
+    if (changed) any = true;
+  }
+  return any;
 }
 function wrapRanges(el, ranges, cls) {
   if (!ranges || !ranges.length) return 0;
@@ -483,6 +517,8 @@ var CharMarkLayer = class {
     unwrapCharMarks(noteEl);
     const madeB = wrapRanges(noteEl, ranges.b, CLS.charIns);
     if (madeB < 0) this.revertCount++;
+    baseEl.toggleClass(CLS.rowwise, markTableRows(baseEl));
+    noteEl.toggleClass(CLS.rowwise, markTableRows(noteEl));
   }
   /** Diagnostic snapshot for the alignment report. */
   stats(modRows) {
@@ -547,6 +583,12 @@ function topmostVisible(container, els) {
 // src/baseView.ts
 var import_obsidian = require("obsidian");
 var VIEW_TYPE = "live-git-diff-base";
+function tagElClass(el) {
+  if (el.children.length !== 1) return;
+  const only = el.firstElementChild;
+  if (!only) return;
+  el.addClass("el-" + only.tagName.toLowerCase());
+}
 var GitBaseView = class extends import_obsidian.ItemView {
   constructor(leaf, host) {
     super(leaf);
@@ -646,6 +688,7 @@ var GitBaseView = class extends import_obsidian.ItemView {
         else if (row.kind === "mod") el.addClass(CLS.mod);
         else el.addClass(CLS.same);
         await import_obsidian.MarkdownRenderer.render(this.app, row.a.text, el, "", this);
+        tagElClass(el);
       }
     } finally {
       this.endPadEl = sizer.createDiv({ cls: CLS.endpad });
@@ -980,8 +1023,12 @@ var ScrollSync = class {
   constructor(host) {
     /** Master switch. Default ON; toggled by command. Never persisted — a review is a session. */
     this.enabled = true;
-    /** Re-entrancy guard: true while WE are moving a pane (see `scrollLock`). */
-    this.syncing = false;
+    /**
+     * Which pane WE are currently moving, if any — see `scrollLock`. Null when idle.
+     * DIRECTIONAL on purpose: an echo arrives on the pane we moved, never on the other one,
+     * so blocking both is what made the base lag behind a live scroll.
+     */
+    this.syncingSide = null;
     /** Timer that clears `syncing` after a programmatic scroll. */
     this.syncTimer = null;
     /** rAF throttle token; one pending frame at a time, whichever pane fired. */
@@ -1033,12 +1080,13 @@ var ScrollSync = class {
    * is set and dispatched after.
    */
   onScroll(side) {
-    if (!this.enabled || this.syncing) return;
+    if (!this.enabled) return;
+    if (this.syncingSide === side) return;
     if (this.rafPending) return;
     this.rafPending = true;
     window.requestAnimationFrame(() => {
       this.rafPending = false;
-      if (!this.enabled || this.syncing) return;
+      if (!this.enabled || this.syncingSide === side) return;
       try {
         if (side === "note") this.syncNoteToBase();
         else this.syncBaseToNote();
@@ -1055,25 +1103,33 @@ var ScrollSync = class {
    * note -> base -> note -> ... judder. Obsidian's own one-shot boolean has the mirror
    * problem — it swallows the next real scroll when a programmatic scroll emits zero
    * events. So the flag is a TIME-BASED owner token: held for a short window (120ms)
-   * AFTER the move, and every nested call pushes the window out. Cost: a genuine user
-   * scroll started within 120ms of a programmatic one is ignored. That is invisible in
-   * practice and strictly better than an oscillation.
+   * AFTER the move, and every nested call pushes the window out.
+   *
+   * `side` is the pane being MOVED, and it is what makes the window affordable. An earlier
+   * version held the token against BOTH panes and reasoned: "a genuine user scroll started
+   * within 120ms of a programmatic one is ignored — that is invisible in practice." It is
+   * not invisible. Under a continuous scroll EVERY window overlaps the reader's next
+   * event, so sync ran at most once per 120ms and the base trailed by however far they had
+   * moved — 300-600px at a flick, snapping true the instant they stopped. The oscillation
+   * this guards against is note -> base -> note, which can only arrive as an echo on the
+   * pane we just moved; the other pane's events are always the reader's, and they must get
+   * through.
    */
-  scrollLock(fn) {
-    this.syncing = true;
+  scrollLock(side, fn) {
+    this.syncingSide = side;
     try {
       fn();
     } finally {
       if (this.syncTimer !== null) window.clearTimeout(this.syncTimer);
       this.syncTimer = window.setTimeout(() => {
-        this.syncing = false;
+        this.syncingSide = null;
         this.syncTimer = null;
       }, 120);
     }
   }
   /** True while a programmatic scroll is in flight — callers must not re-anchor. */
   get busy() {
-    return this.syncing;
+    return this.syncingSide !== null;
   }
   /* ---------------------------------------------------------------- *
    * anchor resolution                                                 *
@@ -1175,7 +1231,7 @@ var ScrollSync = class {
       if (Math.abs(delta) < 1) return;
       const want = clamp(base.scrollTop + delta, 0, maxScroll(base));
       if (Math.abs(base.scrollTop - want) < 1) return;
-      this.scrollLock(() => {
+      this.scrollLock("base", () => {
         base.scrollTop = want;
       });
       return;
@@ -1183,7 +1239,7 @@ var ScrollSync = class {
     const target = this.baseScrollTopFor(row, hit.frac);
     if (target == null) return;
     if (Math.abs(base.scrollTop - target) < 1) return;
-    this.scrollLock(() => {
+    this.scrollLock("base", () => {
       base.scrollTop = target;
     });
   }
@@ -1210,7 +1266,7 @@ var ScrollSync = class {
     if (!row) return;
     const line = this.noteLineFor(row, hit.frac);
     if (line == null || !isFinite(line)) return;
-    this.scrollLock(() => {
+    this.scrollLock("note", () => {
       this.applyNoteScroll(note.view, line);
     });
   }
@@ -1257,6 +1313,9 @@ var ScrollSync = class {
 };
 
 // src/viewzones.ts
+function endPadPx(noteRange, extra, baseClient, contentPx) {
+  return Math.max(0, Math.round(noteRange + extra + baseClient - contentPx));
+}
 var ViewZones = class {
   constructor(host) {
     /**
@@ -1440,7 +1499,11 @@ var ViewZones = class {
     const pad = view.endPadEl;
     const contentPx = base.scrollHeight - pad.getBoundingClientRect().height;
     const noteRange = note.scroller.scrollHeight - note.scroller.clientHeight;
-    const want = Math.max(0, Math.round(noteRange + base.clientHeight - contentPx));
+    const H = base.getBoundingClientRect().top - note.scroller.getBoundingClientRect().top;
+    const padTop = (el) => el ? parseFloat(el.ownerDocument.defaultView.getComputedStyle(el).paddingTop) || 0 : 0;
+    const dp = padTop(base.querySelector(".markdown-preview-sizer")) - padTop(note.scroller.querySelector(".markdown-preview-sizer"));
+    const extra = Math.max(0, H + dp);
+    const want = endPadPx(noteRange, extra, base.clientHeight, contentPx);
     const px = want + "px";
     if (pad.style.height !== px) pad.style.height = px;
   }
@@ -1558,6 +1621,7 @@ var ViewZones = class {
     const tpx = top > 0 ? top + "px" : "";
     if (el.style.paddingBottom !== bpx) el.style.paddingBottom = bpx;
     if (el.style.paddingTop !== tpx) el.style.paddingTop = tpx;
+    el.toggleClass(CLS.haspad, bottom > 0 || top > 0);
   }
   /** Diagnostic snapshot for the alignment report. */
   stats() {
@@ -2165,21 +2229,28 @@ ${e.message}`;
     }
   }
   /**
-   * Show the base pane beside the active note.
+   * Show the base pane beside the active note — on the LEFT.
    *
-   * CHOICE: `getLeaf('split', 'vertical')` — a real editor-area split, full height, same
-   * width class as the note. The left SIDEBAR (getLeftLeaf) is genuinely on the left but
-   * is a narrow utility rail; rendered prose is unreadable in it, and side-by-side
-   * reading is the entire point.
-   * TRADE-OFF: Obsidian places a new split AFTER the active leaf, so the base pane lands
-   * to the RIGHT of the note by default. Drag its tab across once to swap. See README
-   * "Known limitations".
+   * Old on the left, new on the right, is the convention every diff tool shares (git, VS
+   * Code, GitHub), and reading a change right-to-left inverts a habit nobody should have
+   * to suspend to review a document.
+   *
+   * `createLeafBySplit(active, 'vertical', true)` — the third argument is `before`, and it
+   * is the whole reason this is one call rather than a caveat. `getLeaf('split')` always
+   * inserts AFTER the active leaf, so the base landed on the right and the README carried
+   * an apology telling readers to drag the tab across once.
+   *
+   * CHOICE: a real editor-area split, not the left SIDEBAR (getLeftLeaf). The sidebar is
+   * genuinely on the left but is a narrow utility rail; rendered prose is unreadable in it,
+   * and side-by-side reading is the entire point.
    */
   async revealView() {
+    var _a, _b;
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     let leaf = existing[0];
     if (!leaf) {
-      leaf = this.app.workspace.getLeaf("split", "vertical");
+      const host = (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView)) == null ? void 0 : _a.leaf) != null ? _b : this.app.workspace.getLeaf(false);
+      leaf = this.app.workspace.createLeafBySplit(host, "vertical", true);
       await leaf.setViewState({ type: VIEW_TYPE, active: false });
     }
     this.app.workspace.revealLeaf(leaf);

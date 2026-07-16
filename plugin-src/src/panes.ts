@@ -18,6 +18,8 @@ export const CLS = {
   spacer: 'lgd-spacer',
   /** The TRAILING view zone: the base pane's stand-in for Obsidian's scroll-past-end room. */
   endpad: 'lgd-endpad',
+  /** A NOTE block carrying our deletion-zone padding — its wash must not paint the zone. */
+  haspad: 'lgd-haspad',
   /** A section in the NOTE pane that we have tagged (every section, not just changed). */
   nblock: 'lgd-nblock',
   ins: 'lgd-ins',
@@ -26,6 +28,10 @@ export const CLS = {
   same: 'lgd-same',
   charIns: 'lgd-char-ins',
   charDel: 'lgd-char-del',
+  /** A 'mod' block whose changes are confined to table ROWS — wash the rows, not the slab. */
+  rowwise: 'lgd-rowwise',
+  /** A <tr> the diff touched. Only meaningful inside .lgd-rowwise. */
+  rowchanged: 'lgd-rowchanged',
 } as const;
 
 /** Row index stamped on both panes' elements, so lookups never rescan the row list. */

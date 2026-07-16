@@ -23,6 +23,18 @@
  * Side-by-side needs no third state anyway — the layout already says "this became that":
  * red on the left, green on the right.
  *
+ * THE ONE PLACE WE DEPART FROM GITHUB: the ALPHA of the two washes.
+ * GitHub's hues are theirs and unmodified; their opacity is not. Obsidian draws table cell
+ * borders as a 0.55px line in #e0e0e0 — barely visible on white, and GitHub's 50% wash
+ * swallows it whole, so a diffed table reads as one green slab with no grid. Their values
+ * are tuned for VS Code, where a table is ASCII inside a code font and has no borders to
+ * lose. Ours run at 35%: the same hue, quiet enough that the document's own structure
+ * still shows through it. The washes are custom properties, so anyone who wants GitHub's
+ * exact 0x80/0x66 back can type it into settings.
+ *
+ * The word marks share these variables, so lowering the alpha lowers BOTH coats — the
+ * one-color-painted-twice contrast is preserved, just gentler.
+ *
  * WHY LITERAL VALUES AND NOT OBSIDIAN'S THEME VARS:
  * an early version used var(--color-green) / var(--color-red) at 0.10 alpha and it read
  * as harsh — even though 0.10 is LIGHTER than GitHub's 0.30. The intensity was never
@@ -37,16 +49,16 @@
 
 /* --- light (GitHub Light Default, taken from github-vscode-theme) --- */
 body {
-  --lgd-ins-bg: #6fdd8b80;   /* insertedTextBackground */
-  --lgd-del-bg: #ff818266;   /* removedTextBackground  */
+  --lgd-ins-bg: #6fdd8b59;   /* insertedTextBackground, alpha lowered — see THE PALETTE */
+  --lgd-del-bg: #ff818259;   /* removedTextBackground,  alpha lowered — see THE PALETTE */
   --lgd-ins-rail: #4ac26b66; /* editorGutter.addedBackground   */
   --lgd-del-rail: #ff818266; /* editorGutter.deletedBackground */
 }
 
 /* --- dark (GitHub Dark Default) --- */
 body.theme-dark {
-  --lgd-ins-bg: #3fb9504d;
-  --lgd-del-bg: #ff7b724d;
+  --lgd-ins-bg: #3fb95036;   /* alpha lowered from 4d, same reason as light */
+  --lgd-del-bg: #ff7b7236;
   --lgd-ins-rail: #2ea04366;
   --lgd-del-rail: #f8514966;
 }
@@ -137,6 +149,46 @@ body.theme-dark {
 .lgd-nblock.lgd-mod { background-color: var(--lgd-ins-bg); } /* NEW side of a change */
 .lgd-block.lgd-mod  { background-color: var(--lgd-del-bg); } /* OLD side of a change */
 
+/* A note block carrying a DELETION ZONE — reserved space standing in for text that was
+   removed. Padding lives inside the border box, so a washed block would paint its wash
+   straight across the reservation: a green rectangle under a table, announcing "this is
+   new text" about space that stands in for DELETED text. Clip the wash to the content
+   box so the zone reads as what it is — empty room.
+
+   Only on blocks WE padded (styleDelPad toggles the class), never a blanket rule on
+   .lgd-nblock: content-box clipping every note block would also crop the wash by whatever
+   padding a THEME puts on a section, shrinking highlights for reasons that have nothing
+   to do with a zone. The rail is a ::before and is positioned independently, so it still
+   spans the block. */
+.lgd-nblock.lgd-haspad {
+  background-clip: content-box;
+}
+
+/* ------------------------------------------------------------------ *
+ * TABLES: WASH THE CHANGED ROWS, NOT THE SLAB.
+ *
+ * VS Code's shape, adopted because of what Obsidian's tables are made of: cell borders are
+ * a 0.55px line in #e0e0e0. Tint the whole table and every border dissolves into the wash —
+ * the diff becomes one colored rectangle and the table stops reading as a table, which is
+ * worse than no highlight at all. Coloring only the touched rows leaves every unchanged
+ * row on white, so the grid survives and the eye still lands on what changed.
+ *
+ * Which rows are "touched" is not a second diff: charmarks has already marked the changed
+ * WORDS, so a <tr> containing one of our spans is a row the diff touched. markTableRows
+ * reads that and tags the block .lgd-rowwise, which hands the wash down to the rows.
+ *
+ * A table whose marks are SUPPRESSED (>80% of words changed) gets no .lgd-rowwise and
+ * keeps the ordinary block wash — the honest fallback: at that point the whole table really
+ * did change, and the slab is telling the truth.
+ * ------------------------------------------------------------------ */
+.lgd-nblock.lgd-mod.lgd-rowwise,
+.lgd-block.lgd-mod.lgd-rowwise {
+  background-color: transparent;
+}
+
+.lgd-nblock.lgd-mod.lgd-rowwise tr.lgd-rowchanged { background-color: var(--lgd-ins-bg); }
+.lgd-block.lgd-mod.lgd-rowwise  tr.lgd-rowchanged { background-color: var(--lgd-del-bg); }
+
 /* ------------------------------------------------------------------ *
  * TWO STATES, NOT THREE — the rail always agrees with the wash it borders.
  *
@@ -203,11 +255,23 @@ body.theme-dark {
 
 /* ---- left (base) view ---- */
 
-.lgd-view {
+/* `.view-content.lgd-view`, not `.lgd-view`: this element carries BOTH classes, and
+   Obsidian's own `.view-content { padding: 12px 12px 32px }` ties on specificity (0,1,0)
+   and wins on order. Two classes (0,2,0) settles it without an !important. Verified: a
+   plain `.lgd-view { padding: 0 }` matched the element and still computed to 12px 12px
+   32px — the rule was there and losing, which is exactly the failure that looks like a
+   typo and isn't. */
+.view-content.lgd-view {
   display: flex;
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  /* Obsidian's own `.view-content` ships `padding: 12px 12px 32px`, and a markdown leaf's
+     reading view zeroes it. We carry the same class, so without this the base pane's text
+     column is 24px narrower than the note's — identical text then wraps at a different
+     width, produces different line counts, and every block below the anchor drifts. Same
+     failure as the max-width bug documented under .lgd-body, just quieter: 574px vs 584px. */
+  padding: 0;
 }
 
 .lgd-header {
@@ -365,10 +429,13 @@ body.theme-dark {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
-  /* Rail breathing room lives on the SCROLLER, never on the sizer: the sizer's
-     max-width is a fixed px value, so padding there would shrink the CONTENT box and
-     change where text wraps — which is exactly the bug the block below fixes. */
-  padding-left: 18px; /* room for the ::before rail that hangs 12px left */
+  /* NO padding override. This carried `padding-left: 18px` for "rail breathing room",
+     which quietly broke the one property this whole block exists to protect: the note's
+     `.markdown-preview-view` is a uniform `padding: var(--file-margins)` (32px), so an
+     18px left made the base's content box 14px WIDER while .view-content's 12px sides made
+     the pane 24px narrower — net 10px off, and identical text wrapped differently. The
+     rail needs 12px of clearance and --file-margins already gives 32px; it never needed
+     its own value. Measured after: both sizers 584px. */
 }
 
 /* Mirror Obsidian's own sizer instead of overriding it.

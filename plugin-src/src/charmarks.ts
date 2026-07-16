@@ -159,6 +159,33 @@ function inSkippedContext(node: Node, root: Element): boolean {
   return false;
 }
 
+/**
+ * Is this text node the formatting whitespace BETWEEN a table's cells?
+ *
+ * A `<tr>` is display:table-row, and CSS wraps any NON-CELL child of a table row in an
+ * ANONYMOUS TABLE CELL. So wrapping the newline that sits between two `<td>`s does not
+ * produce an invisible span — it produces an extra COLUMN, shoving every real cell in
+ * that row sideways. Only CHANGED rows get marks, so a table comes apart along exactly
+ * the rows the diff touched, which reads as "this plugin mangles tables".
+ *
+ * Observed on a 5-row table (2026-07-16): rows 0-2 `th,th,th` / `td,td,td`, while the two
+ * changed rows read `td,span,td,span,td,span` — three phantom columns each.
+ *
+ * The textContent invariant CANNOT catch this. Re-parenting whitespace into a span leaves
+ * el.textContent byte-identical, so the assertion passes while the layout is visibly
+ * wrong. This is a PLACEMENT bug, not a text bug, and it needs its own guard.
+ *
+ * Checks the IMMEDIATE parent, not the ancestor chain: text inside a `<td>` is real
+ * content and must stay markable — it is only text whose direct parent is table
+ * STRUCTURE that has nowhere legal to live.
+ */
+export function isTableStructureWhitespace(t: Text): boolean {
+  const p = t.parentElement;
+  if (!p) return false;
+  const tag = p.tagName;
+  return tag === 'TR' || tag === 'TABLE' || tag === 'THEAD' || tag === 'TBODY' || tag === 'TFOOT';
+}
+
 interface TextEntry {
   node: Text;
   start: number;
@@ -183,7 +210,14 @@ function collectTextNodes(root: Element): TextEntry[] {
   while ((n = walker.nextNode())) {
     const t = n as Text;
     const len = t.nodeValue ? t.nodeValue.length : 0;
-    out.push({ node: t, start: off, end: off + len, skip: inSkippedContext(t, root) });
+    // Skipped entries STAY in the list carrying their offsets — that is the whole point
+    // of the flag. Dropping them would shift every later range by their length.
+    out.push({
+      node: t,
+      start: off,
+      end: off + len,
+      skip: inSkippedContext(t, root) || isTableStructureWhitespace(t),
+    });
     off += len;
   }
   return out;
@@ -195,6 +229,12 @@ function collectTextNodes(root: Element): TextEntry[] {
  * structure, never characters, so the cumulative-offset walk is unaffected.
  */
 export function unwrapCharMarks(el: Element): number {
+  // Row washes are DERIVED from the marks, so they go when the marks go. Left behind, a
+  // recycled block would keep yesterday's rows colored with nothing explaining why.
+  (el as HTMLElement).removeClass(CLS.rowwise);
+  for (const tr of Array.from(el.querySelectorAll('tr.' + CLS.rowchanged))) {
+    (tr as HTMLElement).removeClass(CLS.rowchanged);
+  }
   const marks = el.querySelectorAll('[' + CHAR_MARK_ATTR + ']');
   for (const span of Array.from(marks)) {
     const parent = span.parentNode;
@@ -204,6 +244,37 @@ export function unwrapCharMarks(el: Element): number {
   }
   if (marks.length) el.normalize();
   return marks.length;
+}
+
+/**
+ * Wash a table's CHANGED ROWS instead of the whole block. VS Code's shape, and the reason
+ * is legibility rather than taste.
+ *
+ * Obsidian draws cell borders as a 0.55px line in #e0e0e0. Wash the whole table and every
+ * border in it disappears into the tint — the diff reads as one colored slab with no grid,
+ * which is worse than no highlight at all because the table stops being a table. VS Code
+ * never does this: it colors only the rows the diff touched, so every unchanged row keeps
+ * a white background and the grid survives.
+ *
+ * The signal is already in hand: apply() has just marked the changed WORDS, so a <tr> that
+ * contains one of our spans is a row the diff touched. No second diff, no row-pairing
+ * problem — the word ranges already answered it.
+ *
+ * @returns true if any row was marked, i.e. the caller should switch this block to
+ *          row-wise washing. False for a non-table block, or a table whose marks are
+ *          suppressed — both keep the ordinary block wash, which is the honest fallback:
+ *          "something in here changed" is still true, and still visible.
+ */
+function markTableRows(el: HTMLElement): boolean {
+  const tbl = el.querySelector('table');
+  if (!tbl) return false;
+  let any = false;
+  for (const tr of Array.from(tbl.querySelectorAll('tr'))) {
+    const changed = !!tr.querySelector('[' + CHAR_MARK_ATTR + ']');
+    tr.toggleClass(CLS.rowchanged, changed);
+    if (changed) any = true;
+  }
+  return any;
 }
 
 /**
@@ -379,6 +450,11 @@ export class CharMarkLayer {
     unwrapCharMarks(noteEl);
     const madeB = wrapRanges(noteEl, ranges.b, CLS.charIns);
     if (madeB < 0) this.revertCount++;
+
+    // TABLES: hand the wash to the changed rows. Both sides, independently — a row can be
+    // touched on one side and not the other. See markTableRows.
+    baseEl.toggleClass(CLS.rowwise, markTableRows(baseEl));
+    noteEl.toggleClass(CLS.rowwise, markTableRows(noteEl));
   }
 
   /** Diagnostic snapshot for the alignment report. */
