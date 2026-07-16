@@ -43,7 +43,7 @@ import { GitBaseView, VIEW_TYPE } from './baseView.ts';
 import { GitError, commitInfoFor, fileLog, readBaseAt, resolveGit, resolveRef } from './git.ts';
 import type { CommitInfo, GitContext } from './git.ts';
 import { CommitPickerModal } from './refPicker.ts';
-import { ATTR_ROW, CLS } from './panes.ts';
+import { ATTR_ROW, CLS, setNoteKind } from './panes.ts';
 import type { BasePaneLike, NotePane } from './panes.ts';
 import { buildSession, errorSession } from './session.ts';
 import type { BasePin, Row, Session } from './session.ts';
@@ -205,17 +205,25 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
         if (row) this.zones.styleDelPad(el);
 
         const kind = row ? row.kind : this.kindForRange(session, info.lineStart, info.lineEnd);
+
+        // SET the kind, never accumulate it: this element may still be wearing the
+        // previous session's wash, and only a removal can take it off. See setNoteKind.
+        setNoteKind(el, kind);
+
         if (kind === 'ins') {
-          el.addClass(CLS.ins);
           // INSERTION VIEW ZONE HEIGHT TAP — the one moment we are guaranteed to hold an
           // 'ins' block's element. See ViewZones.harvestInsHeight.
           if (row) this.zones.harvestInsHeight(row, el);
         } else if (kind === 'mod') {
-          el.addClass(CLS.mod);
           // WORD-LEVEL MARKS. Here, not at base-render time, because this is the first
           // moment both rendered texts exist. Re-runs on every recycle and is idempotent
           // (it unwraps its own spans first).
           if (row) this.charMarks.apply(row, el);
+        } else {
+          // Same reason as the wash above: a block that was 'mod' last session keeps its
+          // word-marks otherwise, since charMarks.apply — the only thing that unwraps
+          // them — no longer runs for this block.
+          unwrapCharMarks(el);
         }
       } catch (e) {
         // A post-processor that throws breaks the whole preview render. Never.
@@ -528,6 +536,11 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
       this.zones.reset();
       this.charMarks.reset();
       this.warnedNoScroller = false;
+      // The PREVIOUS session's paint is still on the note's recycled sections. The
+      // post-processor now self-heals each one, but only when it actually re-renders —
+      // so scrub first rather than trusting every off-screen block to come back through
+      // that hook before the reader sees it.
+      this.clearNoteDecorations();
 
       // The empty diff is the confusing case, so it gets its own sentence rather than
       // "0 changed block(s)" — which looks like the plugin failed. It is instead a
@@ -605,6 +618,8 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
         el.style.paddingBottom = '';
         el.style.paddingTop = '';
         unwrapCharMarks(el);
+        setNoteKind(el, null);
+        el.removeClass(CLS.nblock);
       }
     }
   }

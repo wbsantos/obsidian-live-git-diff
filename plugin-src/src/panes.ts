@@ -29,6 +29,36 @@ export const CLS = {
 /** Row index stamped on both panes' elements, so lookups never rescan the row list. */
 export const ATTR_ROW = 'data-row-index';
 
+/**
+ * The kind classes we own on a NOTE-pane section. Deletions never appear here — they are
+ * view zones, not blocks — so a note block is only ever 'ins', 'mod', or unmarked.
+ */
+export const NOTE_KIND_CLASSES: readonly string[] = [CLS.ins, CLS.mod];
+
+/** The DOM surface setNoteKind touches, narrowed so it is testable without a jsdom. */
+interface ClassTarget {
+  classList: { add(c: string): void; remove(c: string): void };
+}
+
+/**
+ * Put a note block in EXACTLY the kind this session says — never merely add to it.
+ *
+ * Reading-view sections are recycled, not rebuilt, so an element can arrive still wearing
+ * the PREVIOUS review's wash. A conditional `addClass` can only ever put paint on; nothing
+ * takes it off. Re-pinning onto a base with fewer changes therefore left every stale 'ins'
+ * block green underneath a header that correctly read "0 changed" — a diff that no longer
+ * existed, rendered convincingly (bug, 2026-07-15).
+ *
+ * Removing before adding is what makes this a SET rather than an accumulate. It touches
+ * only the two classes we own, so side-comments' marks and Obsidian's own classes on the
+ * same element are left alone.
+ */
+export function setNoteKind(el: ClassTarget, kind: string | null): void {
+  for (const c of NOTE_KIND_CLASSES) el.classList.remove(c);
+  if (kind === 'ins') el.classList.add(CLS.ins);
+  else if (kind === 'mod') el.classList.add(CLS.mod);
+}
+
 /** The base pane's view, reduced to what the other modules actually touch. */
 export interface BasePaneLike {
   /** The scrolling element of this pane. Recreated on every render. */

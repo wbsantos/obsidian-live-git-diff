@@ -239,6 +239,12 @@ var CLS = {
   charDel: "lgd-char-del"
 };
 var ATTR_ROW = "data-row-index";
+var NOTE_KIND_CLASSES = [CLS.ins, CLS.mod];
+function setNoteKind(el, kind) {
+  for (const c of NOTE_KIND_CLASSES) el.classList.remove(c);
+  if (kind === "ins") el.classList.add(CLS.ins);
+  else if (kind === "mod") el.classList.add(CLS.mod);
+}
 
 // src/log.ts
 var PREFIX = "[live-git-diff]";
@@ -1525,7 +1531,7 @@ var ViewZones = class {
 // src/settings.ts
 var import_obsidian3 = require("obsidian");
 var DEFAULT_SETTINGS = {
-  colors: { insBg: "", delBg: "", insRail: "", delRail: "", modRail: "" },
+  colors: { insBg: "", delBg: "", insRail: "", delRail: "" },
   baseRefMode: "head",
   baseRef: "main",
   logLimit: 50,
@@ -1535,15 +1541,13 @@ var CSS_VAR = {
   insBg: "--lgd-ins-bg",
   delBg: "--lgd-del-bg",
   insRail: "--lgd-ins-rail",
-  delRail: "--lgd-del-rail",
-  modRail: "--lgd-mod-rail"
+  delRail: "--lgd-del-rail"
 };
 var LIGHT_DEFAULT = {
   insBg: "#6fdd8b80",
   delBg: "#ff818266",
   insRail: "#4ac26b66",
-  delRail: "#ff818266",
-  modRail: "#d4a72c66"
+  delRail: "#ff818266"
 };
 var FIELD_LABEL = {
   insBg: {
@@ -1555,8 +1559,7 @@ var FIELD_LABEL = {
     desc: "Wash behind removed blocks, and behind the OLD side of a changed block, in the base pane."
   },
   insRail: { name: "Rail \u2014 added", desc: "The 4px bar beside a wholly new block." },
-  delRail: { name: "Rail \u2014 removed", desc: "The 4px bar beside a wholly removed block." },
-  modRail: { name: "Rail \u2014 changed", desc: 'The 4px bar beside a changed block: "this replaced something".' }
+  delRail: { name: "Rail \u2014 removed", desc: "The 4px bar beside a wholly removed block." }
 };
 function isValidColor(v) {
   const s = String(v || "").trim();
@@ -1781,12 +1784,13 @@ var LiveGitDiffPlugin = class extends import_obsidian4.Plugin {
         if (row) el.setAttr(ATTR_ROW, String(row.idx));
         if (row) this.zones.styleDelPad(el);
         const kind = row ? row.kind : this.kindForRange(session, info.lineStart, info.lineEnd);
+        setNoteKind(el, kind);
         if (kind === "ins") {
-          el.addClass(CLS.ins);
           if (row) this.zones.harvestInsHeight(row, el);
         } else if (kind === "mod") {
-          el.addClass(CLS.mod);
           if (row) this.charMarks.apply(row, el);
+        } else {
+          unwrapCharMarks(el);
         }
       } catch (e) {
         error("post-processor error", e);
@@ -2043,6 +2047,7 @@ ${e.message}`;
       this.zones.reset();
       this.charMarks.reset();
       this.warnedNoScroller = false;
+      this.clearNoteDecorations();
       if (this.session.counts.changed === 0) {
         new import_obsidian4.Notice(
           `No changes against ${base.label} (${this.session.shortSha}).` + (base.label === "HEAD" ? ' Your work is committed \u2014 use "Open review against a version\u2026" to pick an earlier one.' : ""),
@@ -2098,6 +2103,8 @@ ${e.message}`;
         el.style.paddingBottom = "";
         el.style.paddingTop = "";
         unwrapCharMarks(el);
+        setNoteKind(el, null);
+        el.removeClass(CLS.nblock);
       }
     }
   }

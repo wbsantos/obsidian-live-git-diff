@@ -37,8 +37,6 @@ export interface DiffColors {
   insRail: string;
   /** Rail beside a wholly deleted block. */
   delRail: string;
-  /** Rail beside a modified block — "this replaced something". */
-  modRail: string;
 }
 
 /**
@@ -73,7 +71,7 @@ export interface LiveGitDiffSettings {
 }
 
 export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
-  colors: { insBg: '', delBg: '', insRail: '', delRail: '', modRail: '' },
+  colors: { insBg: '', delBg: '', insRail: '', delRail: '' },
   baseRefMode: 'head',
   baseRef: 'main',
   logLimit: 50,
@@ -86,7 +84,6 @@ const CSS_VAR: Record<keyof DiffColors, string> = {
   delBg: '--lgd-del-bg',
   insRail: '--lgd-ins-rail',
   delRail: '--lgd-del-rail',
-  modRail: '--lgd-mod-rail',
 };
 
 /** Built-in light-theme values, shown as the placeholder so the field is discoverable. */
@@ -95,7 +92,6 @@ const LIGHT_DEFAULT: DiffColors = {
   delBg: '#ff818266',
   insRail: '#4ac26b66',
   delRail: '#ff818266',
-  modRail: '#d4a72c66',
 };
 
 const FIELD_LABEL: Record<keyof DiffColors, { name: string; desc: string }> = {
@@ -109,7 +105,6 @@ const FIELD_LABEL: Record<keyof DiffColors, { name: string; desc: string }> = {
   },
   insRail: { name: 'Rail — added', desc: 'The 4px bar beside a wholly new block.' },
   delRail: { name: 'Rail — removed', desc: 'The 4px bar beside a wholly removed block.' },
-  modRail: { name: 'Rail — changed', desc: 'The 4px bar beside a changed block: "this replaced something".' },
 };
 
 /**

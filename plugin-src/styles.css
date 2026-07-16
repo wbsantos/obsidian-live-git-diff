@@ -5,25 +5,23 @@
    because they store SOURCE-TEXT offsets and resolve them by walking text nodes. */
 
 /* ------------------------------------------------------------------ *
- * THE PALETTE — five colors, and why exactly five.
+ * THE PALETTE — four colors, and why exactly four.
  *
- * VS Code's scheme, adopted verbatim (verified by grepping its own
- * markdown-language-features/media/markdown.css):
+ * Modelled on VS Code's rendered-markdown diff, verified by grepping its own
+ * markdown-language-features/media/markdown.css (see "TWO STATES, NOT THREE" below for
+ * the verbatim rules and for where we deliberately part company):
  *
- *   BACKGROUND answers "is this the new text?"   green = new, red = old
- *   RAIL       answers "where did it come from?" a distinct bar = replaced something
+ *   WASH answers "is this the new text?"  green = new, red = old
+ *   RAIL is the same answer in the margin, a shade darker, so a page can be SCANNED for
+ *        changes without reading it. It is not a third signal.
  *
- * VS Code uses NO yellow anywhere. Its only 'modified' color is
- * --vscode-editorGutter-modifiedBackground, and its rule
- *   .code-line-diff-modified.code-line-diff-added { box-shadow:none }
- * shows the design: a modified line IS the 'added' (green) wash; the 'modified' class
- * merely drops the green rail so the other bar can show.
+ * VS Code uses NO yellow anywhere in this surface, and neither do we. An earlier draft
+ * gave 'mod' blocks an amber wash and then, after that was deleted, an amber RAIL — a
+ * third state that collided with annotation plugins' own yellow highlight, so yellow
+ * meant two things on screen at once. Both are gone: yellow now means ONLY "annotated".
  *
- * An earlier draft washed 'mod' blocks amber on BOTH sides — a third state VS Code
- * doesn't have, and it collided with annotation plugins' own yellow highlight, so
- * yellow meant two things on screen. Deleting the state fixed that for free: yellow
- * now means ONLY "annotated". Side-by-side needs no third color anyway — the layout
- * already says "this became that": red on the left, green on the right.
+ * Side-by-side needs no third state anyway — the layout already says "this became that":
+ * red on the left, green on the right.
  *
  * WHY LITERAL VALUES AND NOT OBSIDIAN'S THEME VARS:
  * an early version used var(--color-green) / var(--color-red) at 0.10 alpha and it read
@@ -41,9 +39,8 @@
 body {
   --lgd-ins-bg: #6fdd8b80;   /* insertedTextBackground */
   --lgd-del-bg: #ff818266;   /* removedTextBackground  */
-  --lgd-ins-rail: #4ac26b66; /* editorGutter.addedBackground */
-  --lgd-del-rail: #ff818266; /* editorGutter.deletedBackground */
-  --lgd-mod-rail: #d4a72c66; /* editorGutter.modifiedBackground */
+  --lgd-ins-rail: #4ac26b66; /* editorGutter.addedBackground   — darker than its wash */
+  --lgd-del-rail: #f8514966; /* editorGutter.deletedBackground — darker than its wash */
 }
 
 /* --- dark (GitHub Dark Default) --- */
@@ -52,7 +49,6 @@ body.theme-dark {
   --lgd-del-bg: #ff7b724d;
   --lgd-ins-rail: #2ea04366;
   --lgd-del-rail: #f8514966;
-  --lgd-mod-rail: #bb800966;
 }
 
 /* ------------------------------------------------------------------ *
@@ -90,11 +86,21 @@ body.theme-dark {
 /* ------------------------------------------------------------------ *
  * ONE COLOR, PAINTED TWICE.
  *
- * VS Code's rendered-markdown diff has NO word-level classes at all — grep its
- * markdown.css and you find only .code-line-diff{,-added,-deleted,-modified}. It gets
- * darker words by putting the SAME class on the changed word spans as on the line: the
- * word receives a second coat of the same translucent color and alpha compositing does
- * the work. That is why five colors reach every pixel of this diff.
+ * The darker changed WORDS sitting on a lighter changed LINE are not a fifth and sixth
+ * color. They are the same two, applied a second time: a translucent wash over a
+ * translucent wash, with alpha compositing doing the work. Four colors therefore reach
+ * every pixel of this diff.
+ *
+ * This is VS Code's trick, and it does it with the CSS Custom Highlight API rather than
+ * spans — but note WHICH color it reaches for, which is the whole point:
+ *
+ *   .code-line-diff-added      { background-color: var(--vscode-diffEditor-insertedTextBackground) }
+ *   ::highlight(diff-inner-added) { background-color: var(--vscode-diffEditor-insertedTextBackground) }
+ *
+ * The same token, twice. We use spans because ::highlight() needs live Ranges into text
+ * nodes that Obsidian's virtualised reading view destroys and rebuilds under us, whereas
+ * a span rides along with the section it lives in. See charmarks.ts for the textContent
+ * invariant that keeps those spans from breaking annotation anchors.
  *
  * Note it uses *TextBackground* for the LINE, not *LineBackground*:
  *   .code-line-diff-deleted { background-color: var(--vscode-diffEditor-removedTextBackground) }
@@ -109,10 +115,50 @@ body.theme-dark {
 .lgd-nblock.lgd-mod { background-color: var(--lgd-ins-bg); } /* NEW side of a change */
 .lgd-block.lgd-mod  { background-color: var(--lgd-del-bg); } /* OLD side of a change */
 
-/* the rails */
+/* ------------------------------------------------------------------ *
+ * TWO STATES, NOT THREE — the rail always agrees with the wash it borders.
+ *
+ * VS Code's rendered-markdown diff (markdown-language-features/media/markdown.css — the
+ * closest thing to this surface that ships anywhere) never gives 'modified' a color of
+ * its own. The class exists but only ever lands COMBINED with -added:
+ *
+ *   .code-line-diff-added    { background-color: var(--vscode-diffEditor-insertedTextBackground);
+ *                              box-shadow: -4px 0 0 var(--vscode-diffEditorGutter-insertedLineBackground); }
+ *   .code-line-diff-modified.code-line-diff-added { box-shadow: none; }
+ *
+ * A modified block IS an added block. There is no third hue anywhere in the file.
+ *
+ * An earlier version railed 'mod' in amber, citing editorGutter.modifiedBackground. Wrong
+ * twice over: editorGutter.* is the SCM dirty-diff gutter of a NORMAL editor, answering
+ * "what have I not committed?" — a different question on a different surface — and its real
+ * value is BLUE (#0078D4 dark / #005FB8 light), never amber. It left blocks washed green
+ * under a rail claiming a third state, and it spent the one color Obsidian's annotation
+ * plugins highlight with. Amber now means exactly one thing here: someone left a comment.
+ *
+ * WHERE WE INTENTIONALLY DIVERGE: VS Code kills the rail on a modified block and puts a
+ * 2px dashed RED bar after it instead (.diff-change-indicator-modification), because its
+ * markdown diff is SINGLE-PANE — the removed text is nowhere on screen and needs a
+ * stand-in. We are two-pane: the old text is literally in the pane to the left. That
+ * marker solves a problem we do not have, so 'mod' keeps a rail, and the rail takes the
+ * color of the side it is on — green where the new text is, red where the old text is.
+ *
+ * A rail must also be DARKER than the wash it borders, or it is not a rail — it is just
+ * 12px more wash. The light palette originally took #ff818266 for both the deleted rail
+ * and the deleted wash (GitHub's own two tokens happen to collide there), so the base
+ * pane's rail was invisible while the note pane's read fine — the asymmetry the dark
+ * palette had already avoided by railing in #f85149. Both panes now rail a shade down
+ * from their wash.
+ *
+ * Our rail VALUES are GitHub's editorGutter.{added,deleted}Background rather than the
+ * diffEditorGutter.* family markdown.css rails from, because the workbench registers
+ * diffEditorGutter.insertedLineBackground with a default of NULL: unless a theme sets it,
+ * VS Code's own rail paints nothing at all. Ours is a deliberate improvement on that, not
+ * a copy of it.
+ * ------------------------------------------------------------------ */
 .lgd-ins::before { background: var(--lgd-ins-rail); }
 .lgd-del::before { background: var(--lgd-del-rail); }
-.lgd-mod::before { background: var(--lgd-mod-rail); }
+.lgd-nblock.lgd-mod::before { background: var(--lgd-ins-rail); } /* NEW side = added   */
+.lgd-block.lgd-mod::before  { background: var(--lgd-del-rail); } /* OLD side = removed */
 
 /* the second coat — same color as the line it sits on */
 .lgd-char-ins { background-color: var(--lgd-ins-bg); }
