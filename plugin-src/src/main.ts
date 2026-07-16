@@ -170,6 +170,21 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
       },
     });
 
+    // INTERIM: re-render the note pane so a third-party annotation plugin (side-comments,
+    // etc.) re-applies its reading-view marks. Opening a review can fire our rerender
+    // before such a plugin has finished loading its sidecar asynchronously, so its marks
+    // don't paint until something re-runs the post-processors. This command is that
+    // "something" until the timing is handled automatically. Bindable to a hotkey.
+    this.addCommand({
+      id: 'refresh-annotations',
+      name: 'Refresh annotations in the note pane',
+      checkCallback: (checking: boolean) => {
+        if (!this.session || this.session.error) return false;
+        if (!checking) this.rerenderPreviews();
+        return true;
+      },
+    });
+
     // NOTE pane decoration. Classes only — never text.
     this.registerMarkdownPostProcessor((el, ctx) => {
       try {

@@ -1891,6 +1891,15 @@ var LiveGitDiffPlugin = class extends import_obsidian4.Plugin {
         return true;
       }
     });
+    this.addCommand({
+      id: "refresh-annotations",
+      name: "Refresh annotations in the note pane",
+      checkCallback: (checking) => {
+        if (!this.session || this.session.error) return false;
+        if (!checking) this.rerenderPreviews();
+        return true;
+      }
+    });
     this.registerMarkdownPostProcessor((el, ctx) => {
       try {
         const session = this.session;
