@@ -93,7 +93,10 @@ if (!cache) return JSON.stringify({ error: 'no-cache' });
 return JSON.stringify({
   path: f.path,
   text,
-  apiVersion: (window.require ? require('obsidian').apiVersion : null),
+  // 'obsidian' is only require()-able from inside a plugin's module scope, not the
+  // renderer root where this evaluates — so probe it, and let the caller fall back to
+  // the version in the window title.
+  apiVersion: (() => { try { return window.require('obsidian').apiVersion; } catch { return null; } })(),
   sections: (cache.sections || []).map(s => ({
     type: s.type,
     startLine: s.position.start.line,
@@ -137,6 +140,11 @@ if (msg.result?.exceptionDetails) {
 }
 
 const payload = JSON.parse(msg.result.result.value);
+// Renderer-side require('obsidian') is unavailable outside plugin scope; the window
+// title ("<note> - <vault> - Obsidian 1.12.7") carries the app version instead.
+if (!payload.apiVersion) {
+  payload.apiVersion = ((target.title || '').match(/Obsidian ([\d.]+)/) || [])[1] || null;
+}
 if (payload.error === 'not-found') {
   console.error(`No file ${JSON.stringify(FILE)} in that vault. Copy the corpus in first. Markdown files there:`);
   for (const p of payload.files) console.error('  -', p);

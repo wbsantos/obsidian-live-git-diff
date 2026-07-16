@@ -1,0 +1,255 @@
+{
+  "_comment": [
+    "Obsidian's OWN sectioning of test/fixtures/corpus-head.md, used as the grain oracle.",
+    "Captured by tools/capture-sections.mjs from a running Obsidian over CDP.",
+    "Regenerate with: npm run capture-oracle -- --window \"<vault>\" --file \"corpus-head.md\"",
+    "sourceSha256 must match the local corpus, or the oracle is stale and the test fails."
+  ],
+  "capturedAt": "2026-07-16T04:19:19.323Z",
+  "obsidianApiVersion": "1.12.7",
+  "sourceFile": "test/fixtures/corpus-head.md",
+  "sourceSha256": "e638c5862a358211178c60e8a2f155f787a2f7f0401a2cb4284a7b480b3c6909",
+  "sectionCount": 48,
+  "sections": [
+    {
+      "type": "heading",
+      "startLine": 0,
+      "endLine": 0
+    },
+    {
+      "type": "paragraph",
+      "startLine": 2,
+      "endLine": 3
+    },
+    {
+      "type": "thematicBreak",
+      "startLine": 5,
+      "endLine": 5
+    },
+    {
+      "type": "heading",
+      "startLine": 7,
+      "endLine": 7
+    },
+    {
+      "type": "paragraph",
+      "startLine": 9,
+      "endLine": 11
+    },
+    {
+      "type": "paragraph",
+      "startLine": 13,
+      "endLine": 13
+    },
+    {
+      "type": "list",
+      "startLine": 15,
+      "endLine": 17
+    },
+    {
+      "type": "paragraph",
+      "startLine": 19,
+      "endLine": 19
+    },
+    {
+      "type": "paragraph",
+      "startLine": 21,
+      "endLine": 22
+    },
+    {
+      "type": "heading",
+      "startLine": 24,
+      "endLine": 24
+    },
+    {
+      "type": "paragraph",
+      "startLine": 26,
+      "endLine": 28
+    },
+    {
+      "type": "paragraph",
+      "startLine": 30,
+      "endLine": 30
+    },
+    {
+      "type": "heading",
+      "startLine": 32,
+      "endLine": 32
+    },
+    {
+      "type": "paragraph",
+      "startLine": 34,
+      "endLine": 36
+    },
+    {
+      "type": "paragraph",
+      "startLine": 38,
+      "endLine": 38
+    },
+    {
+      "type": "heading",
+      "startLine": 40,
+      "endLine": 40
+    },
+    {
+      "type": "table",
+      "startLine": 42,
+      "endLine": 47
+    },
+    {
+      "type": "paragraph",
+      "startLine": 49,
+      "endLine": 50
+    },
+    {
+      "type": "heading",
+      "startLine": 52,
+      "endLine": 52
+    },
+    {
+      "type": "heading",
+      "startLine": 54,
+      "endLine": 54
+    },
+    {
+      "type": "paragraph",
+      "startLine": 56,
+      "endLine": 57
+    },
+    {
+      "type": "paragraph",
+      "startLine": 59,
+      "endLine": 60
+    },
+    {
+      "type": "heading",
+      "startLine": 62,
+      "endLine": 62
+    },
+    {
+      "type": "paragraph",
+      "startLine": 64,
+      "endLine": 65
+    },
+    {
+      "type": "paragraph",
+      "startLine": 67,
+      "endLine": 68
+    },
+    {
+      "type": "heading",
+      "startLine": 70,
+      "endLine": 70
+    },
+    {
+      "type": "paragraph",
+      "startLine": 72,
+      "endLine": 72
+    },
+    {
+      "type": "code",
+      "startLine": 74,
+      "endLine": 80
+    },
+    {
+      "type": "heading",
+      "startLine": 82,
+      "endLine": 82
+    },
+    {
+      "type": "paragraph",
+      "startLine": 84,
+      "endLine": 86
+    },
+    {
+      "type": "heading",
+      "startLine": 88,
+      "endLine": 88
+    },
+    {
+      "type": "paragraph",
+      "startLine": 90,
+      "endLine": 91
+    },
+    {
+      "type": "list",
+      "startLine": 93,
+      "endLine": 96
+    },
+    {
+      "type": "paragraph",
+      "startLine": 98,
+      "endLine": 98
+    },
+    {
+      "type": "heading",
+      "startLine": 100,
+      "endLine": 100
+    },
+    {
+      "type": "paragraph",
+      "startLine": 102,
+      "endLine": 102
+    },
+    {
+      "type": "list",
+      "startLine": 103,
+      "endLine": 105
+    },
+    {
+      "type": "paragraph",
+      "startLine": 107,
+      "endLine": 107
+    },
+    {
+      "type": "list",
+      "startLine": 108,
+      "endLine": 110
+    },
+    {
+      "type": "heading",
+      "startLine": 112,
+      "endLine": 112
+    },
+    {
+      "type": "paragraph",
+      "startLine": 114,
+      "endLine": 116
+    },
+    {
+      "type": "paragraph",
+      "startLine": 118,
+      "endLine": 118
+    },
+    {
+      "type": "heading",
+      "startLine": 120,
+      "endLine": 120
+    },
+    {
+      "type": "paragraph",
+      "startLine": 122,
+      "endLine": 123
+    },
+    {
+      "type": "paragraph",
+      "startLine": 125,
+      "endLine": 125
+    },
+    {
+      "type": "heading",
+      "startLine": 127,
+      "endLine": 127
+    },
+    {
+      "type": "paragraph",
+      "startLine": 129,
+      "endLine": 129
+    },
+    {
+      "type": "table",
+      "startLine": 131,
+      "endLine": 135
+    }
+  ]
+}
