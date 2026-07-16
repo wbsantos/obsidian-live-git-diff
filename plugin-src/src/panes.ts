@@ -16,6 +16,8 @@ export const CLS = {
   block: 'lgd-block',
   /** A view zone in the BASE pane, standing in for an 'ins' row. */
   spacer: 'lgd-spacer',
+  /** The TRAILING view zone: the base pane's stand-in for Obsidian's scroll-past-end room. */
+  endpad: 'lgd-endpad',
   /** A section in the NOTE pane that we have tagged (every section, not just changed). */
   nblock: 'lgd-nblock',
   ins: 'lgd-ins',
@@ -67,6 +69,8 @@ export interface BasePaneLike {
   blockEls: Map<number, HTMLElement>;
   /** row.idx -> the VIEW ZONE standing in for an 'ins' row. */
   spacerEls: Map<number, HTMLElement>;
+  /** The trailing view zone. Null before the first render. See ViewZones.styleEndPad. */
+  endPadEl: HTMLElement | null;
 }
 
 /** A markdown view, reduced to the scroll APIs we feature-detect. */

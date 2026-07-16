@@ -198,7 +198,17 @@ export class ViewZones {
    */
   refresh(force?: boolean): boolean {
     const changed = this.measureRenderedInsHeights();
-    if (changed) this.applySpacerHeights();
+    // ALWAYS push, never `if (changed)`. `changed` says the CACHE moved — it says nothing
+    // about whether the DOM agrees with it, and after a base re-render it does not:
+    // openReview calls zones.reset() BEFORE render(), so every spacer is built at 0px;
+    // the note's post-processor then harvests the real height straight into the cache and
+    // schedules this refresh; measureRenderedInsHeights re-measures, finds the cache
+    // ALREADY correct, and returns false — so the push was skipped and the spacers stayed
+    // at 0px permanently, with stats() cheerfully reporting the reserved height it had
+    // never applied. Measured: 120px of insertion zones known and unapplied on a 21-block
+    // diff. applySpacerHeights compares before assigning, so an unconditional call is
+    // free when there is nothing to do.
+    this.applySpacerHeights();
     if (changed || force) {
       // Del-run heights are read from base blocks, whose layout step 2 may have moved.
       // Re-summing is what keeps deletion zones true after a wrap change; it is a walk
@@ -206,7 +216,53 @@ export class ViewZones {
       this.computeDelPads();
       this.applyDelPads();
     }
+    // Last: this one reads the base's TOTAL height, which the two above just changed.
+    this.styleEndPad();
     return changed;
+  }
+
+  /**
+   * THE TRAILING ZONE — give the base pane the same scroll RANGE as the note.
+   *
+   * The two zones above keep the panes level through the document. This one keeps them
+   * level at the END, and it exists because the panes are not symmetric: Obsidian hands
+   * its own reading view scroll-past-the-end room (a min-height and a padding-bottom on
+   * the sizer, both sized off the viewport), and this pane is ours, so it gets none. The
+   * note can therefore always scroll further than the base. Sync asks for a scrollTop
+   * the base cannot reach, the base pins at its ceiling, and every block below drifts by
+   * the shortfall — the anchor quietly stops being true while sync reports itself on.
+   *
+   * It is worst exactly where it looks least likely: a SHORT note. There the end padding
+   * is most of the note's range, and the base's real content barely exceeds its own
+   * viewport, so the ceiling arrives almost at once. Measured on a 21-block demo: the
+   * note at 1100 of 1469 while the base sat pinned at 558 of 558, anchor 337px out. On a
+   * long document the same defect costs only a few hundred px at the very bottom, which
+   * is how it survived a 94-change diff unnoticed.
+   *
+   * The rule is one line: make the base's max scrollTop equal the note's. Then anything
+   * the note can be scrolled to, the base can follow to.
+   *
+   * The pad is measured out of the CONTENT height (total minus the pad's own height)
+   * rather than nudged incrementally, so it is an output and never an input — it cannot
+   * feed back on itself however often this runs.
+   */
+  styleEndPad(): void {
+    const view = this.host.baseView();
+    const base = this.host.basePane();
+    const note = this.host.notePane();
+    if (!view || !view.endPadEl || !base || !note) return;
+
+    const pad = view.endPadEl;
+    const contentPx = base.scrollHeight - pad.getBoundingClientRect().height;
+    const noteRange = note.scroller.scrollHeight - note.scroller.clientHeight;
+    // scrollHeight = contentPx + pad  =>  maxScroll = contentPx + pad - clientHeight.
+    // Solving maxScroll = noteRange gives:
+    const want = Math.max(0, Math.round(noteRange + base.clientHeight - contentPx));
+
+    const px = want + 'px';
+    // Compare before assigning: an identical write still dirties layout, and this runs
+    // on every debounced refresh.
+    if (pad.style.height !== px) pad.style.height = px;
   }
 
   /**

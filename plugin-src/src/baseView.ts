@@ -29,6 +29,9 @@ export class GitBaseView extends ItemView {
 
   /** The scrolling element of this pane (`.lgd-body`). Recreated on every render. */
   bodyEl: HTMLElement | null = null;
+
+  /** The trailing view zone. See its creation site in render(). */
+  endPadEl: HTMLElement | null = null;
   /** row.idx -> its block container in this pane. */
   blockEls: Map<number, HTMLElement> = new Map();
   /**
@@ -69,6 +72,7 @@ export class GitBaseView extends ItemView {
     // Stale after empty() — rebuilt below, and the plugin re-attaches its scroll
     // listener to the NEW body element once this returns.
     this.bodyEl = null;
+    this.endPadEl = null;
     this.blockEls = new Map();
     this.spacerEls = new Map();
 
@@ -142,41 +146,58 @@ export class GitBaseView extends ItemView {
     // re-deriving the typography ourselves.
     const sizer = body.createDiv({ cls: 'markdown-preview-sizer markdown-preview-section' });
 
-    // Render the BASE version block by block. Because we did the splitting, we own the
-    // line map on this side — no getSectionInfo needed here.
-    for (const row of session.rows) {
-      if (!row.a) {
-        // VIEW ZONE (VS Code's term). An 'ins' row exists only in the note, so the base
-        // pane is SHORTER than the note by that block's height and every paired block
-        // below the run lands too high. We own this DOM, so we can reserve the missing
-        // height with an empty element — the trick the note pane denies us (its sizer
-        // calls setChildrenInPlace() every scroll tick and rips injections out). Height
-        // comes from the note-side counterpart, measured lazily and cached, because the
-        // reading view may not have rendered it yet; until it is known the zone is 0px,
-        // i.e. exactly the behaviour we'd have without it. One zone PER ROW (not per
-        // run) so partial knowledge of a run still narrows the error.
-        const sp = sizer.createDiv({ cls: CLS.spacer });
-        sp.setAttr(ATTR_ROW, String(row.idx));
-        sp.style.height = this.host.zones.insHeight(row.idx) + 'px';
-        this.spacerEls.set(row.idx, sp);
-        continue;
-      }
-      const el = sizer.createDiv({ cls: CLS.block });
-      el.setAttr('data-line-start', String(row.a.lineStart));
-      el.setAttr('data-line-end', String(row.a.lineEnd));
-      el.setAttr(ATTR_ROW, String(row.idx));
-      this.blockEls.set(row.idx, el);
-      if (row.kind === 'del') el.addClass(CLS.del);
-      else if (row.kind === 'mod') el.addClass(CLS.mod);
-      else el.addClass(CLS.same);
+    try {
+      // Render the BASE version block by block. Because we did the splitting, we own the
+      // line map on this side — no getSectionInfo needed here.
+      for (const row of session.rows) {
+        if (!row.a) {
+          // VIEW ZONE (VS Code's term). An 'ins' row exists only in the note, so the base
+          // pane is SHORTER than the note by that block's height and every paired block
+          // below the run lands too high. We own this DOM, so we can reserve the missing
+          // height with an empty element — the trick the note pane denies us (its sizer
+          // calls setChildrenInPlace() every scroll tick and rips injections out). Height
+          // comes from the note-side counterpart, measured lazily and cached, because the
+          // reading view may not have rendered it yet; until it is known the zone is 0px,
+          // i.e. exactly the behaviour we'd have without it. One zone PER ROW (not per
+          // run) so partial knowledge of a run still narrows the error.
+          const sp = sizer.createDiv({ cls: CLS.spacer });
+          sp.setAttr(ATTR_ROW, String(row.idx));
+          sp.style.height = this.host.zones.insHeight(row.idx) + 'px';
+          this.spacerEls.set(row.idx, sp);
+          continue;
+        }
+        const el = sizer.createDiv({ cls: CLS.block });
+        el.setAttr('data-line-start', String(row.a.lineStart));
+        el.setAttr('data-line-end', String(row.a.lineEnd));
+        el.setAttr(ATTR_ROW, String(row.idx));
+        this.blockEls.set(row.idx, el);
+        if (row.kind === 'del') el.addClass(CLS.del);
+        else if (row.kind === 'mod') el.addClass(CLS.mod);
+        else el.addClass(CLS.same);
 
-      // sourcePath is '' ON PURPOSE. Any post-processor (notably a side-comments
-      // plugin) keys off sourcePath to find a note's annotations. Passing the real path
-      // would paint the CURRENT note's comment marks onto this OLD text, anchored to
-      // lines that no longer mean the same thing. '' resolves to no note, so those
-      // processors no-op here. Verified live: no stray comment marks on the old version.
-      // Cost: relative links/embeds in the base pane won't resolve. See README.
-      await MarkdownRenderer.render(this.app, row.a.text, el, '', this);
+        // sourcePath is '' ON PURPOSE. Any post-processor (notably a side-comments
+        // plugin) keys off sourcePath to find a note's annotations. Passing the real path
+        // would paint the CURRENT note's comment marks onto this OLD text, anchored to
+        // lines that no longer mean the same thing. '' resolves to no note, so those
+        // processors no-op here. Verified live: no stray comment marks on the old version.
+        // Cost: relative links/embeds in the base pane won't resolve. See README.
+        await MarkdownRenderer.render(this.app, row.a.text, el, '', this);
+      }
+    } finally {
+      // TRAILING VIEW ZONE. The note pane's sizer carries scroll-past-the-end room that
+      // Obsidian sets on it (a min-height and a padding-bottom, both sized off the
+      // viewport); this pane is ours and gets none, so its scroll range is SHORTER than
+      // the note's by exactly that much. Sync then asks for a scrollTop the pane cannot
+      // reach, the base pins at its ceiling, and the panes drift apart by the shortfall —
+      // worst on a short document, where the note's end padding is most of its range
+      // (measured: note at 1100/1469 while the base sat pinned at 558/558, anchor 337px
+      // out). Height is owned by ViewZones.styleEndPad, which mirrors the note's range.
+      //
+      // In a `finally` because styleEndPad is a no-op without this element: one throw from
+      // MarkdownRenderer inside the loop above would otherwise leave endPadEl null for the
+      // life of the session and silently restore the bug — a half-rendered pane that also
+      // cannot scroll is strictly worse than a half-rendered pane that can.
+      this.endPadEl = sizer.createDiv({ cls: CLS.endpad });
     }
 
     // This pane's scroll listener must follow the freshly-created body element.

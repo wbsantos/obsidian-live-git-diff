@@ -51,6 +51,28 @@ body.theme-dark {
   --lgd-del-rail: #f8514966;
 }
 
+/* The TRAILING view zone: the base pane's stand-in for the scroll-past-the-end room
+   Obsidian gives the real note's sizer. Height is owned by ViewZones.styleEndPad — it
+   mirrors the note's scroll range so the base can always follow. Never painted: it is
+   reserved space, not content, and a wash on it would read as a diffed block.
+
+   Same box-model reset as .lgd-spacer, and for a sharper reason: styleEndPad derives the
+   pane's content height as `scrollHeight - pad.getBoundingClientRect().height`. rect.height
+   EXCLUDES margins while scrollHeight INCLUDES them, so a theme that margins a sizer child
+   would make contentPx over-count, the pad come out short by that margin, and the base
+   stop reaching the note's end — silently restoring the exact defect this element exists
+   to fix. Padding/border would corrupt it in the other direction. Every pixel of this
+   element must come from its inline height. */
+.lgd-endpad {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 /* ------------------------------------------------------------------ *
  * THE RAIL. Floats 12px clear of the text (VS Code's
  * .diff-modification-gutter trick) and costs ZERO layout — no padding, no width

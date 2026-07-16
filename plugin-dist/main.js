@@ -229,6 +229,8 @@ var CLS = {
   block: "lgd-block",
   /** A view zone in the BASE pane, standing in for an 'ins' row. */
   spacer: "lgd-spacer",
+  /** The TRAILING view zone: the base pane's stand-in for Obsidian's scroll-past-end room. */
+  endpad: "lgd-endpad",
   /** A section in the NOTE pane that we have tagged (every section, not just changed). */
   nblock: "lgd-nblock",
   ins: "lgd-ins",
@@ -550,6 +552,8 @@ var GitBaseView = class extends import_obsidian.ItemView {
     super(leaf);
     /** The scrolling element of this pane (`.lgd-body`). Recreated on every render. */
     this.bodyEl = null;
+    /** The trailing view zone. See its creation site in render(). */
+    this.endPadEl = null;
     /** row.idx -> its block container in this pane. */
     this.blockEls = /* @__PURE__ */ new Map();
     /**
@@ -579,6 +583,7 @@ var GitBaseView = class extends import_obsidian.ItemView {
     root.empty();
     root.addClass("lgd-view");
     this.bodyEl = null;
+    this.endPadEl = null;
     this.blockEls = /* @__PURE__ */ new Map();
     this.spacerEls = /* @__PURE__ */ new Map();
     const session = this.host.session;
@@ -623,23 +628,27 @@ var GitBaseView = class extends import_obsidian.ItemView {
     const body = root.createDiv({ cls: "lgd-body markdown-preview-view markdown-rendered" });
     this.bodyEl = body;
     const sizer = body.createDiv({ cls: "markdown-preview-sizer markdown-preview-section" });
-    for (const row of session.rows) {
-      if (!row.a) {
-        const sp = sizer.createDiv({ cls: CLS.spacer });
-        sp.setAttr(ATTR_ROW, String(row.idx));
-        sp.style.height = this.host.zones.insHeight(row.idx) + "px";
-        this.spacerEls.set(row.idx, sp);
-        continue;
+    try {
+      for (const row of session.rows) {
+        if (!row.a) {
+          const sp = sizer.createDiv({ cls: CLS.spacer });
+          sp.setAttr(ATTR_ROW, String(row.idx));
+          sp.style.height = this.host.zones.insHeight(row.idx) + "px";
+          this.spacerEls.set(row.idx, sp);
+          continue;
+        }
+        const el = sizer.createDiv({ cls: CLS.block });
+        el.setAttr("data-line-start", String(row.a.lineStart));
+        el.setAttr("data-line-end", String(row.a.lineEnd));
+        el.setAttr(ATTR_ROW, String(row.idx));
+        this.blockEls.set(row.idx, el);
+        if (row.kind === "del") el.addClass(CLS.del);
+        else if (row.kind === "mod") el.addClass(CLS.mod);
+        else el.addClass(CLS.same);
+        await import_obsidian.MarkdownRenderer.render(this.app, row.a.text, el, "", this);
       }
-      const el = sizer.createDiv({ cls: CLS.block });
-      el.setAttr("data-line-start", String(row.a.lineStart));
-      el.setAttr("data-line-end", String(row.a.lineEnd));
-      el.setAttr(ATTR_ROW, String(row.idx));
-      this.blockEls.set(row.idx, el);
-      if (row.kind === "del") el.addClass(CLS.del);
-      else if (row.kind === "mod") el.addClass(CLS.mod);
-      else el.addClass(CLS.same);
-      await import_obsidian.MarkdownRenderer.render(this.app, row.a.text, el, "", this);
+    } finally {
+      this.endPadEl = sizer.createDiv({ cls: CLS.endpad });
     }
     this.host.sync.attach();
     window.requestAnimationFrame(() => {
@@ -1390,12 +1399,50 @@ var ViewZones = class {
    */
   refresh(force) {
     const changed = this.measureRenderedInsHeights();
-    if (changed) this.applySpacerHeights();
+    this.applySpacerHeights();
     if (changed || force) {
       this.computeDelPads();
       this.applyDelPads();
     }
+    this.styleEndPad();
     return changed;
+  }
+  /**
+   * THE TRAILING ZONE — give the base pane the same scroll RANGE as the note.
+   *
+   * The two zones above keep the panes level through the document. This one keeps them
+   * level at the END, and it exists because the panes are not symmetric: Obsidian hands
+   * its own reading view scroll-past-the-end room (a min-height and a padding-bottom on
+   * the sizer, both sized off the viewport), and this pane is ours, so it gets none. The
+   * note can therefore always scroll further than the base. Sync asks for a scrollTop
+   * the base cannot reach, the base pins at its ceiling, and every block below drifts by
+   * the shortfall — the anchor quietly stops being true while sync reports itself on.
+   *
+   * It is worst exactly where it looks least likely: a SHORT note. There the end padding
+   * is most of the note's range, and the base's real content barely exceeds its own
+   * viewport, so the ceiling arrives almost at once. Measured on a 21-block demo: the
+   * note at 1100 of 1469 while the base sat pinned at 558 of 558, anchor 337px out. On a
+   * long document the same defect costs only a few hundred px at the very bottom, which
+   * is how it survived a 94-change diff unnoticed.
+   *
+   * The rule is one line: make the base's max scrollTop equal the note's. Then anything
+   * the note can be scrolled to, the base can follow to.
+   *
+   * The pad is measured out of the CONTENT height (total minus the pad's own height)
+   * rather than nudged incrementally, so it is an output and never an input — it cannot
+   * feed back on itself however often this runs.
+   */
+  styleEndPad() {
+    const view = this.host.baseView();
+    const base = this.host.basePane();
+    const note = this.host.notePane();
+    if (!view || !view.endPadEl || !base || !note) return;
+    const pad = view.endPadEl;
+    const contentPx = base.scrollHeight - pad.getBoundingClientRect().height;
+    const noteRange = note.scroller.scrollHeight - note.scroller.clientHeight;
+    const want = Math.max(0, Math.round(noteRange + base.clientHeight - contentPx));
+    const px = want + "px";
+    if (pad.style.height !== px) pad.style.height = px;
   }
   /**
    * Debounced refresh for the events that are NOT a scroll tick (a section rendering,
