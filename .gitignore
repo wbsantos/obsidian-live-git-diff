@@ -1,0 +1,19 @@
+node_modules/
+
+# NOTE: plugin-dist/ is deliberately NOT ignored. It holds the built plugin
+# (main.js, manifest.json, styles.css) — the artifact a user copies into
+# .obsidian/plugins/, and the file tools/check-invariant.mjs greps. Committing it is
+# what lets someone install from a clone without a toolchain, and lets anyone audit the
+# read-only claim from the repo alone rather than trusting a local build.
+
+# Local-only oracle capture (see plugin-src/tools/capture-sections.mjs).
+plugin-src/test/fixtures/*.local.json
+
+# Editors / OS
+.DS_Store
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*

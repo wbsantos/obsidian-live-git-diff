@@ -1,0 +1,90 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The two things that make a diff/sync bug diagnosable are
+        the **alignment report** and the **console output** — both are one command each,
+        and they're asked for below.
+
+  - type: checkboxes
+    id: basics
+    attributes:
+      label: The usual suspects
+      description: Please confirm these first — they cover most reports.
+      options:
+        - label: The note is inside a git repository, and tracked in git.
+          required: true
+        - label: The note is open in **Reading view** (decorations don't exist in Live Preview — this is a known limitation).
+          required: true
+        - label: "`git` is on the PATH (`git --version` works in a terminal)."
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        1. Opened a review on a note with ~40 changed blocks
+        2. Scrolled the note pane to roughly halfway
+        3. Expected the base pane to follow; it stayed near the top
+    validations:
+      required: true
+
+  - type: textarea
+    id: alignment-report
+    attributes:
+      label: Alignment report
+      description: |
+        **If this is about drift, sync, or highlighting**, please run
+        **Live Git Diff: Copy alignment report to clipboard** while the panes look wrong,
+        and paste it here. `deltaPx` is exactly the number needed to diagnose it.
+        It contains block counts, line numbers, and up to 60 characters of block text —
+        skim it if the note is sensitive.
+      render: json
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: |
+        Turn on **Debug logging** in the plugin settings, reproduce, then open the
+        developer console (Ctrl/Cmd+Shift+I) and paste anything prefixed
+        `[live-git-diff]`.
+      render: shell
+
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      placeholder: "1.12.7"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Settings → Community plugins → Live Git Diff.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Windows, Linux]
+    validations:
+      required: true
+
+  - type: textarea
+    id: other-plugins
+    attributes:
+      label: Other plugins involved
+      description: |
+        Especially anything that annotates or reads notes aloud — this plugin is designed
+        to coexist with them, so an interaction bug is genuinely useful to know about.

@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an improvement.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, two things worth knowing — both are in
+        [docs/ARCHITECTURE.md](../blob/main/docs/ARCHITECTURE.md):
+
+        - **This plugin never writes to notes.** Anything that applies, merges, stages, or
+          edits is out of scope by design, not by omission. That constraint is what makes
+          it safe to point at a document you care about.
+        - **Some limitations are structural, not bugs.** Decorations are Reading-view only
+          (Obsidian's post-processors don't run in Live Preview); the diff is block-grain,
+          not line-grain; ~24px of drift remains in inserted/deleted regions.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting?
+      description: The situation, not the solution — it often has a cheaper answer than the one we'd both reach for first.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do today instead?

@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: typecheck / test / build / invariant gate
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: plugin-src
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # The test suite runs TypeScript directly through node's native type
+          # stripping, which needs >= 22.6. No transpile step for tests.
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: plugin-src/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        # BEFORE the tests, not after: test/bundle.test.ts and test/invariant.test.ts
+        # exercise the BUILT artifact (does it load? does the gate catch a planted
+        # write?), so running them first would grade a stale bundle — or skip.
+        run: node esbuild.config.mjs production
+
+      - name: Test
+        # The grain oracle asserts our block splitter agrees with OBSIDIAN's own
+        # sectioning, by comparing against a snapshot captured from a running Obsidian
+        # (see tools/capture-sections.mjs). The comparison itself needs no Obsidian —
+        # only the snapshot.
+        #
+        # Setting this to 1 makes a MISSING snapshot a CI failure rather than a silent
+        # skip. That is the point: a grain disagreement is invisible in normal use (the
+        # panes just drift), so the one place that runs on every push should refuse to
+        # go green without the check.
+        #
+        # If you consciously decide to ship without the oracle, change this to 0 here —
+        # in a file a human reads — rather than deleting the test.
+        run: npm test
+        env:
+          LGD_REQUIRE_ORACLE: '1'
+
+      - name: Read-only invariant gate
+        # This plugin's core promise is that it cannot write to a note. The gate greps
+        # the BUILT bundle for write methods, asserts it imports no filesystem module at
+        # all, and asserts the bundle is valid UTF-8 with zero NUL bytes — because a
+        # check that cannot read the file is not a check. `npm run build` runs this too;
+        # it is a separate step here so a failure is unambiguous in the log.
+        run: npm run gate
+
+      - name: Upload built plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-git-diff-plugin
+          path: |
+            plugin-dist/main.js
+            plugin-dist/manifest.json
+            plugin-dist/styles.css
+          if-no-files-found: error
