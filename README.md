@@ -77,6 +77,8 @@ The workflow this was built for: an AI agent edits your notes and commits as it 
 3. The agent reads the comments, revises, and commits.
 4. Run **Open git diff review for this file** again — the base stays pinned, so you see the total change since your baseline, and your comments are exactly where you left them.
 
+![Reviewing an agent's edits: the git base on the left, the live note on the right with its changes in green, and a comment thread in the side panel — a question on the changed text and the agent's reply — all on the real note.](docs/screenshot-comments.png)
+
 You don't have to run git yourself for any of this. One line in your agent's instruction file is enough:
 
 > After each meaningful change to my notes, commit with a one-line message saying what you did and why.
@@ -97,7 +99,7 @@ The version picker then fills with checkpoints you can actually recognise.
 
 - The diff pairs **blocks** (paragraphs, lists, tables), not lines. A block rewritten past recognition shows as a removal plus an addition rather than one modification.
 - Highlights appear in **Reading view** only — Obsidian's post-processors don't run in Live Preview.
-- The base pane opens to the right of your note. Drag its tab across once if you prefer it on the left; the workspace remembers.
+- The base pane opens to the left of your note. Drag its tab across if you'd rather have it on the right; the workspace remembers.
 - Links and embeds don't resolve in the base pane. That's deliberate — it's what keeps other plugins from anchoring your current annotations onto the old text.
 - A little vertical drift is normal next to inserted or deleted regions. It's bounded, and it doesn't grow as you scroll.
 - Desktop only, and the note must be tracked in git at the version you compare against.
@@ -113,6 +115,10 @@ This plugin never writes to your notes and never talks to the network. It runs `
 - **Obsidian's reading view**, which the base pane inherits its typography from.
 
 How it all works — and why the obvious approaches don't — is written up in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Support
+
+If this plugin is useful to you, a star helps other people find it. And if you'd like to support development: [Buy Me a Coffee](https://buymeacoffee.com/1JvyRHI8zH).
 
 ## License
 
