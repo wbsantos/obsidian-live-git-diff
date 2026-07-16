@@ -118,7 +118,7 @@ How it all works — and why the obvious approaches don't — is written up in [
 
 ## Support
 
-If this plugin is useful to you, a star helps other people find it. And if you'd like to support development: [Buy Me a Coffee](https://buymeacoffee.com/1JvyRHI8zH).
+If this plugin is useful to you, a star helps other people find it. And if you'd like to support development: [Buy Me a Coffee](https://buymeacoffee.com/jkosturko).
 
 ## License
 
