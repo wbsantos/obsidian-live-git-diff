@@ -20,3 +20,7 @@ plugin-src/test/fixtures/*.local.json
 # Logs
 *.log
 npm-debug.log*
+
+# Vault-open artifacts — this repo is a plugin, not a vault; anyone opening it
+# in Obsidian gets a config dir that must never publish.
+.obsidian/

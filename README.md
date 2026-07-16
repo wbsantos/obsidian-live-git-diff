@@ -1,260 +1,118 @@
 # Live Git Diff
 
-**Review a note side by side against any git version of itself — both fully rendered, scroll-synced, inside Obsidian. The pane you review is your actual note, not a copy — so your comments stay anchored.**
+Review a note side by side against any git version of it — both panes fully rendered, scroll-synced, inside Obsidian. The pane you review is your actual note, not a copy, so your comments and your other plugins keep working while you read the diff.
 
----
+![A review on a real note: the pinned git version on the left with deletions in red, the live note on the right with insertions in green and changed words marked on both sides.](docs/screenshot-side-by-side.png)
 
-## Why this exists
+## Features
 
-No Obsidian plugin diffs rendered markdown **without destroying the rendered document to do it.**
+- **Side-by-side rendered diff.** The git version on one side, your real note on the other, both typeset by Obsidian in your theme.
+- **Compare against any version.** Pick a commit by subject and age from a searchable list. Follows renames.
+- **Word-level highlights** inside changed blocks, on both sides.
+- **Scroll sync.** Scroll either pane and the other follows, with blank space reserved where one side has text the other doesn't.
+- **Your annotations survive.** The plugin only adds CSS classes to blocks Obsidian already rendered — it never rebuilds the view. Comment plugins, text-to-speech, and links stay anchored through the whole review.
+- **Read-only, and checked.** Nothing is written to disk. The old version is read straight into memory, and a build gate fails the build if a write call ever reaches the bundle.
 
-File Diff, Intervaults, Diff Apply, and the GitHub-sync plugins all diff **raw source** — you get `**bold**` and `| --- |` and pipe tables in a monospace gutter, which is not the document you wrote. Obsidian's reading view has no diff of its own. Smart2Brain (2.0.0-beta, April 2026) does render a two-pane diff of pending AI edits inside a reading-view block — but it calls `el.empty()` and rebuilds the DOM, so anything anchored to that DOM is gone.
+![Scrolling the note pane; the base pane follows, so the same section stays across from itself.](docs/demo-scroll-sync.gif)
 
-That last part is the whole point. A rendered diff anywhere else puts a **copy** on your screen — synthesized for the review, thrown away after it — while your comments, your text-to-speech, and your links stay attached to the original. This plugin only **adds CSS classes to blocks Obsidian already rendered**: the pane you review is your **actual note** — nothing synthesized, nothing duplicated, nothing written — which is why everything that attaches to it keeps working while you read the diff.
+## Why another diff plugin?
 
-> *Prior art checked 2026-07-15/16, to source or shipped binary (Smart2Brain's diff verified in its 2.0.0-beta bundle: rendered, stacked vertically, rebuilt via `el.empty()`). If a plugin has since shipped a non-destructive rendered diff, this section is out of date — please open an issue.*
-
-## What it does
-
-- **The note you review is the real one.** The right pane is your actual note in an ordinary markdown leaf — not a copy, not a generated document. The plugin *adds CSS classes* to blocks Obsidian already rendered; it never rebuilds the view and never touches your text.
-- **So your comments survive the review.** Anything that anchors to your note — annotation plugins such as [side-comments](https://github.com/guoxueziliao/side-comments), TTS, links — keeps working mid-review, because the thing it anchored to is still there. Comments are deliberately out of scope: plenty of plugins annotate well; what was missing was a diff view that doesn't break them.
-- **Side-by-side rendered diff.** Left = the git version, right = your real note. Both typeset by Obsidian, in your theme.
-- **Compare against any version.** Pick from a list of the file's commits — by subject and age, not by sha. "Everything since last week" or "the last ten edits in one view" is two clicks: one base, N commits, one diff. Follows renames.
-- **Nothing is written to disk.** The base version is fetched into memory with `git show`. No temp file, no generated note, nothing in your vault.
-- **Scroll-synced, block-aligned.** Scroll either pane and the other follows — the same paragraph sits across from itself the whole way down, with blank space reserved where one side has text the other doesn't. You read one document in two states, not two documents.
-- **Word-level marks.** Inside a changed block, the words that actually changed are highlighted — on both sides.
-- **Read-only, and that's enforced.** Not a promise: a [build gate](#privacy-and-safety) fails the build if a write method reaches the bundle.
+The diff plugins I could find show raw markdown — `**bold**`, pipe tables and all. That's the right tool for merging vaults or applying patches, but it isn't the document you wrote. And a rendered diff usually means building a separate preview just for the review, which orphans anything that was anchored to the original view. This plugin decorates the note you already have open instead. If there's a plugin that already does this, open an issue — I'd genuinely like to see it.
 
 ## Requirements
 
-- **Obsidian 1.4.0+**, **desktop only.** The plugin runs `git` as a subprocess, which a mobile app cannot do.
-- **`git` on your PATH.**
-- **The note must live inside a git repository.** Your vault root does **not** have to be the git root — a vault nested inside a larger repo works fine, which is the common case for anyone keeping docs alongside code. Not a git user? An AI agent can own all of this for you — see [Let the agent do the git](#let-the-agent-do-the-git).
-- The note must be **tracked** in git at the version you are comparing against.
+- Desktop Obsidian 1.4.0+ (the plugin runs `git`, which mobile can't).
+- `git` on your PATH.
+- The note lives in a git repository. The vault root doesn't have to be the git root — a vault nested inside a bigger repo is fine.
 
-## Installation
+## Install
 
-Obsidian loads exactly three files — `main.js`, `manifest.json`, `styles.css` — from `<your-vault>/.obsidian/plugins/live-git-diff/`. Every route below is a way of getting those three files there.
+### With BRAT
 
-### Via BRAT (the recommended route, once a release exists)
-
-[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs plugins straight from a GitHub repo and keeps them updated. It reads this repo's root `manifest.json` to resolve the version, then downloads the assets from the latest **release** — so it works from the first tagged release onward, and **not before one exists.** If [the releases page](https://github.com/jkosturko/obsidian-live-git-diff/releases) is empty, build from source instead.
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs from the latest GitHub release, so this route works once the first release is up.
 
 1. Install **Obsidian42 - BRAT** from Community plugins and enable it.
-2. Open the command palette → **BRAT: Add a beta plugin for testing**.
-3. Paste the repo URL:
-   ```
-   https://github.com/jkosturko/obsidian-live-git-diff
-   ```
-4. Choose the latest version and click **Add Plugin**.
-5. Enable **Live Git Diff** in **Settings → Community plugins**.
+2. Command palette → **BRAT: Add a beta plugin for testing**.
+3. Paste `https://github.com/jkosturko/obsidian-live-git-diff`.
+4. Enable **Live Git Diff** in **Settings → Community plugins**.
 
-### Manual
+### Manually
 
-Either download the three files from a release, or build them yourself.
-
-**From a release** *(once one exists)* — download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jkosturko/obsidian-live-git-diff/releases), put them in `<your-vault>/.obsidian/plugins/live-git-diff/`, then restart Obsidian (or toggle **Community plugins** off and on) and enable **Live Git Diff**.
-
-**From source** — no release needed:
+Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/jkosturko/obsidian-live-git-diff/releases) into `<your-vault>/.obsidian/plugins/live-git-diff/`, restart Obsidian, and enable the plugin. Or build from source:
 
 ```bash
 git clone https://github.com/jkosturko/obsidian-live-git-diff
 cd obsidian-live-git-diff/plugin-src
-npm ci && npm run build          # typecheck -> bundle -> read-only gate
-
-PLUGIN="/path/to/YourVault/.obsidian/plugins/live-git-diff"
-mkdir -p "$PLUGIN"
-cp ../plugin-dist/{main.js,manifest.json,styles.css} "$PLUGIN"
+npm ci && npm run build
+cp ../plugin-dist/{main.js,manifest.json,styles.css} "<your-vault>/.obsidian/plugins/live-git-diff/"
 ```
 
-Then restart Obsidian and enable **Live Git Diff**. `plugin-dist/` is committed, so a clone alone has the three files if you'd rather not run the toolchain — though running the build is what puts the [read-only gate](#privacy-and-safety) between the source and the bundle you install. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, including symlinking `plugin-dist` into a vault so a rebuild lands without copying.
+Not in the community directory yet — BRAT or manual for now.
 
-### Via Community plugins
+## How to use
 
-**Not yet submitted.** This plugin is not in the community directory. Use BRAT or a manual install for now.
+Open a note that lives in a git repo, switch to **Reading view**, and run **Open review against a version…** from the command palette. Pick a commit; a second pane opens beside your note with that version, and the changes light up in both.
 
-## Usage
+![The version picker: the file's recent commits listed by subject, age, and sha.](docs/screenshot-version-picker.png)
 
-Open a note that lives in a git repo, switch to **Reading view**, then run **Live Git Diff: Open review against a version…** from the command palette. Pick a version from the list; a second pane opens with it beside your note.
+The picked version stays pinned while the review is open, so the diff can't shrink under you while something else commits to the repo. Sessions live in memory — close the review and it's gone.
 
 | Command | What it does |
 | --- | --- |
-| **Open review against a version…** | **The main one.** Lists this file's recent commits — subject, age, sha — and pins the one you pick as the base. |
-| **Open git diff review for this file** | The quick path: pins whatever you set as the default base (HEAD unless you change it) without asking. If a review is already open on the file, it keeps the pinned base and just re-diffs. |
-| **Close review** | Ends the session, removes every decoration, and closes the base pane. |
-| **Refresh review (re-pin the base version)** | Re-resolves the base and re-diffs. Use it after new commits land. |
-| **Toggle scroll sync** | Turns the pane-following on and off. The base pane's header shows which. |
-| **Copy alignment report to clipboard** | Copies a JSON diagnostic — how far the panes are out of alignment, in pixels, right now. For bug reports. |
+| **Open review against a version…** | Pick this file's base version from a searchable list. |
+| **Open git diff review for this file** | Skips the picker and uses your default base (HEAD unless you change it). |
+| **Close review** | Removes every decoration and closes the base pane. |
+| **Refresh review (re-pin the base version)** | Re-resolves the base and re-diffs. |
+| **Toggle scroll sync** | The base pane's header shows whether it's on. |
+| **Copy alignment report to clipboard** | A JSON diagnostic for bug reports. |
 
-### The review loop
+**If the diff comes up empty:** your changes are probably already committed, and you're comparing against HEAD — which contains them. Pick the commit from before the work started instead. You can also change the default base in settings.
 
-The workflow this plugin was built for — reviewing an AI agent's writing without giving up your annotations:
+### Reviewing an agent's edits
 
-1. **Open a review** against the version you recognise — the commit from before the agent's work started.
-2. **Comment on your note** with your annotation plugin ([side-comments](https://github.com/guoxueziliao/side-comments) keeps comments in a sidecar file, so the `.md` stays clean).
-3. **The agent reads the comments and revises** — editing the note, committing as it goes.
-4. **Run _Open git diff review for this file_ again.** With a review already open it keeps the pinned base — a fresh diff against the same baseline, and your comments are exactly where you left them, because the note was never rebuilt.
+The workflow this was built for: an AI agent edits your notes and commits as it goes, and you review its work without giving up your annotations.
 
-Each round shows the *total* change since your chosen baseline, not just the last edit. Use **Refresh review** only when you want to move the baseline forward.
+1. Open a review against the last version you recognise.
+2. Comment on the note with your annotation plugin ([side-comments](https://github.com/guoxueziliao/side-comments) keeps comments in a sidecar file, so the `.md` stays clean).
+3. The agent reads the comments, revises, and commits.
+4. Run **Open git diff review for this file** again — the base stays pinned, so you see the total change since your baseline, and your comments are exactly where you left them.
 
-### Let the agent do the git
-
-You don't need to run git yourself for any of this. If an AI agent works in your vault, give it one standing instruction — in `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, or whatever instruction file your agent reads:
+You don't have to run git yourself for any of this. One line in your agent's instruction file is enough:
 
 > After each meaningful change to my notes, commit with a one-line message saying what you did and why.
 
-The agent handles the repository setup, the commits, and the messages; you get a version picker full of checkpoints you can actually recognise ("apply review round 1", "rework intro per comments") and a diff against any of them. The plugin never asks you to touch a terminal — it only needs the history to exist.
-
-### Choosing what to compare against
-
-**This is the setting that decides whether the plugin is useful to you**, so it's worth 30 seconds.
-
-The default compares your note against **HEAD** — which shows your **uncommitted** changes. That's the right answer if you edit, then review, then commit.
-
-It is the *wrong* answer if your changes are **already committed** — which is the normal case when something commits frequently on your behalf (an AI agent checkpointing so that reverting stays cheap, say). Then your working tree is clean, HEAD already contains the changes, and the diff is **empty**. The plugin will tell you so rather than just showing you nothing.
-
-For that workflow, use **Open review against a version…** and pick the commit from *before* the work started. One base, N commits of change, one view. The picker shows what you actually recognise:
-
-```
-apply review round 1
-7 hours ago · Jul 15, 4:11 PM · 3c9d151
-
-note the autumn planting rule
-8 days ago · Jul 7, 2:10 PM · 9b1f2e4
-```
-
-Subject, sha, and both dates are all searchable. The list follows renames, so history doesn't stop at the point the file got its current name.
-
-You can also set a different **default** in settings (HEAD, HEAD~1, this file's previous version, or any ref you like), for the quick command.
-
-### What a "review session" is
-
-Opening a review **pins a base commit** and holds it for the whole session.
-
-That's deliberate, and it's the difference between a review that works and one that quietly evaporates. If the diff followed a live `HEAD`, every commit landing while you read would shrink it — and a review of a document something else is actively committing to would appear to *finish itself*. The base stays put until you explicitly re-pin it with **Refresh review**.
-
-Sessions live in memory only. Close the review, or quit Obsidian, and it is gone — there is nothing to clean up.
-
-The base pane's header always names the pinned version, because a sha on its own can't tell you what you're looking at:
-
-```
-base 3c9d151 · "apply review round 1" · 7 hours ago
-```
-
-### Reading the colors
-
-| What you see | What it means |
-| --- | --- |
-| **Green wash** (right pane) | New text — this wasn't in the base version. |
-| **Red wash** (left pane) | Removed text — this was in the base and isn't now. |
-| **Darker green / red on words** | Exactly the words that changed inside a changed block. |
-| **A changed block** | Green on the right, red on the left, with a rail beside both. The layout says "this became that" — so there is no third color for "modified". |
-| **A gap on one side** | Reserved space where the other side has text. Both sides always show their real content at full size; nothing is collapsed or hidden. |
+The version picker then fills with checkpoints you can actually recognise.
 
 ## Settings
 
-| Setting | Default | What it does |
+| Setting | Default | Notes |
 | --- | --- | --- |
-| **Compare against by default** | The latest commit (HEAD) | What the *quick* command pins. Options: `HEAD` (shows uncommitted changes), `HEAD~1`, **this file's previous version** (the commit before the last one that touched *this* document — regardless of what else was committed since), or a specific ref. The version picker overrides this per review. |
-| **Ref** | `main` | Only shown for *A specific ref*. Anything git resolves: `main`, `origin/main`, `v1.2`, `HEAD~5`, a sha, `main@{yesterday}`. Resolved once when the review opens, then pinned. |
-| **Versions to list** | 50 | How many commits the version picker shows. |
-| **Inserted text** | GitHub green | Wash behind added blocks and the new side of a change. The changed words get a second coat of the same color. |
-| **Deleted text** | GitHub red | Wash behind removed blocks and the old side of a change. |
-| **Rail — added** | GitHub green | The 4px bar beside a wholly new block. |
-| **Rail — removed** | GitHub red | The 4px bar beside a wholly removed block. |
-| **Debug logging** | Off | Verbose console output. Warnings and errors are logged either way. |
+| Compare against by default | HEAD | What the quick command pins: HEAD (shows uncommitted changes), HEAD~1, this file's previous version, or a specific ref. |
+| Ref | `main` | For "a specific ref" — anything git can resolve. |
+| Versions to list | 50 | How many commits the picker shows. |
+| Colors | GitHub's diff palette | Four fields: inserted/deleted wash, added/removed rail. Any CSS color, alpha included. The defaults follow your light/dark theme; an override applies to both. |
+| Debug logging | Off | Verbose console output. |
 
-Colors accept **any CSS color**, including alpha — `#6fdd8b80`, `rgb(0 0 0 / 20%)`, `color-mix(...)`. Alpha matters: these are washes that sit *behind* your text, and the defaults are translucent on purpose. Leave a field empty for the default.
+## Limitations
 
-The defaults are GitHub's diff palette and follow your light/dark theme automatically. **An override applies to both themes** — see [Known limitations](#known-limitations).
+- The diff pairs **blocks** (paragraphs, lists, tables), not lines. A block rewritten past recognition shows as a removal plus an addition rather than one modification.
+- Highlights appear in **Reading view** only — Obsidian's post-processors don't run in Live Preview.
+- The base pane opens to the right of your note. Drag its tab across once if you prefer it on the left; the workspace remembers.
+- Links and embeds don't resolve in the base pane. That's deliberate — it's what keeps other plugins from anchoring your current annotations onto the old text.
+- A little vertical drift is normal next to inserted or deleted regions. It's bounded, and it doesn't grow as you scroll.
+- Desktop only, and the note must be tracked in git at the version you compare against.
 
-## How it works
+## Privacy
 
-Three ideas, in order of how much they matter:
+This plugin never writes to your notes and never talks to the network. It runs `git` to read old versions, renders them in memory, and adds CSS classes to your rendered note — that's the whole footprint. The read-only claim is checked mechanically on every build: [a gate](plugin-src/tools/check-invariant.mjs) scans the shipped bundle for write calls, filesystem imports, and `innerHTML`, and CI runs it on every push. The only thing it stores is its own settings, which Obsidian removes when you uninstall.
 
-1. **The base version never becomes a file.** `git show <sha>:<path>` is read into memory and rendered by Obsidian's own renderer into a custom read-only pane. There is no temp file and no generated note.
-2. **Your note is your note.** The right pane is a normal markdown leaf showing the real file. The plugin adds CSS classes to already-rendered blocks — it never touches text nodes, never injects text, never writes. That's precisely why annotation plugins and TTS keep working: they anchor to the file, and the file is untouched.
-3. **The panes are aligned by block, not by pixel.** Obsidian only keeps the blocks near your viewport in the DOM, so the heights of far-off blocks literally cannot be measured. Sync therefore anchors the topmost *visible* block to its counterpart, and reserves blank space ("view zones") wherever one side has text the other doesn't.
+## Thanks
 
-The full reasoning — including why each of the obvious approaches doesn't work — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **VS Code** — the markdown preview's diff styling and Monaco's diff editor are the prior art here: the rail technique, the two-color scheme, and the view-zone idea that keeps two panes aligned.
+- **[GitHub's VS Code themes](https://github.com/primer/github-vscode-theme)** for the diff palette in both light and dark.
+- **Obsidian's reading view**, which the base pane inherits its typography from.
 
-## Known limitations
-
-These are real, measured, and worth knowing before you rely on it.
-
-- **Block grain, not line grain.** The diff pairs *blocks* (paragraphs, lists, tables, code fences), not lines. A block edited a little is shown as a modification with the changed words marked; a block rewritten past recognition is shown as a delete plus an add. **A list restructured into a paragraph reads as delete+add, not as a modification.** VS Code diffs lines and doesn't have this; we diff blocks because block pairing is what keeps the two rendered panes aligned and keeps annotation anchors intact.
-- **Inserting a block next to an edited one can turn the edit into delete+add.** Within a rewritten region, blocks pair by position, so a newly inserted block shifts its neighbours' pairing.
-- **~24px of residual drift in unpaired regions.** Measured on a 94-change diff: the anchor block is pixel-exact at 5 of 6 sample positions, median worst-case on-screen drift **24px**, max **48px**. Drift is bounded, not cumulative — it does not grow as you scroll.
-- **Reading view only.** Obsidian's markdown post-processors don't run in Live Preview, so decorations appear in Reading view only. You can still edit in Live Preview; you just won't see the highlights while you do. (VS Code has the same limitation.)
-- **The base pane opens on the right.** Obsidian places a new split *after* the active pane. Drag its tab across once to put it on the left; the workspace remembers.
-- **Links and embeds don't resolve in the base pane.** The base is rendered with an empty source path, on purpose — that's what stops other plugins from painting your *current* note's annotations onto the *old* text, anchored to lines that no longer mean the same thing. The cost is that relative links in the old version aren't clickable.
-- **Color overrides apply to both themes.** The built-in defaults are theme-aware; an override is a single value used in light and dark alike.
-- **Desktop only.** Requires `git` as a subprocess.
-- **Large notes are diffed on open, not incrementally.** Fine for a book chapter. A multi-megabyte note is untested.
-
-## FAQ / Troubleshooting
-
-**The diff is empty / nothing is highlighted.**
-Almost always: your changes are already **committed**, and you're comparing against HEAD — which contains them. A clean working tree against HEAD is correctly an empty diff. Use **Open review against a version…** and pick a commit from before the work started. (See [Choosing what to compare against](#choosing-what-to-compare-against).)
-
-**The base pane is empty, or says "not tracked in git".**
-The file isn't tracked at that commit. The pane distinguishes two cases in words, because they need different reactions: *"this file did not exist at &lt;sha&gt;"* (you picked a commit from before it was created — it names the earliest commit that does have it) versus *"not tracked in git at all"* (it has never been committed). It always says which, rather than rendering blank — because "no base" and "the whole file is new" look identical otherwise.
-
-**The file was renamed and I expected history to stop.**
-It doesn't. The picker uses `git log --follow`, and the base pane reads the file under whatever name it had at the commit you picked. When that name differs from today's, the header says `was old-name.md`.
-
-**Nothing happens when I run the command.**
-Three usual causes: the note isn't inside a git repo; you're not in **Reading view** (decorations only exist there); or `git` isn't on the PATH that Obsidian sees. Turn on **Debug logging** in settings and check the developer console (`Ctrl/Cmd+Shift+I`).
-
-**My annotations/comments disappeared!**
-They didn't — this plugin cannot write to your notes, and it never modifies text. Close the review; if something still looks wrong, it isn't from this plugin. The read-only claim is [machine-enforced](#privacy-and-safety), and you can run the check yourself.
-
-**The panes drift apart as I scroll.**
-Some drift in inserted/deleted regions is expected (see above). If a *paired* block is badly out, run **Copy alignment report to clipboard** and paste it into an issue — `deltaPx` is exactly the number needed to diagnose it.
-
-**The diff shrank while I was reading it.**
-That's what pinning prevents, so this shouldn't happen — unless you ran **Refresh review**, which intentionally re-pins to the current version. If it happened on its own, please file an issue.
-
-**Scroll sync feels steppy.**
-The note pane is scrolled by source *line*, not by pixel (it has to be — see ARCHITECTURE). Whether Obsidian honours a fractional line is undocumented and version-dependent.
-
-## Privacy and safety
-
-**This plugin never writes to your notes, and never talks to the network.**
-
-Its entire effect on your machine is: run `git` to *read* text, read your note, build DOM, add CSS classes. It imports no filesystem module at all. The only thing it persists is its own settings, in its own config file, which Obsidian deletes when you uninstall it.
-
-That's a strong claim, so it's **checked mechanically on every build** rather than promised here:
-
-```bash
-cd plugin-src
-npm ci
-npm run build     # typecheck -> bundle -> gate
-```
-
-The gate ([`plugin-src/tools/check-invariant.mjs`](plugin-src/tools/check-invariant.mjs)) reads the shipped bundle and fails the build if it finds:
-
-- **any write method** — `vault.modify(`, `vault.create(`, `vault.delete(`, `adapter.write(`, `editor.replace…(`, `writeFile…(`, and 30-odd more;
-- **any filesystem import** — you cannot write a file with a module you never imported;
-- **any `innerHTML` assignment**;
-- **NUL bytes or invalid UTF-8** — because a check that can't read the file isn't a check. *(This one is not paranoia: an earlier hand-written build contained NUL bytes, which made `grep` treat it as binary and skip it. Every read-only check "passed" without reading a single line. That defect is why this gate reads the bytes itself.)*
-
-Settings persistence is the one declared exception, and it is **pinned**: exactly one call site, in exactly one file. A second one anywhere fails the build.
-
-And the gate itself is tested — [`plugin-src/test/invariant.test.ts`](plugin-src/test/invariant.test.ts) plants real violations in a copy of the bundle and asserts the gate goes red for each. A gate nobody has watched fail is not known to work. CI runs all of it on every push.
-
-## Credits and prior art
-
-- **[VS Code](https://github.com/microsoft/vscode)**, two different parts of it:
-  - `markdown-language-features` (`media/markdown.css`) is the closest prior art for decorating a *rendered* markdown view, and this plugin borrows its technique on purpose: rails that cost zero layout (`box-shadow`, never border + padding), two states rather than three (a modified block *is* an added block — `.code-line-diff-modified` only ever lands combined with `.code-line-diff-added`), and one color painted twice to darken the changed words. Where it goes its own way: that diff is **single-pane**, so it marks a deletion with a dashed indicator after the block. We are two-pane and show the removed text itself.
-  - Monaco's **diff editor** is where **view zones** come from — reserving blank space on the short side rather than collapsing or hiding either side's content. That's a text diff, not a rendered one, but the idea is what keeps two rendered panes aligned.
-- **[GitHub's VS Code themes](https://github.com/primer/github-vscode-theme)** — the diff palette, taken verbatim from `light-default` / `dark-default`: `diffEditor.{inserted,removed}TextBackground` for the washes, `editorGutter.{added,deleted}Background` for the rails, in both themes. GitHub's hues are nearly white, which is what lets a wash sit behind text without shouting; the intensity was never the alpha. (Having a rail at all is ours — VS Code rails its markdown diff from `diffEditorGutter.*`, which is registered with a `null` default, so unless a theme sets it that rail paints nothing.)
-- **Obsidian's own reading view** — the base pane inherits `markdown-preview-view` / `markdown-preview-sizer` rather than re-deriving typography. Every hand-rolled lookalike drifted.
-- The `metadataCache.getFileCache().sections` API, which settles block-grain questions by measurement instead of argument.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). The one hard rule: **this plugin does not write to notes.** That isn't a style preference — it's the entire reason the design is safe to run on a document you care about, and the build enforces it.
+How it all works — and why the obvious approaches don't — is written up in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 
