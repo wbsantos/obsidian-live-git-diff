@@ -85,6 +85,40 @@
 }
 
 
+/* ---- view zones ----
+
+   Paired blocks already measure identically in the two panes, so ALL remaining drift
+   comes from UNPAIRED runs: an 'ins' run makes the note taller, a 'del' run makes the
+   base taller, and the next paired anchor lands off by exactly that height.
+
+   VS Code's answer is a view zone — blank reserved space on whichever side is SHORT,
+   with both sides' real content always shown full size. Deletions are never collapsed
+   or hidden. We do the same, from the two sides we're allowed to touch:
+
+     'ins' -> `.sp2a-spacer`, a real element in the base pane (ours; we can inject).
+     'del' -> padding-bottom on the preceding note block (theirs; we can only restyle
+              what already exists — hence padding rather than a new node).
+
+   Only the 'ins' side needs CSS; the 'del' side is an inline style, because its height
+   is per-run and computed. */
+
+/* A view zone: reserves the height its counterpart occupies in the note pane.
+   Height is set inline from the measured note-side block (0 until known — an unknown
+   zone is simply today's behaviour, never a regression), and it doubles as the SCROLL
+   ANCHOR for its row, which is why it must sit at exactly the right place in reading
+   order rather than merely add up to the right total.
+   NO margin/padding/border: every pixel of this element must come from the inline
+   height, or the reservation is wrong by whatever the box model added on top. */
+.sp2a-spacer{
+  display:block;
+  margin:0;
+  padding:0;
+  border:0;
+  height:0;
+  overflow:hidden;
+  pointer-events:none;
+}
+
 .sp2a-empty{
   padding:24px 16px;
   color:var(--text-muted);

@@ -69,6 +69,43 @@ Residual at 3%/90% is the unpaired regions (pure deletions/insertions with no
 counterpart) — the case VS Code solves with view zones, and where there is no
 correct answer without them.
 
+### View zones — measured on a BIG diff (base 9b1f2e4 Jul-07 vs HEAD)
+
+The 10-block diff was flattering us. Real test: 312 blocks, **94 changed**
+(43 mod / 26 ins / 25 del) across **17 ins runs and 17 del runs**.
+
+| position | before zones | after zones |
+|---|---|---|
+| 5%  | 98px  | **16px** |
+| 20% | 46px  | 40px |
+| 35% | **340px** | **24px** |
+| 50% | 126px | **24px** |
+| 65% | 0px   | 48px |
+| 80% | **235px** | **24px** |
+| **median worst** | **126px** | **24px** |
+| **max worst** | **340px** | **48px** |
+
+Anchor is 0px at 5 of 6 positions (was off by up to 340px). All 26 insertion
+zones harvested a height (26/26) despite the note pane being virtualised.
+
+**Insertions**: one `div.sp2a-spacer` per ins row in the base pane, height
+harvested lazily from the note block via the post-processor (the one moment we
+are guaranteed to hold the element before the reading view discards it). Crucially
+the spacer is also the **alignment anchor** — `baseElFor(idx)` = blockEls ?? spacerEls.
+That is what killed the 340px: an ins row previously had no base counterpart, so
+the anchor fell through to interpolation.
+
+**Deletions**: NOT collapsed (VS Code doesn't collapse — it reserves space on the
+short side and never hides content). We can't inject into the note pane (virtualised,
+setChildrenInPlace rips it out) — but we can style an element that's already there:
+`padding-bottom` on the note block PRECEDING each del run, sized from the base's
+exactly-known heights. Padding not margin, so Obsidian's measureSection() counts it.
+Applied from the post-processor so it self-heals when sections recycle.
+
+Verified no feedback loop: ins-height measurement subtracts del padding before
+caching; hammering one scroll position 8x holds at 2616px ins zones / 120px del
+pads — converges in one pass, no growth.
+
 ### Architecture facts (verified against Obsidian 1.11.5 source)
 - **Reading view virtualizes**: off-screen sections are `.detach()`ed (getBoundingClientRect
   = zeros) and `sizerEl.setChildrenInPlace()` runs every scroll tick — so **injected spacers

@@ -11,6 +11,35 @@
  * topmost VISIBLE block (which by definition is rendered), its source line range, and
  * the block-pairing we already computed. See `syncNoteToBase` / `syncBaseToNote`.
  *
+ * VIEW ZONES — why the anchor alone isn't enough
+ * ----------------------------------------------
+ * Anchoring makes ONE block exact. Everything below it drifts by however much the two
+ * panes disagree in height in between — and since paired blocks now measure
+ * identically, that disagreement is exactly the UNPAIRED runs: text inserted since the
+ * base exists only in the note, text deleted since the base exists only in the base.
+ *
+ * VS Code solves this with "view zones": blank reserved space on whichever side is
+ * short, both sides' real content always shown at full size (it does NOT collapse
+ * deletions). We do the same, but each side of the diff needs a different technique,
+ * because we own one pane and merely decorate the other:
+ *
+ *   'ins' (note has it, base doesn't) -> `.sp2a-spacer`, a real empty element in the
+ *      BASE pane. We own that DOM, so we can inject. Its height must come from the
+ *      note-side block, which may not be rendered — hence the lazy harvest into
+ *      `insHeights`. Unknown => 0px => no worse than having no zone at all.
+ *
+ *   'del' (base has it, note doesn't) -> padding-bottom on the note block PRECEDING
+ *      the run. We cannot inject here (the reading view calls setChildrenInPlace()
+ *      every tick and rips out added elements) — but we are already allowed to restyle
+ *      an element it owns, and growing an existing block reserves space just as well
+ *      as inserting a new one. Heights here are EXACT: the base pane is fully rendered.
+ *
+ * The spacers are also ANCHORS, not just spacing: a spacer sits where its row's content
+ * sits in reading order, so a topmost-visible 'ins' block aligns to its spacer exactly,
+ * instead of falling through to the interpolating estimate. That fallback still exists
+ * as a guard, but with zones in place every note row has a counterpart and it should
+ * rarely fire.
+ *
  * LEFT  pane: custom read-only ItemView. Renders the git base version of the note,
  *             fetched into memory via `git show`. Never lands on disk.
  * RIGHT pane: the REAL note in a normal markdown leaf, decorated only by adding
@@ -558,6 +587,11 @@ class GitBaseView extends obsidian.ItemView {
     this.bodyEl = null;
     /** @type {Map<number, HTMLElement>} row.idx -> its block container in this pane. */
     this.blockEls = new Map();
+    /**
+     * @type {Map<number, HTMLElement>} row.idx -> the VIEW ZONE standing in for an
+     * 'ins' row (text the note has and the base does not). See `render`.
+     */
+    this.spacerEls = new Map();
   }
 
   getViewType() {
@@ -586,6 +620,7 @@ class GitBaseView extends obsidian.ItemView {
     // listener to the NEW body element once this returns.
     this.bodyEl = null;
     this.blockEls = new Map();
+    this.spacerEls = new Map();
 
     const session = this.plugin.session;
     if (!session) {
@@ -629,7 +664,23 @@ class GitBaseView extends obsidian.ItemView {
     // Render the BASE version block by block. Because we did the splitting, we
     // own the line map on this side — no getSectionInfo needed here.
     for (const row of session.rows) {
-      if (!row.a) continue; // 'ins' rows have no base-side block
+      if (!row.a) {
+        // VIEW ZONE (VS Code's term). An 'ins' row exists only in the note, so the
+        // base pane is SHORTER than the note by that block's height and every paired
+        // block below the run lands too high. We own this DOM, so we can reserve the
+        // missing height with an empty element — the trick the note pane denies us
+        // (its sizer calls setChildrenInPlace() every scroll tick and rips injections
+        // out). Height comes from the note-side counterpart, measured lazily and
+        // cached, because the reading view may not have rendered it yet; until it is
+        // known the zone is 0px, i.e. exactly today's behaviour. One zone PER ROW (not
+        // per run) so partial knowledge of a run still narrows the error.
+        const sp = sizer.createDiv({ cls: 'sp2a-spacer' });
+        sp.setAttr('data-row-index', String(row.idx));
+        const known = this.plugin.insHeights.get(row.idx);
+        sp.style.height = (known > 0 ? known : 0) + 'px';
+        this.spacerEls.set(row.idx, sp);
+        continue;
+      }
       const el = sizer.createDiv({ cls: 'sp2a-block' });
       el.setAttr('data-line-start', String(row.a.lineStart));
       el.setAttr('data-line-end', String(row.a.lineEnd));
@@ -650,6 +701,15 @@ class GitBaseView extends obsidian.ItemView {
 
     // This pane's scroll listener must follow the freshly-created body element.
     this.plugin.attachScrollSync();
+    // Every base block is now rendered and measurable, which is precisely the moment
+    // the deletion zones become exactly knowable. Deferred one frame: rects read
+    // synchronously after a large DOM build can predate the layout that MarkdownRenderer's
+    // own async work triggers, and a zone computed from a half-laid-out pane is worse
+    // than one computed a frame late.
+    window.requestAnimationFrame(() => {
+      if (!this.bodyEl || !this.bodyEl.isConnected) return; // re-rendered since
+      this.plugin.refreshSpacers(true);
+    });
   }
 
   updateSyncBadge() {
@@ -660,6 +720,7 @@ class GitBaseView extends obsidian.ItemView {
   async onClose() {
     this.bodyEl = null;
     this.blockEls = new Map();
+    this.spacerEls = new Map();
     // Nothing else to tear down; child components are unloaded with this view.
   }
 }
@@ -682,6 +743,41 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     this.syncTimer = null;
     /** rAF throttle token; one pending frame at a time, whichever pane fired. */
     this.rafPending = false;
+    /**
+     * VIEW ZONE height cache: row.idx of an 'ins' row -> the rendered height of its
+     * NOTE-side block, in px.
+     *
+     * Why a cache and not a measurement: the note pane is virtualised, so at any
+     * moment most 'ins' blocks are simply absent from the DOM and have no height to
+     * read. Heights are therefore harvested opportunistically — whenever a block
+     * passes through the post-processor, and from whatever is rendered on each sync
+     * tick — and remembered afterwards, even once the reading view discards the
+     * element. A strong Map is right here (unlike `noteLines`) because the key is a
+     * row index, not a DOM node: it pins a number, not dead DOM.
+     *
+     * Unknown => the zone stays 0px => today's exact behaviour. This structure can
+     * only remove drift, never add it.
+     * @type {Map<number, number>}
+     */
+    this.insHeights = new Map();
+    /** Debounce token for `scheduleSpacerRefresh`. */
+    this.spacerRefreshPending = false;
+    /**
+     * DELETION VIEW ZONES. row.idx of a NOTE-side row -> px of reserved space to hang
+     * BELOW it, standing in for the run of 'del' blocks that follows it in the base.
+     *
+     * Unlike `insHeights` these are EXACT and known up front: the base pane is our own
+     * un-virtualised DOM, every block is rendered, so the run's height is a plain sum
+     * of rects. No lazy harvest, no estimation.
+     * @type {Map<number, number>}
+     */
+    this.delPadBottom = new Map();
+    /**
+     * Same, for the one run that cannot hang below anything: a 'del' run at the very
+     * top of the file, before any note block exists to follow. It hangs ABOVE the
+     * first note block instead. @type {Map<number, number>}
+     */
+    this.delPadTop = new Map();
     /** @type {Array<{el:EventTarget, type:string, fn:Function}>} manual listeners. */
     this.domListeners = [];
     /**
@@ -745,9 +841,41 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
         el.addClass('sp2b-nblock');
         this.noteLines.set(el, { lineStart: info.lineStart, lineEnd: info.lineEnd });
 
-        const kind = this.kindForRange(session, info.lineStart, info.lineEnd);
-        if (kind === 'ins') el.addClass('sp2a-ins');
-        else if (kind === 'mod') el.addClass('sp2a-mod');
+        // Resolve the row ONCE and stamp it on the element. Everything downstream
+        // (view-zone padding, height harvest, per-tick refresh) then reads an
+        // attribute instead of re-running the O(rows) overlap search. That is what
+        // keeps per-tick work proportional to what's RENDERED rather than to the
+        // document — on the 312-block diff the scanning form would run ~300 overlap
+        // tests per visible block, per frame.
+        const row = this.rowForNoteRange(info.lineStart, info.lineEnd);
+        if (row) el.setAttr('data-row-index', String(row.idx));
+
+        // DELETION VIEW ZONE. Re-applied here, not just once after the base renders,
+        // because reading-view sections are recycled: a block scrolled out and back
+        // returns as a fresh element with our inline style gone. The post-processor is
+        // the hook that fires on every such re-render, so treating it as the single
+        // place zones get written makes them self-healing rather than a one-shot that
+        // silently decays as the reader scrolls.
+        if (row) this.styleDelPad(el);
+
+        const kind = row ? row.kind : this.kindForRange(session, info.lineStart, info.lineEnd);
+        if (kind === 'ins') {
+          el.addClass('sp2a-ins');
+          // INSERTION VIEW ZONE HEIGHT TAP. This is the one moment we are guaranteed
+          // to hold an 'ins' block's element: it fires as the reading view renders the
+          // section, and the reading view will later throw that element away. Harvest
+          // the height now, while it exists, so the base pane's zone can reserve the
+          // same space forever after. The read here can be stale-by-a-frame
+          // (images/embeds settle after render) and is taken before any zone padding
+          // is applied, which is why `measureRenderedInsHeights` re-measures — and
+          // subtracts padding — on each tick. This tap is the only way to learn about
+          // blocks that are NOT currently on screen.
+          if (row) {
+            const h = el.getBoundingClientRect().height;
+            if (h > 0) this.insHeights.set(row.idx, h);
+            this.scheduleSpacerRefresh();
+          }
+        } else if (kind === 'mod') el.addClass('sp2a-mod');
       } catch (e) {
         // A post-processor that throws breaks the whole preview render. Never.
         console.error('[spike2b] post-processor error', e);
@@ -758,6 +886,11 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     // changes; re-attaching is cheap and idempotent (attach detaches first).
     this.registerEvent(this.app.workspace.on('layout-change', () => this.attachScrollSync()));
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.attachScrollSync()));
+    // A resize changes where the note pane WRAPS, so every cached view-zone height is
+    // suspect. We can only re-measure what is currently rendered; the rest correct
+    // themselves as they scroll back through the post-processor. Debounced because
+    // 'resize' fires per animation frame of a drag.
+    this.registerEvent(this.app.workspace.on('resize', () => this.scheduleSpacerRefresh()));
     // Belt and braces: registerDomEvent can't be individually unregistered, and these
     // listeners must move between elements mid-session — hence manual attach/detach
     // with an explicit unload hook rather than registerDomEvent.
@@ -767,6 +900,10 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
   onunload() {
     this.detachScrollSync();
     if (this.syncTimer) window.clearTimeout(this.syncTimer);
+    if (this.spacerTimer) window.clearTimeout(this.spacerTimer);
+    this.insHeights = new Map();
+    // Unloading the plugin must leave no trace in the note pane either.
+    try { this.clearDelPads(); } catch (e) { /* workspace already torn down */ }
     this.session = null;
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
@@ -820,6 +957,38 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     return body && body.isConnected ? body : null;
   }
 
+  /**
+   * The base-pane element standing in for `rowIdx` — a real block, or the VIEW ZONE
+   * that occupies the place a real block would have.
+   *
+   * THE SINGLE RESOLVER, and the reason the anchor is exact.
+   *
+   * Before view zones existed, only paired rows had a base element; a topmost-visible
+   * 'ins' row resolved to nothing and sync fell through to `baseScrollTopFor`'s
+   * interpolation, which estimates position by BLOCK COUNT across a run. On the big
+   * diff (26 'ins' rows in 17 runs) the topmost visible note block is frequently an
+   * 'ins' row, so the anchor — which is 0px by construction whenever a counterpart
+   * exists — was measured up to 340px off. It wasn't the interpolation misbehaving;
+   * it was the interpolation being asked a question it can only estimate.
+   *
+   * A spacer sits at exactly the position its row's content occupies in the note's
+   * reading order, so aligning an inserted note block to its spacer is not an
+   * approximation — it is the same answer a real block would give. Every note row
+   * now has a counterpart here, which makes interpolation a guard rather than a path.
+   *
+   * NOTE the zero-height case is still CORRECT, not merely tolerable: a spacer whose
+   * height hasn't been harvested yet is 0px tall but is still in the right PLACE, so
+   * the anchor lands exactly; only the blocks below it stay off until the height is
+   * known. Strictly better than interpolating, at every stage of the harvest.
+   */
+  baseElFor(rowIdx) {
+    const view = this.baseView();
+    if (!view) return null;
+    const el = (view.blockEls && view.blockEls.get(rowIdx)) ||
+               (view.spacerEls && view.spacerEls.get(rowIdx));
+    return el && el.isConnected ? el : null;
+  }
+
   /* ---------------------------------------------------------------- *
    * scroll sync — listener wiring                                     *
    * ---------------------------------------------------------------- */
@@ -857,6 +1026,262 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     );
     // Snap the panes back together immediately so ON is visibly different from OFF.
     if (this.syncEnabled) this.syncNoteToBase();
+  }
+
+  /* ---------------------------------------------------------------- *
+   * view zones (insertion spacers) + deletion collapse                 *
+   *                                                                    *
+   * Both exist for one reason. Paired blocks now measure IDENTICALLY in
+   * the two panes, so the only remaining drift comes from UNPAIRED RUNS
+   * between two paired anchors: an 'ins' run makes the note taller by
+   * exactly its own height, a 'del' run makes the base taller by exactly
+   * its own height, and the next anchor lands off by that amount. VS Code
+   * solves this with view zones on both sides. We only own one side, so:
+   * 'ins' gets a real zone (below), 'del' gets an optional collapse.
+   * ---------------------------------------------------------------- */
+
+  /** Push cached heights onto the base pane's zones. Cheap; idempotent. */
+  applySpacerHeights() {
+    const view = this.baseView();
+    if (!view || !view.spacerEls) return;
+    for (const [idx, el] of view.spacerEls) {
+      const h = this.insHeights.get(idx);
+      const px = (h > 0 ? h : 0) + 'px';
+      // Compare before assigning: writing an identical value still dirties layout,
+      // and this runs on every sync tick.
+      if (el.style.height !== px) el.style.height = px;
+    }
+  }
+
+  /**
+   * Re-measure the 'ins' blocks the note pane happens to have rendered RIGHT NOW.
+   *
+   * Bounded by what is on screen (a dozen or so elements), not by the document, so
+   * this is safe to call per sync tick. Blocks off screen keep whatever height they
+   * were last seen at — a remembered height is strictly better than no height, and
+   * a wrong-by-a-few-px remembered height is strictly better than a 0 that leaves
+   * the whole run's worth of drift in place.
+   * @returns {boolean} true if any cached height changed
+   */
+  measureRenderedInsHeights() {
+    const session = this.session;
+    if (!session || session.error) return false;
+    const note = this.notePane();
+    if (!note) return false;
+    let changed = false;
+    for (const el of note.scroller.querySelectorAll('.sp2a-ins.sp2b-nblock[data-row-index]')) {
+      const idx = Number(el.getAttribute('data-row-index'));
+      if (!isFinite(idx)) continue;
+      const row = session.rows[idx];
+      if (!row || row.kind !== 'ins') continue;
+      // SUBTRACT OUR OWN ZONES. The rect includes padding, and an 'ins' block may
+      // ALSO be carrying a deletion zone (it is a perfectly ordinary candidate for
+      // "the note block preceding a del run"). Measuring the padded height would
+      // reserve the deletion's pixels a second time in the base pane — the two
+      // mechanisms would feed each other, and each pass would grow the error. What we
+      // want is the block's own content height, so take the padding back out.
+      const h = el.getBoundingClientRect().height
+        - (this.delPadBottom.get(idx) || 0)
+        - (this.delPadTop.get(idx) || 0);
+      if (!(h > 0)) continue;
+      if (this.insHeights.get(idx) !== h) {
+        this.insHeights.set(idx, h);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Refresh BOTH directions of view zone. @returns {boolean} true if anything moved.
+   *
+   * ORDER IS DELIBERATE. Insertion zones are measured from note blocks whose padding
+   * comes from deletion zones, and deletion zones are measured from base blocks whose
+   * positions come from insertion zones — so the two are mutually dependent and the
+   * sequence has to break the cycle rather than chase it:
+   *   1. measure 'ins' heights, subtracting any deletion padding already on the block
+   *      (so what we read is content height, independent of our own zones);
+   *   2. push those heights into the base pane's spacers;
+   *   3. re-sum the del runs from the base pane, which has now settled;
+   *   4. write that back to the note pane's padding.
+   * Each step reads a quantity the later steps can't perturb, so this converges in
+   * one pass instead of oscillating.
+   *
+   * PER-TICK COST. This is called from every sync tick, so the steady state — nothing
+   * new learned — must be nearly free: one querySelectorAll over the RENDERED 'ins'
+   * blocks and a rect each. Steps 3-4 walk all rows and force a layout flush to read
+   * base rects, so they run only when a height actually moved (or on the debounced
+   * `force` path). Unconditionally re-summing here would put an O(rows) scan plus a
+   * forced reflow on every frame of every scroll — invisible on the 10-block diff this
+   * was built against, and 312 rows deep on the one it now has to survive.
+   *
+   * @param {boolean} [force] recompute the deletion zones even if nothing moved —
+   *   for the cases where BASE heights changed without any 'ins' height changing
+   *   (a resize, a base re-render).
+   */
+  refreshSpacers(force) {
+    const changed = this.measureRenderedInsHeights();
+    if (changed) this.applySpacerHeights();
+    if (changed || force) {
+      // Del-run heights are read from base blocks, whose layout step 2 may have moved.
+      // Re-summing is what keeps deletion zones true after a wrap change; it is a walk
+      // of the rows plus a rect per 'del' block (25 on the big diff), not per block.
+      this.computeDelPads();
+      this.applyDelPads();
+    }
+    return changed;
+  }
+
+  /**
+   * Debounced refresh for the events that are NOT a scroll tick (a section rendering,
+   * a resize). Trailing-edge: a resize drag fires continuously and only the final
+   * geometry is worth measuring.
+   */
+  scheduleSpacerRefresh() {
+    if (this.spacerRefreshPending) return;
+    this.spacerRefreshPending = true;
+    this.spacerTimer = window.setTimeout(() => {
+      this.spacerRefreshPending = false;
+      this.spacerTimer = null;
+      try {
+        // force: this path exists for the events that change BASE geometry (resize, a
+        // fresh base render) without necessarily moving any 'ins' height.
+        this.refreshSpacers(true);
+        // Zones above the viewport moving means content shifted under the reader;
+        // re-anchor so the correction reads as invisible rather than as a jump.
+        if (this.syncEnabled && !this.syncing) this.syncNoteToBase();
+      } catch (e) {
+        console.error('[spike2b] spacer refresh failed', e);
+      }
+    }, 150);
+  }
+
+  /**
+   * Compute the DELETION view zones: for every run of consecutive 'del' rows, how
+   * much space the NOTE pane must reserve to stay level with the base.
+   *
+   * The mirror of `insHeights`, and the easy direction: the base pane is ours and
+   * un-virtualised — every block is rendered — so a run's height is an exact sum of
+   * rects, known as soon as the base view finishes rendering. Nothing is estimated,
+   * nothing needs harvesting over time.
+   *
+   * ATTACHMENT: a run's height hangs off the note block that immediately PRECEDES it
+   * in note order — the last row carrying a `b` before the run starts. That block's
+   * bottom edge sits exactly where the deleted text would have begun, so growing it
+   * downward opens the gap in the right place.
+   *
+   * LEADING-RUN EDGE CASE: a file beginning with deleted blocks has no preceding note
+   * block. That run hangs off the FIRST note block as padding-TOP instead
+   * (`delPadTop`) — same pixels, same place on screen, expressed from the only side
+   * of the only element available.
+   */
+  computeDelPads() {
+    const session = this.session;
+    const view = this.baseView();
+    this.delPadBottom = new Map();
+    this.delPadTop = new Map();
+    if (!session || session.error || !view || !view.blockEls) return;
+
+    let carry = 0;          // height of the del run currently being walked
+    let lastNoteRow = null; // last row that exists in the note pane
+
+    const flush = () => {
+      if (carry <= 0) return;
+      if (lastNoteRow) {
+        // += rather than =: two del runs separated only by rows absent from the note
+        // pane would otherwise overwrite each other. (Can't happen today — an 'ins'
+        // row carries a `b` and so updates lastNoteRow — but the sum is the honest
+        // form and costs nothing.)
+        this.delPadBottom.set(
+          lastNoteRow.idx,
+          (this.delPadBottom.get(lastNoteRow.idx) || 0) + carry
+        );
+      } else {
+        const first = session.noteRows[0];
+        if (first) {
+          this.delPadTop.set(first.idx, (this.delPadTop.get(first.idx) || 0) + carry);
+        }
+        // else: the note has no blocks at all (whole file deleted). Nothing to hang
+        // the padding on — and nothing to align either. Correctly dropped.
+      }
+      carry = 0;
+    };
+
+    for (const row of session.rows) {
+      if (row.kind === 'del') {
+        const el = view.blockEls.get(row.idx);
+        if (el && el.isConnected) carry += el.getBoundingClientRect().height;
+        continue;
+      }
+      flush(); // the run, if any, ended at the row before this one
+      if (row.b) lastNoteRow = row;
+    }
+    flush(); // a run that ends at EOF
+  }
+
+  /**
+   * Write the deletion zones onto the note pane's rendered blocks.
+   *
+   * WHY THIS IS ALLOWED given we cannot inject into the note pane: we are not
+   * injecting. The reading view recycles its section elements and calls
+   * sizerEl.setChildrenInPlace() every scroll tick, which rips out any element we
+   * ADD — but it does not object to us restyling an element it already owns. Growing
+   * an existing block IS a view zone; it just isn't a new node.
+   *
+   * PADDING, NOT MARGIN — load-bearing. Padding is inside the border box, so the rect
+   * Obsidian's own measureSection() reads already includes it and its virtual-display
+   * math (sizer min-height, section offsets) stays true. A margin lives OUTSIDE the
+   * box: the reading view would measure each block at its unpadded height, disagree
+   * with real layout by the sum of every zone above, and mis-place sections — trading
+   * our drift for its drift.
+   *
+   * No text nodes, no textContent, no wrapper, no pseudo-content — an inline style on
+   * an element the renderer already owns, safe for the side-comments plugin's anchors
+   * by exactly the same argument as the diff classes.
+   *
+   * Bounded by RENDERED blocks (a screenful), not by the document: the row index is
+   * read off the element's own data attribute, never re-derived by scanning rows.
+   */
+  applyDelPads() {
+    const note = this.notePane();
+    if (!note) return;
+    for (const el of note.scroller.querySelectorAll('.sp2b-nblock[data-row-index]')) {
+      this.styleDelPad(el);
+    }
+  }
+
+  /** Apply (or clear) one note block's zone padding. Idempotent. */
+  styleDelPad(el) {
+    const idx = Number(el.getAttribute('data-row-index'));
+    if (!isFinite(idx)) return;
+    const bottom = this.delPadBottom.get(idx) || 0;
+    const top = this.delPadTop.get(idx) || 0;
+    const bpx = bottom > 0 ? bottom + 'px' : '';
+    const tpx = top > 0 ? top + 'px' : '';
+    // Compare before writing: this runs per section render and per refresh, and an
+    // identical assignment still invalidates layout.
+    if (el.style.paddingBottom !== bpx) el.style.paddingBottom = bpx;
+    if (el.style.paddingTop !== tpx) el.style.paddingTop = tpx;
+  }
+
+  /**
+   * Hand the note pane's blocks back exactly as we found them.
+   * Reading-view sections are recycled rather than rebuilt on command, so closing a
+   * review must actively remove the padding — otherwise the note keeps phantom gaps
+   * where deletions used to be, with no session left to explain them.
+   */
+  clearDelPads() {
+    this.delPadBottom = new Map();
+    this.delPadTop = new Map();
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      const scroller = view ? findPreviewScroller(view) : null;
+      if (!scroller) continue;
+      for (const el of scroller.querySelectorAll('.sp2b-nblock')) {
+        el.style.paddingBottom = '';
+        el.style.paddingTop = '';
+      }
+    }
   }
 
   /**
@@ -975,16 +1400,18 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     const view = this.baseView();
     if (!base || !view) return null;
 
-    if (row.paired) {
-      const el = view.blockEls.get(row.idx);
-      if (!el) return null;
-      return clamp(offsetIn(base, el) + frac * el.offsetHeight, 0, maxScroll(base));
+    // Any row with a counterpart — a real block OR its view zone — is answerable
+    // exactly, so it never reaches the interpolation below. Before view zones this
+    // read `if (row.paired)`, which sent every 'ins' row down the estimating path.
+    const own = this.baseElFor(row.idx);
+    if (own) {
+      return clamp(offsetIn(base, own) + frac * own.offsetHeight, 0, maxScroll(base));
     }
 
     const prev = row.pnPrev;
     const next = row.pnNext;
-    const prevEl = prev ? view.blockEls.get(prev.idx) : null;
-    const nextEl = next ? view.blockEls.get(next.idx) : null;
+    const prevEl = prev ? this.baseElFor(prev.idx) : null;
+    const nextEl = next ? this.baseElFor(next.idx) : null;
     const lo = prevEl ? offsetIn(base, prevEl) + prevEl.offsetHeight : 0;
     const hi = nextEl ? offsetIn(base, nextEl) : maxScroll(base);
     const p = (row.pnRunIdx + frac) / row.pnRunLen;
@@ -998,7 +1425,12 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
    * not by pixel, precisely because we cannot measure its unrendered parts.
    */
   noteLineFor(row, frac) {
-    if (row.paired) {
+    // Gate on `row.b`, not `row.paired`: an 'ins' row is unpaired but its note-side
+    // lines are known EXACTLY (it's the base side it lacks). Since view zones let a
+    // spacer be the base pane's topmost visible element, this direction now gets asked
+    // about 'ins' rows too — and estimating a line number we already know would be a
+    // self-inflicted error.
+    if (row.b) {
       const span = row.b.lineEnd - row.b.lineStart + 1;
       return row.b.lineStart + frac * span;
     }
@@ -1020,6 +1452,11 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     const base = this.basePane();
     if (!note || !base) return;
 
+    // BEFORE anchoring, not after: the zones we are about to correct change where the
+    // anchor's counterpart sits. Measuring on-screen blocks only, this is a handful
+    // of rect reads — and reading a rect we are about to read anyway for the anchor.
+    this.refreshSpacers();
+
     const hit = this.topmostVisible(
       note.scroller,
       note.scroller.querySelectorAll('.sp2b-nblock')
@@ -1040,9 +1477,11 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     // the moment the header wraps to two lines, a banner appears, or a theme
     // changes its padding), align the two blocks' actual on-screen positions and
     // let the delta absorb whatever chrome exists. Self-correcting by construction.
-    const baseView = this.baseView();
-    const baseEl = baseView && baseView.blockEls ? baseView.blockEls.get(row.idx) : null;
-    if (baseEl && baseEl.isConnected) {
+    // blockEls first, then spacerEls — see `baseElFor`. With view zones in place this
+    // resolves for EVERY note row, so the interpolated fallback below is a guard for
+    // the pathological (a row whose element vanished mid-frame), not a routine path.
+    const baseEl = this.baseElFor(row.idx);
+    if (baseEl) {
       const delta = baseEl.getBoundingClientRect().top - hit.el.getBoundingClientRect().top;
       if (Math.abs(delta) < 1) return; // already aligned; don't churn
       const want = clamp(base.scrollTop + delta, 0, maxScroll(base));
@@ -1072,7 +1511,11 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     const view = this.baseView();
     if (!note || !base || !view) return;
 
-    const hit = this.topmostVisible(base, base.querySelectorAll('.sp2a-block'));
+    // Spacers are anchors in this direction too: a view zone carries a data-row-index
+    // and its row's NOTE lines are known exactly, so the zone answers as well as a
+    // block would. Both selectors are needed — they are disjoint sets covering,
+    // between them, every row in the base pane's reading order.
+    const hit = this.topmostVisible(base, base.querySelectorAll('.sp2a-block, .sp2a-spacer'));
     if (!hit) return;
 
     const idx = Number(hit.el.getAttribute('data-row-index'));
@@ -1198,15 +1641,21 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
     }
 
     // Where does the note-pane top block's counterpart ACTUALLY sit in the base pane?
+    // The measurement must follow the same resolver sync uses, or the report grades a
+    // different mechanism than the one that ran. `noteRow.paired` was the old gate; it
+    // reported null for every 'ins' row — i.e. it went quiet on exactly the rows that
+    // drifted most, which is how a 340px anchor error stayed invisible in a diagnostic
+    // whose whole job was to surface it.
     let deltaPx = null;
-    let deltaNote = 'unpaired note block — interpolated region, no exact counterpart';
-    if (noteRow && noteRow.paired && base && view && noteOffsetPx != null) {
-      const el = view.blockEls.get(noteRow.idx);
+    let deltaNote = 'no base-side counterpart at all — interpolated region';
+    if (noteRow && base && view && noteOffsetPx != null) {
+      const el = this.baseElFor(noteRow.idx);
       if (el) {
         const baseOffsetPx = el.getBoundingClientRect().top - base.getBoundingClientRect().top;
         deltaPx = Number((baseOffsetPx - noteOffsetPx).toFixed(1));
         deltaNote = '0 = counterpart blocks sit at the same depth in both viewports; ' +
-                    '+ = base pane block sits lower than the note pane block';
+                    '+ = base pane block sits lower than the note pane block' +
+                    (noteRow.paired ? '' : ' (counterpart is a view zone, not a block)');
       }
     }
 
@@ -1217,6 +1666,34 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
       counts: session.counts,
       syncEnabled: this.syncEnabled,
       lastNoteScrollApi: this.lastScrollApi,
+      // View-zone coverage. `known` climbs toward `total` as the reader scrolls the
+      // note pane past each insertion — so a low ratio here EXPLAINS a residual
+      // drift rather than leaving it a mystery.
+      viewZones: (() => {
+        const insRows = session.rows.filter((r) => r.kind === 'ins');
+        let reserved = 0;
+        for (const r of insRows) reserved += this.insHeights.get(r.idx) || 0;
+        return {
+          total: insRows.length,
+          knownHeights: insRows.filter((r) => this.insHeights.has(r.idx)).length,
+          reservedPx: Number(reserved.toFixed(1)),
+        };
+      })(),
+      // The other direction: space reserved in the NOTE pane for deleted base blocks.
+      // Exact by construction (the base pane is fully rendered), so `runs` and
+      // `reservedPx` should be stable from the first render — if reservedPx is 0 while
+      // the diff reports deletions, the padding never landed and that is the bug.
+      delZones: {
+        delRows: session.rows.filter((r) => r.kind === 'del').length,
+        runs: this.delPadBottom.size + this.delPadTop.size,
+        reservedPx: Number(
+          ([...this.delPadBottom.values(), ...this.delPadTop.values()]
+            .reduce((a, b) => a + b, 0)).toFixed(1)
+        ),
+        leadingRunPx: Number(
+          ([...this.delPadTop.values()].reduce((a, b) => a + b, 0)).toFixed(1)
+        ),
+      },
       panes: {
         // Spec naming: pane A = the real note, pane B = our git-base ItemView.
         A_note: notePart,
@@ -1290,6 +1767,9 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
       const currentText = await this.app.vault.cachedRead(file); // read-only
 
       this.session = buildSession(this.app, file, baseText, ctx, sha, currentText);
+      // Row indices are session-local: a re-pin re-pairs everything, so yesterday's
+      // heights would be filed under today's unrelated rows. Drop them.
+      this.insHeights = new Map();
       this.warnedNoScroller = false;
       new obsidian.Notice(
         `Spike2b: base ${this.session.shortSha} · ${this.session.counts.changed} changed block(s)`
@@ -1311,6 +1791,13 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
         counts: { blocks: 0, curBlocks: 0, changed: 0 },
         error: msg,
       };
+      this.insHeights = new Map();
+      // The error render returns before the base pane is built, so the rAF that
+      // normally recomputes zones never runs. Without this, a failed re-pin would
+      // leave the PREVIOUS session's gaps padding the note with nothing to justify
+      // them — a wrong-but-plausible state, which is the class of failure this file
+      // works hardest to avoid.
+      this.clearDelPads();
       new obsidian.Notice(`Spike2b: ${String(msg).split('\n')[0]}`, 8000);
       console.error('[spike2b]', e);
     }
@@ -1324,7 +1811,12 @@ module.exports = class Spike2bGitDiffPlugin extends obsidian.Plugin {
 
   closeReview() {
     this.detachScrollSync();
+    // BEFORE dropping the session: clearDelPads walks live note elements, and the
+    // padding is ours to remove. Leaving it would strand phantom gaps in the reader's
+    // note with no review open to explain them.
+    this.clearDelPads();
     this.session = null;
+    this.insHeights = new Map();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
     this.rerenderPreviews();
     new obsidian.Notice('Spike2b: review closed.');
