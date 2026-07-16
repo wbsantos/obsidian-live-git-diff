@@ -61,6 +61,26 @@ import {
 import type { LiveGitDiffSettings } from './settings.ts';
 import * as log from './log.ts';
 
+/**
+ * Obsidian's reading-view renderer, reduced to the two internals we decorate against. Not in
+ * obsidian.d.ts — feature-detected at every use and behind previewRenderer(), so a shape
+ * change degrades to a logged fallback rather than a throw. `sections` is the section list
+ * (each with its rendered `el`); `getSectionInfo` gives an element's source line range from
+ * OUTSIDE a render pass, which is what lets us decorate already-rendered sections in place.
+ */
+interface PreviewRenderer {
+  sections: Array<{ el: HTMLElement; rendered?: boolean }>;
+  getSectionInfo(el: HTMLElement): { lineStart: number; lineEnd: number } | null;
+}
+
+/** The preview renderer of a markdown view, or null if the internals aren't the expected shape. */
+function previewRenderer(view: MarkdownView): PreviewRenderer | null {
+  const r = (view.previewMode as unknown as { renderer?: unknown } | undefined)?.renderer as
+    | PreviewRenderer
+    | undefined;
+  return r && Array.isArray(r.sections) && typeof r.getSectionInfo === 'function' ? r : null;
+}
+
 export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
   settings: LiveGitDiffSettings = DEFAULT_SETTINGS;
 
@@ -80,6 +100,9 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
 
   /** Warn about a missing scroller once per session, not once per frame. */
   private warnedNoScroller = false;
+
+  /** Warn once if Obsidian's preview-renderer internals aren't the shape we decorate against. */
+  private warnedNoRenderer = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -170,11 +193,11 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
       },
     });
 
-    // INTERIM: re-render the note pane so a third-party annotation plugin (side-comments,
-    // etc.) re-applies its reading-view marks. Opening a review can fire our rerender
-    // before such a plugin has finished loading its sidecar asynchronously, so its marks
-    // don't paint until something re-runs the post-processors. This command is that
-    // "something" until the timing is handled automatically. Bindable to a hotkey.
+    // ESCAPE HATCH: force a full note-pane rerender so a third-party annotation plugin
+    // re-applies its reading-view marks. Opening a review no longer wipes them (we decorate
+    // in place now, never emptying the note DOM — see decorateNotePaneInPlace), but a
+    // command that says "repaint everyone's annotations" is cheap insurance for the general
+    // case where some other plugin loses its marks. Bindable to a hotkey.
     this.addCommand({
       id: 'refresh-annotations',
       name: 'Refresh annotations in the note pane',
@@ -185,61 +208,18 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
       },
     });
 
-    // NOTE pane decoration. Classes only — never text.
+    // NOTE pane decoration. Classes only — never text. The registered post-processor is a
+    // thin caller so the SAME body can also be driven directly over sections that were
+    // already rendered when a review opened (decorateNotePaneInPlace) — see decorateNoteSection.
     this.registerMarkdownPostProcessor((el, ctx) => {
       try {
         const session = this.session;
         if (!session || session.error) return;
         // Guard: also excludes our own base-pane renders, which pass ''.
         if (!ctx.sourcePath || ctx.sourcePath !== session.filePath) return;
-
         const info = ctx.getSectionInfo(el);
         if (!info) return; // not a top-level section (or not preview) — skip, never throw
-
-        // ANCHOR TAP. Every section gets tagged, not just changed ones: scroll sync needs
-        // to find the topmost visible block whatever its kind, and 'same' blocks are the
-        // overwhelming majority of anchors (261 of 271 on the test doc).
-        el.addClass(CLS.nblock);
-        this.noteLines.set(el, { lineStart: info.lineStart, lineEnd: info.lineEnd });
-
-        // Resolve the row ONCE and stamp it on the element. Everything downstream
-        // (view-zone padding, height harvest, per-tick refresh) then reads an attribute
-        // instead of re-running the O(rows) overlap search. That is what keeps per-tick
-        // work proportional to what's RENDERED rather than to the document — on a
-        // 312-block diff the scanning form would run ~300 overlap tests per visible
-        // block, per frame.
-        const row = this.rowForNoteRange(info.lineStart, info.lineEnd);
-        if (row) el.setAttr(ATTR_ROW, String(row.idx));
-
-        // DELETION VIEW ZONE. Re-applied here, not just once after the base renders,
-        // because reading-view sections are recycled: a block scrolled out and back
-        // returns as a fresh element with our inline style gone. The post-processor is
-        // the hook that fires on every such re-render, so treating it as the single place
-        // zones get written makes them self-healing rather than a one-shot that silently
-        // decays as the reader scrolls.
-        if (row) this.zones.styleDelPad(el);
-
-        const kind = row ? row.kind : this.kindForRange(session, info.lineStart, info.lineEnd);
-
-        // SET the kind, never accumulate it: this element may still be wearing the
-        // previous session's wash, and only a removal can take it off. See setNoteKind.
-        setNoteKind(el, kind);
-
-        if (kind === 'ins') {
-          // INSERTION VIEW ZONE HEIGHT TAP — the one moment we are guaranteed to hold an
-          // 'ins' block's element. See ViewZones.harvestInsHeight.
-          if (row) this.zones.harvestInsHeight(row, el);
-        } else if (kind === 'mod') {
-          // WORD-LEVEL MARKS. Here, not at base-render time, because this is the first
-          // moment both rendered texts exist. Re-runs on every recycle and is idempotent
-          // (it unwraps its own spans first).
-          if (row) this.charMarks.apply(row, el);
-        } else {
-          // Same reason as the wash above: a block that was 'mod' last session keeps its
-          // word-marks otherwise, since charMarks.apply — the only thing that unwraps
-          // them — no longer runs for this block.
-          unwrapCharMarks(el);
-        }
+        this.decorateNoteSection(el, info);
       } catch (e) {
         // A post-processor that throws breaks the whole preview render. Never.
         log.error('post-processor error', e);
@@ -592,24 +572,145 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
     }
 
     await this.revealView();
-    this.rerenderPreviews();
-    // The note pane's sections are re-created by rerenderPreviews above, so its scroller
-    // may be new; the base pane's body certainly is.
+    // Decorate the note's already-rendered sections IN PLACE. Deliberately NOT a rerender:
+    // that would empty every section and wipe other plugins' note-pane decorations. The base
+    // pane's body is freshly built by revealView; the note pane keeps its DOM.
+    this.decorateNotePaneInPlace();
     this.sync.attach();
   }
 
   closeReview(): void {
     this.sync.detach();
-    // BEFORE dropping the session: clearNoteDecorations walks live note elements, and the
-    // padding is ours to remove. Leaving it would strand phantom gaps in the reader's
-    // note with no review open to explain them.
+    // clearNoteDecorations fully reverses us — paddings, word-marks, kinds, and our attrs —
+    // reaching detached sections too. No rerender on close: emptying the note to "clean up"
+    // our own classes would take every OTHER plugin's marks down with it, and the recovery
+    // race (see openReview) could leave them wiped after the review is already gone.
     this.clearNoteDecorations();
     this.session = null;
     this.zones.reset();
     this.charMarks.reset();
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
-    this.rerenderPreviews();
     new Notice('Review closed.');
+  }
+
+  /**
+   * Decorate ONE already-rendered note section: tag it as an anchor, resolve its row, apply
+   * the deletion zone, set its kind, and (for changed rows) word-marks. This is the note
+   * post-processor's body, extracted so it can be driven two ways with identical behaviour —
+   * by Obsidian as sections render naturally, AND by decorateNotePaneInPlace() over sections
+   * already on screen when a review opened. Idempotent by construction: every primitive it
+   * calls is recycle-safe (setNoteKind SETS, charMarks/unwrapCharMarks self-revert, styleDelPad
+   * compares before writing).
+   */
+  private decorateNoteSection(
+    el: HTMLElement,
+    info: { lineStart: number; lineEnd: number },
+  ): void {
+    const session = this.session;
+    if (!session || session.error) return;
+
+    // ANCHOR TAP. Every section gets tagged, not just changed ones: scroll sync needs to
+    // find the topmost visible block whatever its kind, and 'same' blocks are the
+    // overwhelming majority of anchors (261 of 271 on the test doc).
+    el.addClass(CLS.nblock);
+    this.noteLines.set(el, { lineStart: info.lineStart, lineEnd: info.lineEnd });
+
+    // Resolve the row ONCE and stamp it on the element. Everything downstream (view-zone
+    // padding, height harvest, per-tick refresh) then reads an attribute instead of
+    // re-running the O(rows) overlap search — keeping per-tick work proportional to what
+    // is RENDERED rather than to the document.
+    const row = this.rowForNoteRange(info.lineStart, info.lineEnd);
+    if (row) el.setAttr(ATTR_ROW, String(row.idx));
+
+    // DELETION VIEW ZONE. Re-applied here, not just once after the base renders, because
+    // reading-view sections are recycled: a block scrolled out and back returns as a fresh
+    // element with our inline style gone. This is the single place zones get written, which
+    // makes them self-healing rather than a one-shot that decays as the reader scrolls.
+    if (row) this.zones.styleDelPad(el);
+
+    const kind = row ? row.kind : this.kindForRange(session, info.lineStart, info.lineEnd);
+
+    // SET the kind, never accumulate it: this element may still be wearing the previous
+    // session's wash, and only a removal can take it off. See setNoteKind.
+    setNoteKind(el, kind);
+
+    if (kind === 'ins') {
+      // INSERTION VIEW ZONE HEIGHT TAP — the one moment we are guaranteed to hold an 'ins'
+      // block's element. See ViewZones.harvestInsHeight.
+      if (row) this.zones.harvestInsHeight(row, el);
+    } else if (kind === 'mod') {
+      // WORD-LEVEL MARKS. Here, not at base-render time, because this is the first moment
+      // both rendered texts exist. Re-runs on every recycle and is idempotent (it unwraps
+      // its own spans first).
+      if (row) this.charMarks.apply(row, el);
+    } else {
+      // A block that was 'mod' last session keeps its word-marks otherwise, since
+      // charMarks.apply — the only thing that unwraps them — no longer runs for this block.
+      unwrapCharMarks(el);
+    }
+  }
+
+  /**
+   * Decorate the note pane's ALREADY-RENDERED sections in place — the alternative to forcing
+   * a rerender when a review opens.
+   *
+   * WHY NOT rerender(true): Obsidian implements it as `el.empty()` on every section, which
+   * SYNCHRONOUSLY destroys every OTHER plugin's note-pane decorations (annotation-plugin
+   * highlights, etc.) and bets they can all rebuild during the async re-render — a bet that
+   * fails at the hostile moment openReview creates (mid-split-resize, an ~84-render base-pane
+   * storm, inside Obsidian's `lastText = null` window). The sections that existed before the
+   * review opened have simply never passed through our post-processor; this runs it on them
+   * directly, touching nothing else. Later renders are covered by the registered processor as
+   * before. Root cause + probes: docs/designs/annotation-mark-wipe-fix.md.
+   *
+   * Feature-detected against Obsidian internals (previewMode.renderer.sections /
+   * getSectionInfo). If the shape ever changes, this falls back to the old rerender for that
+   * one leaf, warned once — the same degrade-loudly pattern the scroll APIs use (sync.ts).
+   *
+   * FOOTGUN, pre-neutralised: an UNRENDERED (empty) section must be skipped — decorating one
+   * would make charMarks diff "" against the base text and cache wrong ranges under row.idx
+   * for the whole session. An empty section has nothing to wash; the registered processor
+   * decorates it when it actually renders.
+   */
+  private decorateNotePaneInPlace(): void {
+    const session = this.session;
+    if (!session || session.error) return;
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      if (!(view instanceof MarkdownView)) continue;
+      if (!view.file || view.file.path !== session.filePath) continue;
+      if (typeof view.getMode === 'function' && view.getMode() !== 'preview') continue;
+
+      const renderer = previewRenderer(view);
+      if (!renderer) {
+        // Unexpected internals (a future Obsidian) — fall back to the sledgehammer for this
+        // one leaf. It can still wipe annotation marks, but only here, only when the internal
+        // shape we rely on is gone, and it is logged rather than silent.
+        if (!this.warnedNoRenderer) {
+          this.warnedNoRenderer = true;
+          log.warn(
+            'previewMode.renderer.sections/getSectionInfo not found — falling back to a full ' +
+            'rerender to decorate the note pane. Third-party annotation marks may flicker on open.',
+          );
+        }
+        try {
+          if (view.previewMode && typeof view.previewMode.rerender === 'function') {
+            view.previewMode.rerender(true);
+          }
+        } catch (e) {
+          log.error('rerender fallback failed', e);
+        }
+        continue;
+      }
+
+      for (const section of renderer.sections) {
+        const el = section.el;
+        // Skip unrendered/empty sections — see the FOOTGUN note above.
+        if (!el || section.rendered === false || el.childElementCount === 0) continue;
+        const info = renderer.getSectionInfo(el);
+        if (info) this.decorateNoteSection(el, info);
+      }
+    }
   }
 
   /**
@@ -627,16 +728,41 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
     this.charMarks.reset();
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
-      const scroller = view ? findPreviewScroller(view) : null;
-      if (!scroller) continue;
-      for (const el of Array.from(scroller.querySelectorAll<HTMLElement>(`.${CLS.nblock}`))) {
+      if (!view) continue;
+      for (const el of this.decoratedNoteEls(view)) {
         el.style.paddingBottom = '';
         el.style.paddingTop = '';
         unwrapCharMarks(el);
         setNoteKind(el, null);
+        el.removeClass(CLS.haspad);
+        el.removeAttribute(ATTR_ROW);
         el.removeClass(CLS.nblock);
       }
     }
+  }
+
+  /**
+   * The note-pane elements we may have decorated in `view`.
+   *
+   * Prefer the renderer's section list — it reaches sections Obsidian has DETACHED (scrolled
+   * off), which `scroller.querySelectorAll` cannot, and which we now decorate in place so
+   * must also be able to clean. Falls back to the scroller walk when the internals aren't the
+   * expected shape (same feature-detect as decorateNotePaneInPlace).
+   */
+  private decoratedNoteEls(view: unknown): HTMLElement[] {
+    const v = view as MarkdownView;
+    const renderer = v instanceof MarkdownView ? previewRenderer(v) : null;
+    if (renderer) {
+      const out: HTMLElement[] = [];
+      for (const s of renderer.sections) {
+        if (s.el && s.el.classList.contains(CLS.nblock)) out.push(s.el);
+      }
+      if (out.length) return out;
+    }
+    const scroller = findPreviewScroller(view);
+    return scroller
+      ? Array.from(scroller.querySelectorAll<HTMLElement>(`.${CLS.nblock}`))
+      : [];
   }
 
   /**
@@ -673,7 +799,15 @@ export default class LiveGitDiffPlugin extends Plugin implements SyncHost {
     }
   }
 
-  /** Force preview panes to re-run post-processors so decorations refresh. */
+  /**
+   * Force preview panes to re-run their post-processors by emptying and rebuilding sections.
+   *
+   * The sledgehammer: it wipes EVERY plugin's note-pane decorations for the async-rebuild
+   * window, which is why openReview/closeReview no longer use it (they decorate/clear in
+   * place). Two callers remain: the "Refresh annotations" escape-hatch command, where the
+   * wipe-and-rebuild is exactly the intent, and decorateNotePaneInPlace's fallback when
+   * Obsidian's renderer internals aren't the shape we can walk.
+   */
   private rerenderPreviews(): void {
     this.app.workspace.getLeavesOfType('markdown').forEach((leaf) => {
       try {
