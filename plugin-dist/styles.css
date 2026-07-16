@@ -1,0 +1,311 @@
+/* Live Git Diff — block-level diff rails + word-level marks.
+
+   Rails are CSS ONLY (backgrounds / absolutely-positioned bars). Never real text:
+   injecting text into an annotated block silently breaks annotation plugins' anchors,
+   because they store SOURCE-TEXT offsets and resolve them by walking text nodes. */
+
+/* ------------------------------------------------------------------ *
+ * THE PALETTE — five colors, and why exactly five.
+ *
+ * VS Code's scheme, adopted verbatim (verified by grepping its own
+ * markdown-language-features/media/markdown.css):
+ *
+ *   BACKGROUND answers "is this the new text?"   green = new, red = old
+ *   RAIL       answers "where did it come from?" a distinct bar = replaced something
+ *
+ * VS Code uses NO yellow anywhere. Its only 'modified' color is
+ * --vscode-editorGutter-modifiedBackground, and its rule
+ *   .code-line-diff-modified.code-line-diff-added { box-shadow:none }
+ * shows the design: a modified line IS the 'added' (green) wash; the 'modified' class
+ * merely drops the green rail so the other bar can show.
+ *
+ * An earlier draft washed 'mod' blocks amber on BOTH sides — a third state VS Code
+ * doesn't have, and it collided with annotation plugins' own yellow highlight, so
+ * yellow meant two things on screen. Deleting the state fixed that for free: yellow
+ * now means ONLY "annotated". Side-by-side needs no third color anyway — the layout
+ * already says "this became that": red on the left, green on the right.
+ *
+ * WHY LITERAL VALUES AND NOT OBSIDIAN'S THEME VARS:
+ * an early version used var(--color-green) / var(--color-red) at 0.10 alpha and it read
+ * as harsh — even though 0.10 is LIGHTER than GitHub's 0.30. The intensity was never
+ * the alpha; it was the HUE. Obsidian's --color-red is rgb(233,49,71), an alarm red.
+ * GitHub picked hues that are already nearly white (#ffcecb pale pink, #aceebb pale
+ * mint) and can therefore sit at a higher alpha while staying quiet behind text. They
+ * tuned the hue, not the opacity.
+ *
+ * These are custom properties so the settings tab can override them (it writes inline
+ * on <body>, which outranks both blocks below without an !important arms race).
+ * ------------------------------------------------------------------ */
+
+/* --- light (GitHub Light Default, taken from github-vscode-theme) --- */
+body {
+  --lgd-ins-bg: #6fdd8b80;   /* insertedTextBackground */
+  --lgd-del-bg: #ff818266;   /* removedTextBackground  */
+  --lgd-ins-rail: #4ac26b66; /* editorGutter.addedBackground */
+  --lgd-del-rail: #ff818266; /* editorGutter.deletedBackground */
+  --lgd-mod-rail: #d4a72c66; /* editorGutter.modifiedBackground */
+}
+
+/* --- dark (GitHub Dark Default) --- */
+body.theme-dark {
+  --lgd-ins-bg: #3fb9504d;
+  --lgd-del-bg: #ff7b724d;
+  --lgd-ins-rail: #2ea04366;
+  --lgd-del-rail: #f8514966;
+  --lgd-mod-rail: #bb800966;
+}
+
+/* ------------------------------------------------------------------ *
+ * THE RAIL. Floats 12px clear of the text (VS Code's
+ * .diff-modification-gutter trick) and costs ZERO layout — no padding, no width
+ * change, so paired-block heights and wrap points stay identical between the two panes
+ * and the view zones hold.
+ *
+ * ::before is not a text node, so it cannot perturb the cumulative-offset walk that
+ * annotation plugins use to resolve their anchors. That is the same reason the whole
+ * decoration layer is backgrounds rather than borders + padding: an earlier attempt
+ * used border-left + padding-left, which shifted the text and changed the box Obsidian
+ * measures for its virtualised layout.
+ * ------------------------------------------------------------------ */
+.lgd-ins,
+.lgd-del,
+.lgd-mod {
+  position: relative;
+  border-radius: 2px;
+}
+
+.lgd-ins::before,
+.lgd-del::before,
+.lgd-mod::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * ONE COLOR, PAINTED TWICE.
+ *
+ * VS Code's rendered-markdown diff has NO word-level classes at all — grep its
+ * markdown.css and you find only .code-line-diff{,-added,-deleted,-modified}. It gets
+ * darker words by putting the SAME class on the changed word spans as on the line: the
+ * word receives a second coat of the same translucent color and alpha compositing does
+ * the work. That is why five colors reach every pixel of this diff.
+ *
+ * Note it uses *TextBackground* for the LINE, not *LineBackground*:
+ *   .code-line-diff-deleted { background-color: var(--vscode-diffEditor-removedTextBackground) }
+ * An earlier version used removedLineBackground (#ffcecb4d) for the block, which
+ * composites to rgb(255,240,239) — nearly white — so the whole effect floated away.
+ * Theirs lands at rgb(255,205,205) with words at rgb(255,175,175).
+ * ------------------------------------------------------------------ */
+
+/* the block wash */
+.lgd-ins { background-color: var(--lgd-ins-bg); }
+.lgd-del { background-color: var(--lgd-del-bg); }
+.lgd-nblock.lgd-mod { background-color: var(--lgd-ins-bg); } /* NEW side of a change */
+.lgd-block.lgd-mod  { background-color: var(--lgd-del-bg); } /* OLD side of a change */
+
+/* the rails */
+.lgd-ins::before { background: var(--lgd-ins-rail); }
+.lgd-del::before { background: var(--lgd-del-rail); }
+.lgd-mod::before { background: var(--lgd-mod-rail); }
+
+/* the second coat — same color as the line it sits on */
+.lgd-char-ins { background-color: var(--lgd-ins-bg); }
+.lgd-char-del { background-color: var(--lgd-del-bg); }
+
+.lgd-same { opacity: .75; }
+
+/* ---- word-level marks ----
+
+   BACKGROUND ONLY — no border, no padding, no font change. Anything that alters an
+   inline box's metrics would change its block's height, and the view zones are measured
+   from those heights: a padded char mark would silently desync the pane alignment.
+   The plugin MEASURES this at runtime (charMarks.maxBaseHeightDeltaPx in the alignment
+   report) rather than trusting the claim. */
+.lgd-char-ins,
+.lgd-char-del {
+  border-radius: 2px;
+  /* A mark that wraps across lines should paint each line, not one giant box. */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* ---- left (base) view ---- */
+
+.lgd-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.lgd-header {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.lgd-title {
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+  color: var(--text-normal);
+}
+
+.lgd-sub {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+/* Scroll-sync state, shown in the base pane's subheader. */
+.lgd-sync { color: var(--text-muted); }
+
+.lgd-sha {
+  font-family: var(--font-monospace);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.lgd-empty {
+  padding: 24px 16px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.lgd-error {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--color-red, #cf222e);
+  border-radius: 4px;
+  background: var(--background-modifier-error, #ffebe966);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+}
+
+.lgd-block {
+  /* No margin override: blocks are spaced by the rendered content's OWN margins,
+     exactly as in a real reading view. `margin:0 0 4px` here collapsed every paragraph
+     gap and made the pane look squished.
+     No gutter reserved either: the rail is absolutely positioned and occupies no space,
+     so decorated and undecorated blocks stay identical. */
+}
+
+/* ---- view zones ----
+
+   Paired blocks already measure identically in the two panes, so ALL remaining drift
+   comes from UNPAIRED runs: an 'ins' run makes the note taller, a 'del' run makes the
+   base taller, and the next paired anchor lands off by exactly that height.
+
+   VS Code's answer is a view zone — blank reserved space on whichever side is SHORT,
+   with both sides' real content always shown full size. Deletions are never collapsed
+   or hidden. We do the same, from the two sides we're allowed to touch:
+
+     'ins' -> `.lgd-spacer`, a real element in the base pane (ours; we can inject).
+     'del' -> padding-bottom on the preceding note block (theirs; we can only restyle
+              what already exists — hence padding rather than a new node).
+
+   Only the 'ins' side needs CSS; the 'del' side is an inline style, because its height
+   is per-run and computed at runtime. */
+
+/* A view zone: reserves the height its counterpart occupies in the note pane.
+
+   The inline `height` this element carries is a DELIBERATE inline style, not a missing
+   class: the value is measured from a specific note block at runtime and is different
+   for every zone, so there is no class that could express it. It doubles as the SCROLL
+   ANCHOR for its row, which is why it must sit at exactly the right place in reading
+   order rather than merely add up to the right total.
+
+   NO margin/padding/border: every pixel of this element must come from the inline
+   height, or the reservation is wrong by whatever the box model added on top. */
+.lgd-spacer {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * Make the base pane geometrically IDENTICAL to a real reading view.
+ *
+ * Why this is not cosmetic: scroll sync anchors the TOPMOST block by source line.
+ * Everything below the anchor only stays aligned if both panes wrap at the same place
+ * and produce the same block heights. Different widths => different wrap points =>
+ * blocks below the anchor drift within the viewport. Matching typography is therefore
+ * load-bearing for perceived alignment.
+ * ------------------------------------------------------------------ */
+.lgd-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Rail breathing room lives on the SCROLLER, never on the sizer: the sizer's
+     max-width is a fixed px value, so padding there would shrink the CONTENT box and
+     change where text wraps — which is exactly the bug the block below fixes. */
+  padding-left: 18px; /* room for the ::before rail that hangs 12px left */
+}
+
+/* Mirror Obsidian's own sizer instead of overriding it.
+
+   THE BUG THIS FIXES: an earlier attempt set `max-width:100% !important` to stop text
+   clipping. That overrode --file-line-width, so the base pane wrapped at 795px while
+   the real note wrapped at 700px. Different wrap points => different line counts =>
+   different block heights => every block below the sync anchor drifted, even though the
+   anchor itself was pixel-exact (measured deltaPx: 0). Same max-width => same wrap =>
+   same heights => alignment holds down the page.
+
+   Obsidian sizes `.markdown-preview-sizer` against a real preview host and sets
+   min-height inline per scroll tick; dropped into our custom view it can end up wider
+   than the pane, which clips text at the right edge instead of wrapping. Pin it to the
+   pane and let the theme own everything else. */
+.lgd-body .markdown-preview-sizer {
+  width: 100% !important;
+  max-width: var(--file-line-width, 100%) !important;
+  margin: 0 auto !important;
+  min-height: 0 !important;
+  padding: 12px 0 !important;
+}
+
+/* ---- settings tab ---- */
+
+.lgd-settings-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin: 0 0 12px;
+}
+
+.lgd-color-input {
+  font-family: var(--font-monospace);
+}
+
+.lgd-color-input.lgd-invalid {
+  border-color: var(--text-error, #cf222e);
+}
+
+/* The swatch shows the color OVER TEXT, not as a solid chip: these values are
+   translucent by design, and a solid chip would misrepresent what they look like in
+   use — which is the exact mistake that made an earlier palette look wrong. */
+.lgd-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 24px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  color: var(--text-normal);
+  font-size: var(--font-ui-smaller);
+}

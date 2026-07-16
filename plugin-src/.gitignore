@@ -1,0 +1,14 @@
+node_modules/
+
+# The built plugin lives in ../plugin-dist/ and IS committed: it is the artifact a
+# user copies into .obsidian/plugins/, and committing it is what lets someone install
+# from a clone without a toolchain. It is also what tools/check-invariant.mjs greps —
+# a committed bundle means the read-only claim is auditable from the repo alone,
+# without trusting that someone's local build matched these sources.
+
+# Local-only oracle capture (see tools/capture-sections.mjs). Nothing here is secret;
+# it is machine-specific and regenerated, so it does not belong in git.
+test/fixtures/*.local.json
+
+*.log
+.DS_Store

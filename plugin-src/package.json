@@ -1,0 +1,47 @@
+{
+  "name": "obsidian-live-git-diff",
+  "version": "0.1.0",
+  "description": "Obsidian plugin: review a note side by side against its git version, both fully rendered and scroll-synced. Never writes to your notes.",
+  "main": "main.js",
+  "type": "module",
+  "private": true,
+  "author": "Jessica Kosturko",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "comment": "PLACEHOLDER — replace with the real public repo URL before publishing.",
+    "url": "git+https://github.com/jkosturko/obsidian-live-git-diff.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jkosturko/obsidian-live-git-diff/issues"
+  },
+  "homepage": "https://github.com/jkosturko/obsidian-live-git-diff#readme",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "npm run typecheck && node esbuild.config.mjs production && npm run gate",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "gate": "node tools/check-invariant.mjs",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "capture-oracle": "node tools/capture-sections.mjs",
+    "ci": "npm run typecheck && npm run test && npm run build"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "obsidian-md",
+    "git",
+    "diff",
+    "review",
+    "markdown"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "^1.7.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22.6.0"
+  }
+}

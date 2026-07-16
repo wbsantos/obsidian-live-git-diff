@@ -1,0 +1,10 @@
+{
+  "id": "live-git-diff",
+  "name": "Live Git Diff",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Review a note side by side against its git version, both fully rendered and scroll-synced. Never writes to your notes.",
+  "author": "Jessica Kosturko",
+  "authorUrl": "https://github.com/jkosturko/obsidian-live-git-diff",
+  "isDesktopOnly": true
+}

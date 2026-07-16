@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "module": "ESNext",
+    "target": "ES2018",
+    "allowJs": true,
+    "noImplicitAny": true,
+    "moduleResolution": "node",
+    // Typecheck-only: esbuild does the emit, so this affects `tsc --noEmit` alone.
+    // Needed for `import test from 'node:test'` / `import fs from 'node:fs'` in the
+    // test files, which is how node's own runner is documented.
+    "esModuleInterop": true,
+    "importHelpers": false,
+    "isolatedModules": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": ["DOM", "ES2018", "ES2020.String", "ES2021.WeakRef"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "tools/**/*.mjs"]
+}
