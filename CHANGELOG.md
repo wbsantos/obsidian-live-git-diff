@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-07-20
+
+### Fixed
+
+- **Opening a review no longer wipes other plugins' reading-view decorations.** The note
+  pane is now decorated in place — its already-rendered sections get the diff classes
+  directly — instead of being force-rerendered, which emptied every section and destroyed
+  annotation-plugin highlights (side-comments and the like) in the process. Closing a
+  review cleans in place too, and reaches detached sections the old cleanup missed.
+
+### Added
+
+- **"Refresh annotations in the note pane" command** — repaints any annotation plugin's
+  reading-view marks on demand while a review is open. An escape hatch for the general
+  case; the fix above makes it unnecessary for the open/close path.
+
 ## [0.1.0] - 2026-07-16
 
 First release. Ports a measured spike into a real, installable plugin.

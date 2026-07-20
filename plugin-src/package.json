@@ -1,6 +1,6 @@
 {
   "name": "obsidian-live-git-diff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Obsidian plugin: review a note side by side against its git version, both fully rendered and scroll-synced. Never writes to your notes.",
   "main": "main.js",
   "type": "module",
