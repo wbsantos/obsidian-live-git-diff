@@ -717,12 +717,19 @@ var GitError = class extends Error {
 };
 var US = "";
 var RS = "";
-var HUMAN_DATE = "format:%b %-d, %-I:%M %p";
+var HUMAN_DATE = "format:%b %d, %I:%M %p";
 var COMMIT_FIELDS = ["%h", "%H", "%ar", "%ad", "%s"].join(US);
 function parseCommitFields(line, path2) {
-  const [shortSha, sha, relative2, date, subject] = line.split(US);
+  const [shortSha, sha, relative, date, subject] = line.split(US);
   if (!sha) return null;
-  return { shortSha, sha, relative: relative2, date, subject: subject || "(no subject)", path: path2 };
+  return {
+    shortSha,
+    sha,
+    relative,
+    date: date.replace(/(^|\s)0(\d)/g, "$1$2"),
+    subject: subject || "(no subject)",
+    path: path2
+  };
 }
 function git(args) {
   try {
@@ -755,13 +762,14 @@ function resolveGit(app, file) {
   const abs = absPathOf(app, file);
   const dir = path.dirname(abs);
   let root;
+  let prefix;
   try {
-    root = git(["-C", dir, "rev-parse", "--show-toplevel"]).trim();
+    [root, prefix] = git(["-C", dir, "rev-parse", "--show-toplevel", "--show-prefix"]).split(/\r?\n/);
   } catch (e) {
     throw new GitError(`Not inside a git repository (${dir}).
 ${e.message}`);
   }
-  const rel = path.relative(root, abs).split(path.sep).join("/");
+  const rel = prefix + path.basename(abs);
   if (!rel || rel.startsWith("..")) {
     throw new GitError(`File resolves outside its git root:
   file: ${abs}
@@ -824,6 +832,9 @@ function fileLog(root, rel, limit = 50) {
   let out;
   try {
     out = git([
+      // Keep accented paths readable instead of Git's quoted octal byte escapes.
+      "-c",
+      "core.quotepath=false",
       "-C",
       root,
       "log",

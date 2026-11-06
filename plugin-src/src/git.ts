@@ -60,9 +60,9 @@ const RS = '\x1e';
 /**
  * How every commit time this plugin shows a human is formatted.
  *
- * AM/PM, LOCAL, leading zeros stripped: "Jul 7, 2:10 PM". Verified on this platform:
- *   %-d / %-I  strip the zeros ("Jul 7, 2:10 PM", not "Jul 07, 02:10 PM")
- *   %-I        is 12 at both midnight and noon, never 0
+ * AM/PM, LOCAL, leading zeros stripped: "Jul 7, 2:10 PM".
+ * Use portable %d / %I and strip padding in parseCommitFields. The GNU %-d / %-I
+ * extensions crash Git for Windows when it formats a commit date.
  *
  * NO TIMEZONE CONVERSION, and no %Z. git already emits the committer's LOCAL time, so
  * the value is correct as-is; adding a conversion would be the bug. %Z was tried and
@@ -72,7 +72,7 @@ const RS = '\x1e';
  * ISO timestamps are for machines. The alignment report (JSON) keeps one; nothing a
  * person reads does.
  */
-const HUMAN_DATE = 'format:%b %-d, %-I:%M %p';
+const HUMAN_DATE = 'format:%b %d, %I:%M %p';
 
 /** shortSha, sha, relative, absolute, subject — the fields every CommitInfo needs. */
 const COMMIT_FIELDS = ['%h', '%H', '%ar', '%ad', '%s'].join(US);
@@ -80,7 +80,8 @@ const COMMIT_FIELDS = ['%h', '%H', '%ar', '%ad', '%s'].join(US);
 function parseCommitFields(line: string, path: string): CommitInfo | null {
   const [shortSha, sha, relative, date, subject] = line.split(US);
   if (!sha) return null;
-  return { shortSha, sha, relative, date, subject: subject || '(no subject)', path };
+  return { shortSha, sha, relative, date: date.replace(/(^|\s)0(\d)/g, '$1$2'),
+    subject: subject || '(no subject)', path };
 }
 
 /**
@@ -150,13 +151,16 @@ export function resolveGit(app: App, file: TFile): GitContext {
   const abs = absPathOf(app, file);
   const dir = path.dirname(abs);
   let root: string;
+  let prefix: string;
   try {
-    root = git(['-C', dir, 'rev-parse', '--show-toplevel']).trim();
+    [root, prefix] = git(['-C', dir, 'rev-parse', '--show-toplevel', '--show-prefix']).split(/\r?\n/);
   } catch (e: unknown) {
     throw new GitError(`Not inside a git repository (${dir}).\n${(e as Error).message}`);
   }
-  // Relative to the GIT ROOT, POSIX-separated (git speaks posix paths).
-  const rel = path.relative(root, abs).split(path.sep).join('/');
+  // Git resolves directory symlinks/junctions when entering dir. Its prefix is
+  // already relative to the target repository and POSIX-separated; path.relative
+  // would instead compare that real root with the vault's logical alias path.
+  const rel = prefix + path.basename(abs);
   if (!rel || rel.startsWith('..')) {
     throw new GitError(`File resolves outside its git root:\n  file: ${abs}\n  root: ${root}`);
   }
@@ -272,7 +276,8 @@ export function fileLog(root: string, rel: string, limit = 50): CommitInfo[] {
   let out: string;
   try {
     out = git([
-      '-C', root, 'log',
+      // Keep accented paths readable instead of Git's quoted octal byte escapes.
+      '-c', 'core.quotepath=false', '-C', root, 'log',
       '--follow',
       '--name-only',
       `--format=${RS}${COMMIT_FIELDS}`,

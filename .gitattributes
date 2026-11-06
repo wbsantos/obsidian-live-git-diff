@@ -1,0 +1,2 @@
+# The oracle stores a SHA-256 of these exact LF bytes; CRLF breaks it on Windows.
+plugin-src/test/fixtures/*.md text eol=lf

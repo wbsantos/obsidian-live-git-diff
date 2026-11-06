@@ -23,7 +23,7 @@ The diff plugins I could find show raw markdown — `**bold**`, pipe tables and 
 
 - Desktop Obsidian 1.4.0+ (the plugin runs `git`, which mobile can't).
 - `git` on your PATH.
-- The note lives in a git repository. The vault root doesn't have to be the git root — a vault nested inside a bigger repo is fine.
+- The note lives in a git repository. The vault root doesn't have to be the git root — a vault nested inside a bigger repo is fine. Folders linked into a vault with directory symlinks or Windows junctions also work: each note uses its target repository, even when the vault itself is outside Git. No extra configuration is needed.
 
 ## Install
 

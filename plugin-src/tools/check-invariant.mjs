@@ -245,7 +245,7 @@ const srcFiles = fs.readdirSync(SRC, { recursive: true })
   .map((f) => path.join(SRC, String(f)));
 
 const saveSites = srcFiles
-  .map((f) => ({ file: path.relative(ROOT, f), n: countIn(f, 'saveData(') }))
+  .map((f) => ({ file: path.relative(ROOT, f).split(path.sep).join('/'), n: countIn(f, 'saveData(') }))
   .filter((x) => x.n > 0);
 
 const stray = saveSites.filter((s) => s.file !== SAVE_OWNER);
