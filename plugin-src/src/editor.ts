@@ -3,6 +3,7 @@ import { Decoration, EditorView, GutterMarker, ViewPlugin, gutter, type Decorati
 import { editorInfoField } from 'obsidian';
 import type { PairRow } from './diff/mddiff.ts';
 import { reviewRegions } from './editorPresentation.ts';
+import { NativeTablePresentation } from './nativeTablePresentation.ts';
 
 export interface Presentation { filePath: string; revision: number; text: string; rows: PairRow[] }
 export const presentReview = StateEffect.define<Presentation | null>();
@@ -19,8 +20,8 @@ class ChangeMarker extends GutterMarker {
     return element;
   }
 }
-interface ReviewMarks { decorations: DecorationSet; markers: RangeSet<GutterMarker>; revision: number }
-const empty = (): ReviewMarks => ({ decorations: Decoration.none, markers: RangeSet.empty, revision: -1 });
+interface ReviewMarks { decorations: DecorationSet; markers: RangeSet<GutterMarker>; revision: number; rows: PairRow[] | null }
+const empty = (): ReviewMarks => ({ decorations: Decoration.none, markers: RangeSet.empty, revision: -1, rows: null });
 export const reviewMarks = StateField.define<ReviewMarks>({
   create: empty,
   update(value, transaction) {
@@ -31,12 +32,12 @@ export const reviewMarks = StateField.define<ReviewMarks>({
       const data = effect.value;
       if (!data || data.filePath !== info?.file?.path || data.text !== transaction.state.doc.toString()) return empty();
       const decorations: Range<Decoration>[] = [], markers: Range<GutterMarker>[] = [];
-      for (const { block, row, gutterOnly } of reviewRegions(data.rows)) {
-        const message = row.structural || (row.simplified ? 'Alteração; detalhamento simplificado.' : row.kind === 'ins' ? 'Bloco incluído.' : 'Bloco alterado.');
+      for (const { block, row, gutterOnly, gutter: showGutter } of reviewRegions(data.rows)) {
+        const message = row.structural || (row.simplified ? 'Changed; details simplified.' : row.kind === 'ins' ? 'Added block.' : 'Changed block.');
         for (let number = block.lineStart + 1; number <= Math.min(block.lineEnd + 1, transaction.state.doc.lines); number++) {
           const line = transaction.state.doc.line(number);
-          markers.push(new ChangeMarker(row.kind, message).range(line.from));
-          // Native table/math/embed widgets own their interior. Only public margin marks are used.
+          if (showGutter !== false) markers.push(new ChangeMarker(row.kind, message).range(line.from));
+          // Native tables get cell presentation below; these also cover Source mode.
           if (!gutterOnly) decorations.push(Decoration.line({ class: row.kind === 'ins' ? 'lgd-editor-ins' : 'lgd-editor-mod' }).range(line.from));
         }
         if (gutterOnly) continue;
@@ -45,7 +46,7 @@ export const reviewMarks = StateField.define<ReviewMarks>({
           if (to > from && to <= transaction.state.doc.length) decorations.push(Decoration.mark({ class: 'lgd-char-ins' }).range(from, to));
         }
       }
-      value = { decorations: Decoration.set(decorations, true), markers: RangeSet.of(markers, true), revision: data.revision };
+      value = { decorations: Decoration.set(decorations, true), markers: RangeSet.of(markers, true), revision: data.revision, rows: data.rows };
     }
     return value;
   },
@@ -61,18 +62,26 @@ export interface EditorHost {
   editorDetached(view: EditorView): void;
   editorChanged(view: EditorView, filePath: string): void;
   editorGeometryChanged(): void;
+  editorTablePresentationIssue?(view: EditorView, message: string | null): void;
 }
 export function reviewExtension(host: EditorHost): Extension {
   return [reviewMarks, reviewGutter.of([]),
     ViewPlugin.fromClass(class {
       private view: EditorView;
-      constructor(view: EditorView) { this.view = view; host.editorAttached(view); }
+      private tables: NativeTablePresentation;
+      constructor(view: EditorView) {
+        this.view = view;
+        this.tables = new NativeTablePresentation(view, message => host.editorTablePresentationIssue?.(view, message));
+        host.editorAttached(view);
+      }
       update(update: import('@codemirror/view').ViewUpdate): void {
+        const marks = update.state.field(reviewMarks);
+        this.tables.update(marks.rows, marks.revision);
         const path = update.state.field(editorInfoField, false)?.file?.path;
         if (update.docChanged && path) host.editorChanged(update.view, path);
         if (update.geometryChanged || update.viewportChanged) host.editorGeometryChanged();
       }
-      destroy(): void { host.editorDetached(this.view); }
+      destroy(): void { this.tables.destroy(); host.editorDetached(this.view); }
     })];
 }
 

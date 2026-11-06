@@ -76,7 +76,7 @@ export class GitBaseView extends ItemView {
         const content = element.createDiv({ cls: 'lgd-content' });
         const note = element.createDiv({ cls: 'lgd-explanation' });
         entry = { element, content, note, rendered: Promise.resolve() }; this.cache.set(block.sourceStart, entry);
-        if (block.type === 'properties' || block.type === 'reference' || block.conservative?.startsWith('Conteúdo gerado')) {
+        if (block.type === 'properties' || block.type === 'reference' || block.conservative?.startsWith('Plugin-generated content')) {
           content.createEl('pre').createEl('code', { text: block.text });
         } else {
           entry.rendered = MarkdownRenderer.render(this.app, block.text + (references ? '\n\n' + references : ''), content, sourcePath, this.component);

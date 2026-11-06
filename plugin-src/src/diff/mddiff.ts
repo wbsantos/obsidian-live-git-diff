@@ -8,6 +8,11 @@ export const MAX_APPROX_BLOCKS = 200;
 export interface ParseOptions { breaks?: boolean }
 export type BlockType = 'paragraph' | 'heading' | 'list' | 'list-item' | 'quote' | 'callout' | 'table' | 'code' | 'properties' | 'reference' | 'unknown' | 'rule';
 export interface TableCell { text: string; visualKey: string }
+/** Exact source interval supplied by the parser, excluding the separator row. */
+export interface TableSourceRow {
+  lineStart: number; lineEnd: number; sourceStart: number; sourceEnd: number;
+  header: boolean;
+}
 export interface Block {
   text: string;
   lineStart: number;
@@ -20,6 +25,7 @@ export interface Block {
   tokens: string[];
   conservative?: string;
   cells?: TableCell[][];
+  tableRows?: TableSourceRow[];
   items?: Block[];
   listKind?: string;
 }
@@ -27,6 +33,7 @@ export type PairKind = 'same' | 'mod' | 'del' | 'ins';
 export type Range = [number, number];
 export interface TextDetail { a: Range[]; b: Range[] }
 export interface CellDetail { rowA: number; rowB: number; column: number; detail: TextDetail }
+export interface TableRowDetail { kind: PairKind; rowA: number; rowB: number; simplified?: boolean }
 export interface PairRow {
   kind: PairKind;
   a: Block | null;
@@ -36,6 +43,7 @@ export interface PairRow {
   detail?: TextDetail;
   sourceDetail?: TextDetail;
   cells?: CellDetail[];
+  tableRows?: TableRowDetail[];
   items?: PairRow[];
   listStructureChanged?: boolean;
 }
@@ -100,11 +108,13 @@ function semantic(ts: Token[], breaks: boolean): { key: string; text: string } {
 
 function tableCells(ts: Token[], breaks: boolean): TableCell[][] {
   const rows: TableCell[][] = [];
+  let attrs: Array<[string, string | number]> = [];
   for (const t of ts) {
     if (t.type === 'tr_open') rows.push([]);
+    if (t.type === 'th_open' || t.type === 'td_open') attrs = (t.attrs || []).slice().sort((a, b) => a[0].localeCompare(b[0]));
     if (t.type === 'inline' && rows.length) {
       const cell = semantic(t.children || [], breaks);
-      rows[rows.length - 1].push({ text: cell.text, visualKey: cell.key });
+      rows[rows.length - 1].push({ text: cell.text, visualKey: JSON.stringify([attrs, cell.key]) });
     }
   }
   return rows;
@@ -139,9 +149,9 @@ export function parseDocument(input: string | null | undefined, options: ParseOp
     const text = source.slice(sourceStart, sourceEnd);
     const meaning = semantic(tokens, !!options.breaks);
     if (!conservative && type !== 'code' && (tokens.some(t => /html/.test(t.type) || t.children?.some(c => /html/.test(c.type) || (c.type === 'text' && /==/.test(c.content)))) ||
-        /\$|%%|\[\^|(?:^|\n)\s*\^\S+/.test(text))) conservative = 'Sintaxe estendida: comparação conservadora do fonte.';
+        /\$|%%|\[\^|(?:^|\n)\s*\^\S+/.test(text))) conservative = 'Extended syntax: source is compared conservatively.';
     if (type === 'code' && /^(?:```|~~~)\s*(dataview|dataviewjs|query|tasks|mermaid)\b/i.test(text)) {
-      conservative = 'Conteúdo gerado por plugin: apenas o fonte é comparado.';
+      conservative = 'Plugin-generated content: only the source is compared.';
     }
     if (type === 'quote' && /^>\s*\[![^\]]+\]/.test(text)) type = 'callout';
     const key = conservative ? eol(text) : meaning.key;
@@ -150,6 +160,13 @@ export function parseDocument(input: string | null | undefined, options: ParseOp
       visualKey: JSON.stringify([type, key]), visibleText,
       tokens: words(visibleText).map(t => t.toLocaleLowerCase()), conservative,
       ...(type === 'table' ? { cells: tableCells(tokens, !!options.breaks) } : {}) };
+    if (type === 'table') {
+      block.tableRows = tokens.filter(token => token.type === 'tr_open' && token.map).map((token, index) => {
+        const [first, after] = token.map!;
+        return { lineStart: first, lineEnd: after - 1, sourceStart: starts[first],
+          sourceEnd: starts[after - 1] + rawLines[after - 1].replace(/\r$/, '').length, header: index === 0 };
+      });
+    }
     if (type === 'list') {
       block.listKind = JSON.stringify([tokens[0].type, tokens[0].attrs]);
       block.items = [];
@@ -169,12 +186,12 @@ export function parseDocument(input: string | null | undefined, options: ParseOp
     const block = makeBlock(start, end, type, tokens, conservative);
     if (block) out.push(block);
   };
-  if (frontEnd) add(0, frontEnd, 'properties', [], 'Propriedades: comparação conservadora do fonte.');
+  if (frontEnd) add(0, frontEnd, 'properties', [], 'Properties: source is compared conservatively.');
   let covered = frontEnd;
   const gap = (end: number): void => {
     let start = covered;
     while (start < end && !lines[start].trim()) start++;
-    if (start < end) add(start, end, 'reference', [], 'Definições ou sintaxe não interpretada: comparação conservadora do fonte.');
+    if (start < end) add(start, end, 'reference', [], 'Definitions or unsupported syntax: source is compared conservatively.');
   };
   for (let i = 0; i < ts.length; i++) {
     const first = ts[i];
@@ -190,7 +207,7 @@ export function parseDocument(input: string | null | undefined, options: ParseOp
       bullet_list_open: 'list', ordered_list_open: 'list', blockquote_open: 'quote', table_open: 'table',
       fence: 'code', code_block: 'code', hr: 'rule' };
     const type = kinds[first.type] || 'unknown';
-    add(start, end, type, ts.slice(i, j), type === 'unknown' ? 'Construção não interpretada: comparação conservadora do fonte.' : undefined);
+    add(start, end, type, ts.slice(i, j), type === 'unknown' ? 'Unsupported construct: source is compared conservatively.' : undefined);
     covered = end; i = j - 1;
   }
   gap(lines.length);
@@ -281,30 +298,31 @@ export function textDetail(a: string, b: string, budget: Budget = {}): TextDetai
 function refine(row: PairRow, deadline: number): void {
   if (row.kind !== 'mod' || !row.a || !row.b) return;
   const { a, b } = row;
-  if (a.visibleText === b.visibleText || a.type !== b.type) row.structural = 'Alteração de formatação, destino de link, propriedades ou estrutura.';
+  if (a.visibleText === b.visibleText || a.type !== b.type) row.structural = 'Formatting, link destination, properties, or structure changed.';
   if (a.conservative || b.conservative) row.structural = a.conservative || b.conservative;
   if (Date.now() > deadline) { row.simplified = true; return; }
   if (a.items && b.items && !a.conservative && !b.conservative) {
     row.items = pair(a.items, b.items, true, deadline);
     row.listStructureChanged = a.listKind !== b.listKind;
-    if (row.listStructureChanged) row.structural = 'Alteração do tipo ou da numeração da lista.';
+    if (row.listStructureChanged) row.structural = 'List type or numbering changed.';
     if (row.items.some(item => item.simplified)) row.simplified = true;
     return;
   }
   const budget = { timeout: Math.max(1, Math.min(25, deadline - Date.now())), maxEditLength: 1024 };
-  const detail = textDetail(a.visibleText, b.visibleText, budget), source = textDetail(a.text, b.text, budget);
-  row.simplified = detail.simplified || source.simplified;
-  if (!row.simplified) { row.detail = detail; row.sourceDetail = source; }
-  if (a.cells && b.cells) {
+  // Table padding can dwarf the content. Refine semantic rows/cells before any
+  // whole-source word diff, so harmless reformatting cannot exhaust its budget.
+  if (a.cells && b.cells && !a.conservative && !b.conservative) {
     row.cells = [];
-    const makeRow = (cells: TableCell[]): Block => ({ ...a, type: 'table', text: '', cells: undefined,
-      visualKey: JSON.stringify(cells.map(c => c.visualKey)), visibleText: cells.map(c => c.text).join(' '),
+    row.tableRows = [];
+    const makeRow = (cells: TableCell[], index: number): Block => ({ ...a, type: index === 0 ? 'table' : 'list-item', text: '', cells: undefined, tableRows: undefined,
+      visualKey: JSON.stringify([index === 0, cells.map(c => c.visualKey)]), visibleText: cells.map(c => c.text).join(' '),
       tokens: words(cells.map(c => c.text).join(' ')).map(t => t.toLocaleLowerCase()) });
     const ra = a.cells.map(makeRow), rb = b.cells.map(makeRow);
     for (const cellRow of pair(ra, rb, false, deadline)) {
       if (cellRow.simplified) row.simplified = true;
-      if (cellRow.kind === 'same') continue;
       const ia = cellRow.a ? ra.indexOf(cellRow.a) : -1, ib = cellRow.b ? rb.indexOf(cellRow.b) : -1;
+      row.tableRows.push({ kind: cellRow.kind, rowA: ia, rowB: ib, simplified: cellRow.simplified });
+      if (cellRow.kind === 'same') continue;
       const ac = a.cells[ia] || [], bc = b.cells[ib] || [];
       for (let col = 0; col < Math.max(ac.length, bc.length); col++) {
         if (ac[col]?.visualKey === bc[col]?.visualKey) continue;
@@ -314,7 +332,11 @@ function refine(row: PairRow, deadline: number): void {
         row.cells.push({ rowA: ia, rowB: ib, column: col, detail: d });
       }
     }
+    return;
   }
+  const detail = textDetail(a.visibleText, b.visibleText, budget), source = textDetail(a.text, b.text, budget);
+  row.simplified = detail.simplified || source.simplified;
+  if (!row.simplified) { row.detail = detail; row.sourceDetail = source; }
 }
 
 export function pair(a: Block[], b: Block[], details = true, deadline = Date.now() + 350): PairRow[] {

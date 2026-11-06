@@ -27,6 +27,8 @@ import { CLS } from './panes.ts';
 import type { PaneHost } from './panes.ts';
 import type { Row } from './session.ts';
 import type { PairRow } from './diff/mddiff.ts';
+import { tablePresentation } from './editorPresentation.ts';
+import { clearTableCell, paintTableRow } from './nativeTablePresentation.ts';
 import * as log from './log.ts';
 
 /**
@@ -242,6 +244,7 @@ export function unwrapCharMarks(el: Element): number {
   for (const tr of Array.from(el.querySelectorAll('tr.' + CLS.rowchanged))) {
     (tr as HTMLElement).removeClass(CLS.rowchanged);
   }
+  for (const cell of Array.from(el.querySelectorAll<HTMLElement>('.lgd-table-cell-ins,.lgd-table-cell-del'))) clearTableCell(cell);
   const marks = el.querySelectorAll('[' + CHAR_MARK_ATTR + ']');
   for (const span of Array.from(marks)) {
     const parent = span.parentNode;
@@ -292,9 +295,24 @@ function renderedRanges(source: string, rendered: string, ranges: CharRange[]): 
 
 export function applyRowMarks(row: PairRow, element: HTMLElement, side: 'a' | 'b'): number {
   const block = row[side];
-  if (row.kind !== 'mod' || !block || row.simplified || block.conservative) return 0;
+  if (!block || row.kind === 'same') return 0;
   const cls = side === 'a' ? CLS.charDel : CLS.charIns;
   let count = 0;
+  if (block.cells) {
+    const table = element.matches('table') ? element as HTMLTableElement : element.querySelector<HTMLTableElement>('table');
+    if (!table || table.rows.length !== block.cells.length || Array.from(table.rows).some((tr, i) => tr.cells.length !== block.cells![i].length)) return 0;
+    for (const change of tablePresentation(row, side)) {
+      const tr = table.rows[change.index]; if (tr) paintTableRow(tr, change, side);
+    }
+    if (!row.simplified && !block.conservative) for (const change of row.cells || []) {
+      const index = side === 'a' ? change.rowA : change.rowB;
+      const cell = table.rows[index]?.cells[change.column], text = block.cells[index]?.[change.column]?.text;
+      if (cell && text !== undefined) count += Math.max(0, wrapRanges(cell, renderedRanges(text, cell.textContent || '', change.detail[side]), cls));
+    }
+    presentationRoot(element).classList.add(CLS.rowwise);
+    return count;
+  }
+  if (row.kind !== 'mod' || row.simplified || block.conservative) return 0;
   if (block.items && row.items && !row.listStructureChanged) {
     const list = element.matches('ul,ol') ? element : element.querySelector('ul,ol');
     const items = list ? Array.from(list.children).filter(child => child.tagName === 'LI') : [];
@@ -309,19 +327,6 @@ export function applyRowMarks(row: PairRow, element: HTMLElement, side: 'a' | 'b
       item.classList.add('lgd-item-changed');
       count += applyRowMarks(change, item, side);
     }
-  } else if (block.cells && row.cells) {
-    const rows = element.querySelectorAll('tr');
-    for (const change of row.cells) {
-      const index = side === 'a' ? change.rowA : change.rowB;
-      const tr = rows[index], cell = tr?.querySelectorAll<HTMLElement>('th,td')[change.column];
-      const text = block.cells[index]?.[change.column]?.text;
-      if (!cell || text === undefined) continue;
-      tr.classList.add(CLS.rowchanged);
-      count += Math.max(0, wrapRanges(cell, renderedRanges(text, cell.textContent || '', change.detail[side]), cls));
-    }
-    // Insertions and structural changes can have no removed words on the old side.
-    // Cell changes, not the presence of word spans, determine the row wash.
-    presentationRoot(element).toggleClass(CLS.rowwise, row.cells.length > 0);
   } else if (row.detail) {
     count = Math.max(0, wrapRanges(element, renderedRanges(block.visibleText, element.textContent || '', row.detail[side]), cls));
   }

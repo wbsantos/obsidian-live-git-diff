@@ -34,6 +34,9 @@ export default class LiveGitDiffPlugin extends Plugin {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private opening = 0;
   private disposed = false;
+  private previewObserver: MutationObserver | null = null;
+  private previewRoot: HTMLElement | null = null;
+  private previewFrame: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -57,6 +60,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.registerMarkdownPostProcessor((element, context) => {
       if (element.closest('.lgd-view') || context.sourcePath !== this.session?.filePath) return;
       const info = context.getSectionInfo(element); if (info) this.decorateNoteSection(element, info);
+      this.scheduleReadingPaint();
     });
     const layout = (): void => {
       this.sync.attach();
@@ -64,7 +68,7 @@ export default class LiveGitDiffPlugin extends Plugin {
         if (!this.disposed) {
           this.publishEditorMarks();
           // Obsidian may reuse a reading view whose old marks were cleared while editing.
-          this.decorateNotePaneInPlace();
+          this.watchReadingPane(); this.decorateNotePaneInPlace();
         }
       });
       if (this.session) void this.checkBreaks();
@@ -85,6 +89,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   onunload(): void {
     this.disposed = true; this.opening++; this.revisions.close();
     if (this.timer) clearTimeout(this.timer);
+    this.previewObserver?.disconnect(); if (this.previewFrame !== null) window.cancelAnimationFrame(this.previewFrame);
     this.worker.dispose(); this.sync.dispose(); this.clearNoteDecorations();
     this.session = null; this.publishEditorMarks(); this.zones.dispose(); clearColors();
   }
@@ -107,6 +112,26 @@ export default class LiveGitDiffPlugin extends Plugin {
     if (path === this.session?.filePath) { this.preferredEditor = view; this.requestUpdate(); }
   }
   editorGeometryChanged(): void { /* Public scroll anchors are measured on demand. */ }
+  private scheduleReadingPaint(): void {
+    if (this.disposed || this.previewFrame !== null) return;
+    this.previewFrame = window.requestAnimationFrame(() => {
+      this.previewFrame = null;
+      if (!this.disposed) { this.watchReadingPane(); this.watchReadingPane(); this.decorateNotePaneInPlace(); }
+    });
+  }
+  private watchReadingPane(): void {
+    const view = this.reviewLeaf?.view;
+    const root = this.session?.status === 'ready' && view instanceof MarkdownView && view.getMode() === 'preview' ? view.containerEl : null;
+    if (root === this.previewRoot) return;
+    this.previewObserver?.disconnect(); this.previewObserver = null; this.previewRoot = root;
+    if (root) {
+      this.previewObserver = new MutationObserver(records => {
+        // Our word spans change children inside marked sections. Do not observe ourselves.
+        if (records.some(record => !(record.target instanceof Element) || !record.target.closest('.lgd-nblock'))) this.scheduleReadingPaint();
+      });
+      this.previewObserver.observe(root, { childList: true, subtree: true });
+    }
+  }
   private currentEditor(path = this.session?.filePath): EditorView | null {
     if (this.preferredEditor && this.editors.has(this.preferredEditor) && editorPath(this.preferredEditor) === path) return this.preferredEditor;
     const active = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -180,7 +205,7 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.session.baseReferences = result.baseReferences || '';
       await this.baseView()?.render();
       if (!this.revisions.accepts(identity)) return;
-      this.publishEditorMarks(); this.decorateNotePaneInPlace(); this.sync.attach(); this.sync.syncNoteToBase();
+      this.publishEditorMarks(); this.watchReadingPane(); this.decorateNotePaneInPlace(); this.sync.attach(); this.sync.syncNoteToBase();
     } catch (error) {
       if (!this.revisions.accepts(identity) || (error as Error).name === 'AbortError') return;
       if (this.session) { this.session.error = `Falha na comparação: ${(error as Error).message}`; this.session.status = 'error'; }
@@ -241,6 +266,8 @@ export default class LiveGitDiffPlugin extends Plugin {
   }
   closeReview(): void {
     this.opening++; this.revisions.close(); this.worker.dispose(); if (this.timer) clearTimeout(this.timer);
+    this.previewObserver?.disconnect(); this.previewObserver = null; this.previewRoot = null;
+    if (this.previewFrame !== null) window.cancelAnimationFrame(this.previewFrame); this.previewFrame = null;
     this.sync.detach(); this.clearNoteDecorations(); this.session = null;
     this.publishEditorMarks(); this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
@@ -285,7 +312,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     element.addClass(CLS.nblock); this.noteLines.set(element, info);
     if (row) element.setAttr(ATTR_ROW, String(row.idx));
     setNoteKind(element, row?.kind || null);
-    if (row?.kind === 'mod') this.marks.apply(row, element);
+    if (row && row.kind !== 'same') this.marks.apply(row, element);
   }
   /** Reading mode only. Editing uses exclusively the public CodeMirror extension. */
   private readingSections(view: MarkdownView): Array<{ el: HTMLElement; info: { lineStart: number; lineEnd: number } }> {

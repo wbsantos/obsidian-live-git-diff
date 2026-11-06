@@ -515,3 +515,27 @@ body.theme-dark {
 .lgd-explanation { color: var(--text-muted); font-size: var(--font-smallest); line-height: 1.4; padding: 4px 8px; }
 .lgd-explanation:empty { display: none; }
 .lgd-explanation:not(:empty) { border-top: 1px dashed var(--background-modifier-border); }
+
+/* Paint the visible cell surface, including native Live Preview table widgets. */
+.lgd-table-cell-ins { --lgd-table-fill: var(--lgd-ins-bg); }
+.lgd-table-cell-del { --lgd-table-fill: var(--lgd-del-bg); }
+.lgd-rowwise tr.lgd-rowchanged:has(> .lgd-table-cell-ins),
+.lgd-rowwise tr.lgd-rowchanged:has(> .lgd-table-cell-del) { background-color: transparent !important; }
+.lgd-view td.lgd-table-cell-ins, .lgd-view th.lgd-table-cell-ins,
+.lgd-view td.lgd-table-cell-del, .lgd-view th.lgd-table-cell-del,
+.markdown-rendered td.lgd-table-cell-ins, .markdown-rendered th.lgd-table-cell-ins,
+.markdown-rendered td.lgd-table-cell-del, .markdown-rendered th.lgd-table-cell-del {
+  background-image: linear-gradient(var(--lgd-table-fill), var(--lgd-table-fill)) !important;
+}
+.cm-table-widget .lgd-table-cell-ins .table-cell-wrapper,
+.cm-table-widget .lgd-table-cell-ins .cm-editor,
+.cm-table-widget .lgd-table-cell-ins .cm-scroller,
+.cm-table-widget .lgd-table-cell-ins .cm-content,
+.cm-table-widget .lgd-table-cell-ins .cm-line { background-color: transparent !important; }
+.cm-table-widget .lgd-table-cell-ins.lgd-table-cell-detail .table-cell-wrapper {
+  background-image: linear-gradient(var(--lgd-table-fill), var(--lgd-table-fill));
+}
+/* A vault's active-line background must not hide a confirmed change. */
+.cm-line.lgd-editor-ins, .cm-line.lgd-editor-mod {
+  background-image: linear-gradient(var(--lgd-ins-bg), var(--lgd-ins-bg)) !important;
+}
