@@ -11,6 +11,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -33,197 +36,23 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// lgd:worker
+var require_worker = __commonJS({
+  "lgd:worker"(exports, module2) {
+    module2.exports = '"use strict";\n(() => {\n  var __defProp = Object.defineProperty;\n  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;\n  var __export = (target, all) => {\n    for (var name in all)\n      __defProp(target, name, { get: all[name], enumerable: true });\n  };\n  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);\n\n  // ../../plugin-src/node_modules/mdurl/index.mjs\n  var mdurl_exports = {};\n  __export(mdurl_exports, {\n    decode: () => decode_default,\n    encode: () => encode_default,\n    format: () => format,\n    parse: () => parse_default\n  });\n\n  // ../../plugin-src/node_modules/mdurl/lib/decode.mjs\n  var decodeCache = {};\n  function getDecodeCache(exclude) {\n    let cache = decodeCache[exclude];\n    if (cache) {\n      return cache;\n    }\n    cache = decodeCache[exclude] = [];\n    for (let i = 0; i < 128; i++) {\n      const ch = String.fromCharCode(i);\n      cache.push(ch);\n    }\n    for (let i = 0; i < exclude.length; i++) {\n      const ch = exclude.charCodeAt(i);\n      cache[ch] = "%" + ("0" + ch.toString(16).toUpperCase()).slice(-2);\n    }\n    return cache;\n  }\n  function decode(string, exclude) {\n    if (typeof exclude !== "string") {\n      exclude = decode.defaultChars;\n    }\n    const cache = getDecodeCache(exclude);\n    return string.replace(/(%[a-f0-9]{2})+/gi, function(seq) {\n      let result = "";\n      for (let i = 0, l = seq.length; i < l; i += 3) {\n        const b1 = parseInt(seq.slice(i + 1, i + 3), 16);\n        if (b1 < 128) {\n          result += cache[b1];\n          continue;\n        }\n        if ((b1 & 224) === 192 && i + 3 < l) {\n          const b2 = parseInt(seq.slice(i + 4, i + 6), 16);\n          if ((b2 & 192) === 128) {\n            const chr = b1 << 6 & 1984 | b2 & 63;\n            if (chr < 128) {\n              result += "\\uFFFD\\uFFFD";\n            } else {\n              result += String.fromCharCode(chr);\n            }\n            i += 3;\n            continue;\n          }\n        }\n        if ((b1 & 240) === 224 && i + 6 < l) {\n          const b2 = parseInt(seq.slice(i + 4, i + 6), 16);\n          const b3 = parseInt(seq.slice(i + 7, i + 9), 16);\n          if ((b2 & 192) === 128 && (b3 & 192) === 128) {\n            const chr = b1 << 12 & 61440 | b2 << 6 & 4032 | b3 & 63;\n            if (chr < 2048 || chr >= 55296 && chr <= 57343) {\n              result += "\\uFFFD\\uFFFD\\uFFFD";\n            } else {\n              result += String.fromCharCode(chr);\n            }\n            i += 6;\n            continue;\n          }\n        }\n        if ((b1 & 248) === 240 && i + 9 < l) {\n          const b2 = parseInt(seq.slice(i + 4, i + 6), 16);\n          const b3 = parseInt(seq.slice(i + 7, i + 9), 16);\n          const b4 = parseInt(seq.slice(i + 10, i + 12), 16);\n          if ((b2 & 192) === 128 && (b3 & 192) === 128 && (b4 & 192) === 128) {\n            let chr = b1 << 18 & 1835008 | b2 << 12 & 258048 | b3 << 6 & 4032 | b4 & 63;\n            if (chr < 65536 || chr > 1114111) {\n              result += "\\uFFFD\\uFFFD\\uFFFD\\uFFFD";\n            } else {\n              chr -= 65536;\n              result += String.fromCharCode(55296 + (chr >> 10), 56320 + (chr & 1023));\n            }\n            i += 9;\n            continue;\n          }\n        }\n        result += "\\uFFFD";\n      }\n      return result;\n    });\n  }\n  decode.defaultChars = ";/?:@&=+$,#";\n  decode.componentChars = "";\n  var decode_default = decode;\n\n  // ../../plugin-src/node_modules/mdurl/lib/encode.mjs\n  var encodeCache = {};\n  function getEncodeCache(exclude) {\n    let cache = encodeCache[exclude];\n    if (cache) {\n      return cache;\n    }\n    cache = encodeCache[exclude] = [];\n    for (let i = 0; i < 128; i++) {\n      const ch = String.fromCharCode(i);\n      if (/^[0-9a-z]$/i.test(ch)) {\n        cache.push(ch);\n      } else {\n        cache.push("%" + ("0" + i.toString(16).toUpperCase()).slice(-2));\n      }\n    }\n    for (let i = 0; i < exclude.length; i++) {\n      cache[exclude.charCodeAt(i)] = exclude[i];\n    }\n    return cache;\n  }\n  function encode(string, exclude, keepEscaped) {\n    if (typeof exclude !== "string") {\n      keepEscaped = exclude;\n      exclude = encode.defaultChars;\n    }\n    if (typeof keepEscaped === "undefined") {\n      keepEscaped = true;\n    }\n    const cache = getEncodeCache(exclude);\n    let result = "";\n    for (let i = 0, l = string.length; i < l; i++) {\n      const code2 = string.charCodeAt(i);\n      if (keepEscaped && code2 === 37 && i + 2 < l) {\n        if (/^[0-9a-f]{2}$/i.test(string.slice(i + 1, i + 3))) {\n          result += string.slice(i, i + 3);\n          i += 2;\n          continue;\n        }\n      }\n      if (code2 < 128) {\n        result += cache[code2];\n        continue;\n      }\n      if (code2 >= 55296 && code2 <= 57343) {\n        if (code2 >= 55296 && code2 <= 56319 && i + 1 < l) {\n          const nextCode = string.charCodeAt(i + 1);\n          if (nextCode >= 56320 && nextCode <= 57343) {\n            result += encodeURIComponent(string[i] + string[i + 1]);\n            i++;\n            continue;\n          }\n        }\n        result += "%EF%BF%BD";\n        continue;\n      }\n      result += encodeURIComponent(string[i]);\n    }\n    return result;\n  }\n  encode.defaultChars = ";/?:@&=+$,-_.!~*\'()#";\n  encode.componentChars = "-_.!~*\'()";\n  var encode_default = encode;\n\n  // ../../plugin-src/node_modules/mdurl/lib/format.mjs\n  function format(url) {\n    let result = "";\n    result += url.protocol || "";\n    result += url.slashes ? "//" : "";\n    result += url.auth ? url.auth + "@" : "";\n    if (url.hostname && url.hostname.indexOf(":") !== -1) {\n      result += "[" + url.hostname + "]";\n    } else {\n      result += url.hostname || "";\n    }\n    result += url.port ? ":" + url.port : "";\n    result += url.pathname || "";\n    result += url.search || "";\n    result += url.hash || "";\n    return result;\n  }\n\n  // ../../plugin-src/node_modules/mdurl/lib/parse.mjs\n  function Url() {\n    this.protocol = null;\n    this.slashes = null;\n    this.auth = null;\n    this.port = null;\n    this.hostname = null;\n    this.hash = null;\n    this.search = null;\n    this.pathname = null;\n  }\n  var protocolPattern = /^([a-z0-9.+-]+:)/i;\n  var portPattern = /:[0-9]*$/;\n  var simplePathPattern = /^(\\/\\/?(?!\\/)[^\\?\\s]*)(\\?[^\\s]*)?$/;\n  var delims = ["<", ">", \'"\', "`", " ", "\\r", "\\n", "	"];\n  var unwise = ["{", "}", "|", "\\\\", "^", "`"].concat(delims);\n  var autoEscape = ["\'"].concat(unwise);\n  var nonHostChars = ["%", "/", "?", ";", "#"].concat(autoEscape);\n  var hostEndingChars = ["/", "?", "#"];\n  var hostnameMaxLen = 255;\n  var hostnamePartPattern = /^[+a-z0-9A-Z_-]{0,63}$/;\n  var hostnamePartStart = /^([+a-z0-9A-Z_-]{0,63})(.*)$/;\n  var hostlessProtocol = {\n    javascript: true,\n    "javascript:": true\n  };\n  var slashedProtocol = {\n    http: true,\n    https: true,\n    ftp: true,\n    gopher: true,\n    file: true,\n    "http:": true,\n    "https:": true,\n    "ftp:": true,\n    "gopher:": true,\n    "file:": true\n  };\n  function urlParse(url, slashesDenoteHost) {\n    if (url && url instanceof Url) return url;\n    const u = new Url();\n    u.parse(url, slashesDenoteHost);\n    return u;\n  }\n  Url.prototype.parse = function(url, slashesDenoteHost) {\n    let lowerProto, hec, slashes;\n    let rest = url;\n    rest = rest.trim();\n    if (!slashesDenoteHost && url.split("#").length === 1) {\n      const simplePath = simplePathPattern.exec(rest);\n      if (simplePath) {\n        this.pathname = simplePath[1];\n        if (simplePath[2]) {\n          this.search = simplePath[2];\n        }\n        return this;\n      }\n    }\n    let proto = protocolPattern.exec(rest);\n    if (proto) {\n      proto = proto[0];\n      lowerProto = proto.toLowerCase();\n      this.protocol = proto;\n      rest = rest.substr(proto.length);\n    }\n    if (slashesDenoteHost || proto || rest.match(/^\\/\\/[^@\\/]+@[^@\\/]+/)) {\n      slashes = rest.substr(0, 2) === "//";\n      if (slashes && !(proto && hostlessProtocol[proto])) {\n        rest = rest.substr(2);\n        this.slashes = true;\n      }\n    }\n    if (!hostlessProtocol[proto] && (slashes || proto && !slashedProtocol[proto])) {\n      let hostEnd = -1;\n      for (let i = 0; i < hostEndingChars.length; i++) {\n        hec = rest.indexOf(hostEndingChars[i]);\n        if (hec !== -1 && (hostEnd === -1 || hec < hostEnd)) {\n          hostEnd = hec;\n        }\n      }\n      let auth, atSign;\n      if (hostEnd === -1) {\n        atSign = rest.lastIndexOf("@");\n      } else {\n        atSign = rest.lastIndexOf("@", hostEnd);\n      }\n      if (atSign !== -1) {\n        auth = rest.slice(0, atSign);\n        rest = rest.slice(atSign + 1);\n        this.auth = auth;\n      }\n      hostEnd = -1;\n      for (let i = 0; i < nonHostChars.length; i++) {\n        hec = rest.indexOf(nonHostChars[i]);\n        if (hec !== -1 && (hostEnd === -1 || hec < hostEnd)) {\n          hostEnd = hec;\n        }\n      }\n      if (hostEnd === -1) {\n        hostEnd = rest.length;\n      }\n      if (rest[hostEnd - 1] === ":") {\n        hostEnd--;\n      }\n      const host = rest.slice(0, hostEnd);\n      rest = rest.slice(hostEnd);\n      this.parseHost(host);\n      this.hostname = this.hostname || "";\n      const ipv6Hostname = this.hostname[0] === "[" && this.hostname[this.hostname.length - 1] === "]";\n      if (!ipv6Hostname) {\n        const hostparts = this.hostname.split(/\\./);\n        for (let i = 0, l = hostparts.length; i < l; i++) {\n          const part = hostparts[i];\n          if (!part) {\n            continue;\n          }\n          if (!part.match(hostnamePartPattern)) {\n            let newpart = "";\n            for (let j = 0, k = part.length; j < k; j++) {\n              if (part.charCodeAt(j) > 127) {\n                newpart += "x";\n              } else {\n                newpart += part[j];\n              }\n            }\n            if (!newpart.match(hostnamePartPattern)) {\n              const validParts = hostparts.slice(0, i);\n              const notHost = hostparts.slice(i + 1);\n              const bit = part.match(hostnamePartStart);\n              if (bit) {\n                validParts.push(bit[1]);\n                notHost.unshift(bit[2]);\n              }\n              if (notHost.length) {\n                rest = notHost.join(".") + rest;\n              }\n              this.hostname = validParts.join(".");\n              break;\n            }\n          }\n        }\n      }\n      if (this.hostname.length > hostnameMaxLen) {\n        this.hostname = "";\n      }\n      if (ipv6Hostname) {\n        this.hostname = this.hostname.substr(1, this.hostname.length - 2);\n      }\n    }\n    const hash = rest.indexOf("#");\n    if (hash !== -1) {\n      this.hash = rest.substr(hash);\n      rest = rest.slice(0, hash);\n    }\n    const qm = rest.indexOf("?");\n    if (qm !== -1) {\n      this.search = rest.substr(qm);\n      rest = rest.slice(0, qm);\n    }\n    if (rest) {\n      this.pathname = rest;\n    }\n    if (slashedProtocol[lowerProto] && this.hostname && !this.pathname) {\n      this.pathname = "";\n    }\n    return this;\n  };\n  Url.prototype.parseHost = function(host) {\n    let port = portPattern.exec(host);\n    if (port) {\n      port = port[0];\n      if (port !== ":") {\n        this.port = port.substr(1);\n      }\n      host = host.substr(0, host.length - port.length);\n    }\n    if (host) {\n      this.hostname = host;\n    }\n  };\n  var parse_default = urlParse;\n\n  // ../../plugin-src/node_modules/uc.micro/build/index.mjs\n  var build_exports = {};\n  __export(build_exports, {\n    Any: () => Any,\n    Cc: () => Cc,\n    Cf: () => Cf,\n    P: () => P,\n    S: () => S,\n    Z: () => Z\n  });\n  var Any = /[\\0-\\uD7FF\\uE000-\\uFFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?:[^\\uD800-\\uDBFF]|^)[\\uDC00-\\uDFFF]/;\n  var Cc = /[\\0-\\x1F\\x7F-\\x9F]/;\n  var Cf = /[\\xAD\\u0600-\\u0605\\u061C\\u06DD\\u070F\\u0890\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB]|\\uD804[\\uDCBD\\uDCCD]|\\uD80D[\\uDC30-\\uDC3F]|\\uD82F[\\uDCA0-\\uDCA3]|\\uD834[\\uDD73-\\uDD7A]|\\uDB40[\\uDC01\\uDC20-\\uDC7F]/;\n  var P = /[!-#%-\\*,-\\/:;\\?@\\[-\\]_\\{\\}\\xA1\\xA7\\xAB\\xB6\\xB7\\xBB\\xBF\\u037E\\u0387\\u055A-\\u055F\\u0589\\u058A\\u05BE\\u05C0\\u05C3\\u05C6\\u05F3\\u05F4\\u0609\\u060A\\u060C\\u060D\\u061B\\u061D-\\u061F\\u066A-\\u066D\\u06D4\\u0700-\\u070D\\u07F7-\\u07F9\\u0830-\\u083E\\u085E\\u0964\\u0965\\u0970\\u09FD\\u0A76\\u0AF0\\u0C77\\u0C84\\u0DF4\\u0E4F\\u0E5A\\u0E5B\\u0F04-\\u0F12\\u0F14\\u0F3A-\\u0F3D\\u0F85\\u0FD0-\\u0FD4\\u0FD9\\u0FDA\\u104A-\\u104F\\u10FB\\u1360-\\u1368\\u1400\\u166E\\u169B\\u169C\\u16EB-\\u16ED\\u1735\\u1736\\u17D4-\\u17D6\\u17D8-\\u17DA\\u1800-\\u180A\\u1944\\u1945\\u1A1E\\u1A1F\\u1AA0-\\u1AA6\\u1AA8-\\u1AAD\\u1B4E\\u1B4F\\u1B5A-\\u1B60\\u1B7D-\\u1B7F\\u1BFC-\\u1BFF\\u1C3B-\\u1C3F\\u1C7E\\u1C7F\\u1CC0-\\u1CC7\\u1CD3\\u2010-\\u2027\\u2030-\\u2043\\u2045-\\u2051\\u2053-\\u205E\\u207D\\u207E\\u208D\\u208E\\u2308-\\u230B\\u2329\\u232A\\u2768-\\u2775\\u27C5\\u27C6\\u27E6-\\u27EF\\u2983-\\u2998\\u29D8-\\u29DB\\u29FC\\u29FD\\u2CF9-\\u2CFC\\u2CFE\\u2CFF\\u2D70\\u2E00-\\u2E2E\\u2E30-\\u2E4F\\u2E52-\\u2E5D\\u3001-\\u3003\\u3008-\\u3011\\u3014-\\u301F\\u3030\\u303D\\u30A0\\u30FB\\uA4FE\\uA4FF\\uA60D-\\uA60F\\uA673\\uA67E\\uA6F2-\\uA6F7\\uA874-\\uA877\\uA8CE\\uA8CF\\uA8F8-\\uA8FA\\uA8FC\\uA92E\\uA92F\\uA95F\\uA9C1-\\uA9CD\\uA9DE\\uA9DF\\uAA5C-\\uAA5F\\uAADE\\uAADF\\uAAF0\\uAAF1\\uABEB\\uFD3E\\uFD3F\\uFE10-\\uFE19\\uFE30-\\uFE52\\uFE54-\\uFE61\\uFE63\\uFE68\\uFE6A\\uFE6B\\uFF01-\\uFF03\\uFF05-\\uFF0A\\uFF0C-\\uFF0F\\uFF1A\\uFF1B\\uFF1F\\uFF20\\uFF3B-\\uFF3D\\uFF3F\\uFF5B\\uFF5D\\uFF5F-\\uFF65]|\\uD800[\\uDD00-\\uDD02\\uDF9F\\uDFD0]|\\uD801\\uDD6F|\\uD802[\\uDC57\\uDD1F\\uDD3F\\uDE50-\\uDE58\\uDE7F\\uDEF0-\\uDEF6\\uDF39-\\uDF3F\\uDF99-\\uDF9C]|\\uD803[\\uDD6E\\uDEAD\\uDED0\\uDF55-\\uDF59\\uDF86-\\uDF89]|\\uD804[\\uDC47-\\uDC4D\\uDCBB\\uDCBC\\uDCBE-\\uDCC1\\uDD40-\\uDD43\\uDD74\\uDD75\\uDDC5-\\uDDC8\\uDDCD\\uDDDB\\uDDDD-\\uDDDF\\uDE38-\\uDE3D\\uDEA9\\uDFD4\\uDFD5\\uDFD7\\uDFD8]|\\uD805[\\uDC4B-\\uDC4F\\uDC5A\\uDC5B\\uDC5D\\uDCC6\\uDDC1-\\uDDD7\\uDE41-\\uDE43\\uDE60-\\uDE6C\\uDEB9\\uDF3C-\\uDF3E]|\\uD806[\\uDC3B\\uDD44-\\uDD46\\uDDE2\\uDE3F-\\uDE46\\uDE9A-\\uDE9C\\uDE9E-\\uDEA2\\uDF00-\\uDF09\\uDFE1]|\\uD807[\\uDC41-\\uDC45\\uDC70\\uDC71\\uDEF7\\uDEF8\\uDF43-\\uDF4F\\uDFFF]|\\uD809[\\uDC70-\\uDC74]|\\uD80B[\\uDFF1\\uDFF2]|\\uD81A[\\uDE6E\\uDE6F\\uDEF5\\uDF37-\\uDF3B\\uDF44]|\\uD81B[\\uDD6D-\\uDD6F\\uDE97-\\uDE9A\\uDFE2]|\\uD82F\\uDC9F|\\uD836[\\uDE87-\\uDE8B]|\\uD839\\uDDFF|\\uD83A[\\uDD5E\\uDD5F]/;\n  var S = /[\\$\\+<->\\^`\\|~\\xA2-\\xA6\\xA8\\xA9\\xAC\\xAE-\\xB1\\xB4\\xB8\\xD7\\xF7\\u02C2-\\u02C5\\u02D2-\\u02DF\\u02E5-\\u02EB\\u02ED\\u02EF-\\u02FF\\u0375\\u0384\\u0385\\u03F6\\u0482\\u058D-\\u058F\\u0606-\\u0608\\u060B\\u060E\\u060F\\u06DE\\u06E9\\u06FD\\u06FE\\u07F6\\u07FE\\u07FF\\u0888\\u09F2\\u09F3\\u09FA\\u09FB\\u0AF1\\u0B70\\u0BF3-\\u0BFA\\u0C7F\\u0D4F\\u0D79\\u0E3F\\u0F01-\\u0F03\\u0F13\\u0F15-\\u0F17\\u0F1A-\\u0F1F\\u0F34\\u0F36\\u0F38\\u0FBE-\\u0FC5\\u0FC7-\\u0FCC\\u0FCE\\u0FCF\\u0FD5-\\u0FD8\\u109E\\u109F\\u1390-\\u1399\\u166D\\u17DB\\u1940\\u19DE-\\u19FF\\u1B61-\\u1B6A\\u1B74-\\u1B7C\\u1FBD\\u1FBF-\\u1FC1\\u1FCD-\\u1FCF\\u1FDD-\\u1FDF\\u1FED-\\u1FEF\\u1FFD\\u1FFE\\u2044\\u2052\\u207A-\\u207C\\u208A-\\u208C\\u20A0-\\u20C1\\u2100\\u2101\\u2103-\\u2106\\u2108\\u2109\\u2114\\u2116-\\u2118\\u211E-\\u2123\\u2125\\u2127\\u2129\\u212E\\u213A\\u213B\\u2140-\\u2144\\u214A-\\u214D\\u214F\\u218A\\u218B\\u2190-\\u2307\\u230C-\\u2328\\u232B-\\u2429\\u2440-\\u244A\\u249C-\\u24E9\\u2500-\\u2767\\u2794-\\u27C4\\u27C7-\\u27E5\\u27F0-\\u2982\\u2999-\\u29D7\\u29DC-\\u29FB\\u29FE-\\u2B73\\u2B76-\\u2BFF\\u2CE5-\\u2CEA\\u2E50\\u2E51\\u2E80-\\u2E99\\u2E9B-\\u2EF3\\u2F00-\\u2FD5\\u2FF0-\\u2FFF\\u3004\\u3012\\u3013\\u3020\\u3036\\u3037\\u303E\\u303F\\u309B\\u309C\\u3190\\u3191\\u3196-\\u319F\\u31C0-\\u31E5\\u31EF\\u3200-\\u321E\\u322A-\\u3247\\u3250\\u3260-\\u327F\\u328A-\\u32B0\\u32C0-\\u33FF\\u4DC0-\\u4DFF\\uA490-\\uA4C6\\uA700-\\uA716\\uA720\\uA721\\uA789\\uA78A\\uA828-\\uA82B\\uA836-\\uA839\\uAA77-\\uAA79\\uAB5B\\uAB6A\\uAB6B\\uFB29\\uFBB2-\\uFBD2\\uFD40-\\uFD4F\\uFD90\\uFD91\\uFDC8-\\uFDCF\\uFDFC-\\uFDFF\\uFE62\\uFE64-\\uFE66\\uFE69\\uFF04\\uFF0B\\uFF1C-\\uFF1E\\uFF3E\\uFF40\\uFF5C\\uFF5E\\uFFE0-\\uFFE6\\uFFE8-\\uFFEE\\uFFFC\\uFFFD]|\\uD800[\\uDD37-\\uDD3F\\uDD79-\\uDD89\\uDD8C-\\uDD8E\\uDD90-\\uDD9C\\uDDA0\\uDDD0-\\uDDFC]|\\uD802[\\uDC77\\uDC78\\uDEC8]|\\uD803[\\uDD8E\\uDD8F\\uDED1-\\uDED8]|\\uD805\\uDF3F|\\uD807[\\uDFD5-\\uDFF1]|\\uD81A[\\uDF3C-\\uDF3F\\uDF45]|\\uD82F\\uDC9C|\\uD833[\\uDC00-\\uDCEF\\uDCFA-\\uDCFC\\uDD00-\\uDEB3\\uDEBA-\\uDED0\\uDEE0-\\uDEF0\\uDF50-\\uDFC3]|\\uD834[\\uDC00-\\uDCF5\\uDD00-\\uDD26\\uDD29-\\uDD64\\uDD6A-\\uDD6C\\uDD83\\uDD84\\uDD8C-\\uDDA9\\uDDAE-\\uDDEA\\uDE00-\\uDE41\\uDE45\\uDF00-\\uDF56]|\\uD835[\\uDEC1\\uDEDB\\uDEFB\\uDF15\\uDF35\\uDF4F\\uDF6F\\uDF89\\uDFA9\\uDFC3]|\\uD836[\\uDC00-\\uDDFF\\uDE37-\\uDE3A\\uDE6D-\\uDE74\\uDE76-\\uDE83\\uDE85\\uDE86]|\\uD838[\\uDD4F\\uDEFF]|\\uD83B[\\uDCAC\\uDCB0\\uDD2E\\uDEF0\\uDEF1]|\\uD83C[\\uDC00-\\uDC2B\\uDC30-\\uDC93\\uDCA0-\\uDCAE\\uDCB1-\\uDCBF\\uDCC1-\\uDCCF\\uDCD1-\\uDCF5\\uDD0D-\\uDDAD\\uDDE6-\\uDE02\\uDE10-\\uDE3B\\uDE40-\\uDE48\\uDE50\\uDE51\\uDE60-\\uDE65\\uDF00-\\uDFFF]|\\uD83D[\\uDC00-\\uDED8\\uDEDC-\\uDEEC\\uDEF0-\\uDEFC\\uDF00-\\uDFD9\\uDFE0-\\uDFEB\\uDFF0]|\\uD83E[\\uDC00-\\uDC0B\\uDC10-\\uDC47\\uDC50-\\uDC59\\uDC60-\\uDC87\\uDC90-\\uDCAD\\uDCB0-\\uDCBB\\uDCC0\\uDCC1\\uDCD0-\\uDCD8\\uDD00-\\uDE57\\uDE60-\\uDE6D\\uDE70-\\uDE7C\\uDE80-\\uDE8A\\uDE8E-\\uDEC6\\uDEC8\\uDECD-\\uDEDC\\uDEDF-\\uDEEA\\uDEEF-\\uDEF8\\uDF00-\\uDF92\\uDF94-\\uDFEF\\uDFFA]/;\n  var Z = /[ \\xA0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]/;\n\n  // ../../plugin-src/node_modules/entities/dist/decode-codepoint.js\n  var c1 = [\n    8364,\n    0,\n    8218,\n    402,\n    8222,\n    8230,\n    8224,\n    8225,\n    710,\n    8240,\n    352,\n    8249,\n    338,\n    0,\n    381,\n    0,\n    0,\n    8216,\n    8217,\n    8220,\n    8221,\n    8226,\n    8211,\n    8212,\n    732,\n    8482,\n    353,\n    8250,\n    339,\n    0,\n    382,\n    376\n  ];\n  function isInvalidCodePoint(codePoint) {\n    return codePoint === 0 || codePoint >= 55296 && codePoint <= 57343 || codePoint > 1114111;\n  }\n  function replaceCodePoint(codePoint) {\n    if (isInvalidCodePoint(codePoint)) {\n      return 65533;\n    }\n    if (codePoint >= 128 && codePoint <= 159) {\n      return c1[codePoint - 128] || codePoint;\n    }\n    return codePoint;\n  }\n  function codePointToString(codePoint) {\n    return codePoint - 1 >>> 0 < 127 || codePoint - 160 >>> 0 < 55136 ? String.fromCharCode(codePoint) : String.fromCodePoint(replaceCodePoint(codePoint));\n  }\n\n  // ../../plugin-src/node_modules/entities/dist/internal/decode-shared.js\n  var BASE91_INVERSE = /* @__PURE__ */ (() => {\n    const table2 = new Uint8Array(127);\n    let code2 = 0;\n    for (let char = 33; char <= 126; char++) {\n      if (char !== 34 && char !== 36 && char !== 92) {\n        table2[char] = code2++;\n      }\n    }\n    return table2;\n  })();\n  function decodeTrieDict(input, resultLength, atomCount, dict1AtomCount, ngramCount, dictSize) {\n    const base2 = 91;\n    const inputLength = input.length;\n    const twoCharBias = dictSize * (base2 - 1);\n    let pos = 0;\n    const readSlotCode = () => {\n      const c12 = BASE91_INVERSE[input.charCodeAt(pos++)];\n      return c12 < dictSize ? c12 : c12 * base2 - twoCharBias + BASE91_INVERSE[input.charCodeAt(pos++)];\n    };\n    const dict2AtomCount = atomCount - dict1AtomCount;\n    const slotCount = atomCount + ngramCount;\n    const single = new Int32Array(slotCount);\n    single.fill(-1, dict1AtomCount, dictSize);\n    single.fill(-1, dictSize + dict2AtomCount, slotCount);\n    const start = new Int32Array(slotCount);\n    const length = new Int32Array(slotCount);\n    function decodeDelta(count, off) {\n      let previous = 0;\n      let slot = off;\n      const end = off + count;\n      while (slot < end) {\n        const code2 = BASE91_INVERSE[input.charCodeAt(pos++)];\n        if (code2 < 89) {\n          previous += code2;\n          single[slot++] = previous;\n        } else if (code2 === 89) {\n          let runLength = BASE91_INVERSE[input.charCodeAt(pos++)] + 2;\n          while (runLength--)\n            single[slot++] = ++previous;\n        } else {\n          const next = BASE91_INVERSE[input.charCodeAt(pos++)];\n          previous += 89 + // eslint-disable-next-line unicorn/prefer-minimal-ternary -- branches read a different number of side-effecting input bytes\n          (next < 90 ? next * base2 + BASE91_INVERSE[input.charCodeAt(pos++)] : BASE91_INVERSE[input.charCodeAt(pos++)] * 8281 + BASE91_INVERSE[input.charCodeAt(pos++)] * base2 + BASE91_INVERSE[input.charCodeAt(pos++)]);\n          single[slot++] = previous;\n        }\n      }\n    }\n    decodeDelta(dict1AtomCount, 0);\n    decodeDelta(dict2AtomCount, dictSize);\n    const references = new Int32Array(ngramCount * 2);\n    let poolSize = 0;\n    let ngramIndex = 0;\n    function readNgramReferences(count, startSlot) {\n      for (let index = 0; index < count; index++) {\n        const slot = startSlot + index;\n        const a = readSlotCode();\n        const b = readSlotCode();\n        references[ngramIndex * 2] = a;\n        references[ngramIndex * 2 + 1] = b;\n        ngramIndex += 1;\n        start[slot] = poolSize;\n        const entryLength = (single[a] < 0 ? length[a] : 1) + (single[b] < 0 ? length[b] : 1);\n        length[slot] = entryLength;\n        poolSize += entryLength;\n      }\n    }\n    readNgramReferences(ngramCount - dictSize + dict1AtomCount, dictSize + dict2AtomCount);\n    readNgramReferences(dictSize - dict1AtomCount, dict1AtomCount);\n    const pool = new Uint16Array(poolSize);\n    let write = 0;\n    for (let index = 0; index < ngramIndex; index++) {\n      for (let half = 0; half < 2; half++) {\n        const source = references[index * 2 + half];\n        const value = single[source];\n        if (value < 0) {\n          let read = start[source];\n          const readEnd = read + length[source];\n          while (read < readEnd)\n            pool[write++] = pool[read++];\n        } else {\n          pool[write++] = value;\n        }\n      }\n    }\n    const out = new Uint16Array(resultLength);\n    let outIndex = 0;\n    while (pos < inputLength) {\n      let slot = BASE91_INVERSE[input.charCodeAt(pos++)];\n      if (slot >= dictSize) {\n        slot = slot * base2 - twoCharBias + BASE91_INVERSE[input.charCodeAt(pos++)];\n      }\n      const value = single[slot];\n      if (value < 0) {\n        let read = start[slot];\n        const readEnd = read + length[slot];\n        while (read < readEnd)\n          out[outIndex++] = pool[read++];\n      } else {\n        out[outIndex++] = value;\n      }\n    }\n    return out;\n  }\n\n  // ../../plugin-src/node_modules/entities/dist/generated/decode-data-html.js\n  var htmlDecodeTree = /* @__PURE__ */ decodeTrieDict("!}.&u%}\'&}*\'~!6*)%&,~!J~!J~%L~y<~!R,~~%Lu~~#GD~~#|)1#%}^%}2%+#.##%##%}&%##%\'#%##&%#%#\'%#&#%#&#\'#%%#&#%##%#)%\'\'%&%#%#\'%#%%#%%}%%%#%#&(23#%%#&-%0%(\'1#(##%#\'##+%\'*.:1}#%#6-+(%\'%%#%%%}#L\'2351&(\'%}&/N\'(0(/*-%(%%}#\'+&T%7.2}#&%&#%#36/5##%&%%#&#%%#))2%%##%&&\'0~!#*+&\'%1~!%).\'3q?&%\'1~!.##%6(~!+%%%(Gw\'rT~!E#<nA%#jZ~!H%(~!42##~!*31&~!G%U~#)5~#`3~!J~!Z~%]~%Y~%C~!q~!u~#kz~%#~!6\'~!D~!U~!?~#T~!c%~!G#\'~%7|~!G~!J~!G&~#pb~(Df}#%}*&}#%##%##%##&#-}&\'#\'&%#.++}%mI,#,@&(}*%}*\'%&##&#%##%}&0}#.},U},%}+%}&%}#%##&}B%(}(%}+%)})%##%#&}&%##%&}<%}>%#%&}*%}(%}9%}/%})%}*%}*%}?&}&%}3%}&*#%})%#%#)}#&#-#+*%E%%\'%\'#%}#*V##&##I}#&&##%&%#&&Qf%%))w/0+&%#(#.%-\'\'\'\'++++7}>%4\'\',##1,#%#&%##&#\'##&#*#9)%&%}#*}%,#+P(%A&%#\'&##wSD\',9E00#y#@}(+}&%&>~!#~!X}#*}(&&}(&}(,%}%&#+&}#&}I%#%}%)#(},\'%#*}4%%#%}(\'\'}#/##(##),%-##%%)#&}(.}&%#&}%%}*&#%},&&}&%}#%*\'#%})%}D&}&%}-&}6&#&}-,%}#%})-(~+`~,=?~I9\'9%~!,#%})%})%}@%}?%}(~!?~#<~#pP~#BG~#=1#%K+~#?#~%;)~#A~#mF1~#A\'~\'X%\'~#lR~#N~\'N~#r~#m#-~#i\'?%#\'%~#B%##%,%#~#_%#0%~#]732~,w~2+#:&#%&\'0%&>%}#>##F+)#%&&#(+_}4&}-%}(&}@&}O7Fdf0@+/v4}&WU##&/0#&\'(\'B#%}.%}\'+#%}#%%&#&%#%##+#&#)#6#\'#.},%}c%},%#%##%&#&%#&~#>\'*-.%##%##%}#%%}%\'~#)D1}#%*&~#_%%\'(~#S2%\'.}#~#=##*\'*-%}&\'%\'##&&~\'E%.#&~#M4}%%##&\'%#~#O1##%&#\'+~#<B%##%%\'%+~#;#@%}#&%#&&%#(~#H1}\'%\'##&&~#?A}&\'~#D#%32}\'&&&&~#[}\'(#%}\'~#;C})&}%%#%~#=&%,3}%\'(#%%~#^\'#&&)#%\'~#Y%-~#d-%\'~#^%%&#&&&}#~#b~2t*&\'~&(~&@~0%~e~3}%*\'\'0})&}+~!9##-}#%-hD*)1fC#%/&/fB#40~!+#)*4~!+~!K\'&:~!/*7~!.#~!H~!L\':~%x&~!H#~!*~%1~!I#~!+A~#p\'~!F~~#-#~,,(~.Z~!V~%;\'B\'mq-W~!N~%I%#&&#&}#%},%%}\'%}+X#%}#&}(%}\'%}<%}#%}%%\'}\'%}:~![)9@~%>~#UA%-%##&~!C%~!-.9:~!1~!-^2/:a~!y,D*J#-5)/4~%23,~#G~!L1~!0X3`~!2+~!!0-~&E~!W~!o,>Y&]~%cZx_&~#O*9#A#\'#+I\'%#)~!0B*-5A+-((F&*M#)(-7-5+\'-3a5Vi~!Y~!?+[)%3),ERHm~!+:D,VG.+)?fB%%*(%)\'(#&80%1\'8`K8?`+\'Z#&O&\'H5#*9)A%%5&3))0%39+.*7#()&&*=4@**L)<\'_&*+..;(#*+)./&0#3)%\')-8(4ixD(&.}%,(\'aI:,)%,k2231T)I\'#/-W7,/\'Q#.\'Y24+h\')37</31&83##&0#),H(?\'&?/1##%#&&#%\'\'-%&&&#(&\'\'&#.-\'%#%%(,\')*\'&#&#\'##%(%(#%(\'#&##%%%%(\'%#%#%%#%#&%##h>w+v<ayvyvcg.uuhKr}g/v|g>u9i[~>g5uI~=RvdwEg;v/g;uk!!TTSx]@RT!U!#!@VBRUU!\'UTe-d0c`e&gSdicedFcrdTaqb.kYcAohdYd@a3e+d}dMdtd.aJ#bqcK`dle/e.e\'dwdPdodddjbEb}ogd^ofdpduc6j?l%d{drdqc)d7bacOdQ%T#Y)X.sR[yH>6Vyv3[xwLu>vo\'!*.[yBacahoj>6Rew3[xqdZa#!a&#^(X-[yG>6Vyu3[xvg3sEr|g.u/Ri9db0T#^(Xa)!-[y;>6Vylg4wKs{JwNZt3@3r=c4Z([xlg;wKt!cpq\'s@v7A\'*a(a+!-a#[y<3Dt?3Dt\'>6Vym3[xmg9rxsNJwLZt4~?r?db1T#`-!(Xa,!0[yS>6Vz%NuQs.g4wKtnJwNZtS@3r>c4Z([y%g;wKtrdga8!a(!#&T*Y-Xa#!a0<or[yc3Dtq>6Vz43[y3JwNZtf@3s!Ju}!%Dti:pm3c_%X#tjB5pkd6q!r]u?voC\'*-a.a2!0a&a+[yI3DtI3Ds~3DtH>6Vyw3[xx;:s#~<5pKJwNZtE@3r~d`a)!a2T#a.(!+U.X1[yT3Dt`3Dtv>6Vz&3[y&g9rxwzcxstPu.<rAJwLZtT~?r@dZa%!a.&^*Za(/Reu[ya>6Vz23[y1g3sEr}wkg{NuQRg{ci(U#5@b`~,cg#U(2WnH5wugcRh7dX#T(Y,a\'Ta!!a,[yZ<]mj>6Vz,3[y+Pv#5ReZKu+=,%!H}7ABwkaS?Rh:BcW(X#<]mrj:ubv/ARekdg%!(!a.*Ta(Y.X1!#sP>Rl*Dt6[y>>6Vyo3Wf*jOvuumvuRgRJuq*!:9<B@bX~3jVv&v@s@5Re[d/rQt{uAvo&a&a*)a2!,0Wf!3Dt0=Bs\'>6Re}3[xy~<5s%JwJZt1~Gs)c;&!#2sJkNuXvzq7rxu,Re8dka4!a8(aEZ+a@Y.X1Xa)[yd=Bs(3DtP>6Vz53[y4cX#X&Re:avRe9~<5s&JwJZtQ~Gs*i^rzvdRg+Jv{%!2sbB@bX}kdga,!Za?&^*T1/!a\'Dt+[y6>6Vyf3Wf%g/u;s4hGu6?Rh-JvZ,!c%#&RoX54Rivj7uyvf8RgTKvZB%*!2sGh<vu5Rgq<=C::9bb~#dZ#T&Ta6Y.X*Dt>[y93Wf)coZ(T,6VyifluvRgC@95@B@bX~/hFu34cC#T,k/unq8w8Q5RkUklwQuzunq8w8Q5Rk8d/rJu?v8w9)-&!a0a;a&aIWejg3sEr/h1s<DtDJvyZqY5aws3Jvy!&Wei~Hr1:au5@Bag>23E~5c:Z&bX};kKv?w&unuVu5Rjc;>bs)#~@:Rh.=ay<a]C;b`}Vd6s/t{uAvoaxa()!a,a7%-a#a2Dt,[yF2Wo[>6Vyt3[xuNuPRi&NuPwpi#RoWh?vf8Ri%Jv]!%Ri:KvxD!.\'2WeAjZu`q9rxu,Re7woeAg-unLq(qA_/*2Wg_g3u5q^9:4E}/jTrxrzv=Wkkd~0UX#^^Xa-a1a5T&a=U1a\'*aEa]!a*aPaA-adok[y54Rn>;:p3~Dp5g9rpsFNvZqjg3uJp4~<5p0Pw;5qlJwNZt*@3p1Pw:5p/Ou!5p2JvG\'!6Vye=<qnJvh_[xhg3v,Rh3kOwOw-sDuev/Re^dha[a%!%!a+#Ta7)-5TaCaO!aka!a)sf[yb2>Rl!9ARiq5E}Qg=ucRkBE|oJrJ_@Wk~@Wk{JrJ_@Wk|@WkyJrJ_@Wk}@WkzJvO_[y2g-vMRmiKuYC!)&>Ri;>Ri<@3RkNc](X#@9Rk=g5vuRmhKvDB!+\'=]meg3u4Rmgd)#Y\'Vz3CARmfd`a+!%T\'!+#Ta1Ta6TaM-sTDt9[yA9sYd\'%Y#s[[xpj:ueunaXRgEjRq,v-vuqdd2\'`#6Rev<32@5>:2<E}5xIo9a*X#Y(;5RePJvD_g>vyRgNj8w)v8<wggs:RgXiZt|vjx,hSq3ah!-(~@:Ro/Ou!5RhWj^v(pyw8unRhUdx-UY#^Ua.a3a70!)%UX1TaDa)\'omRiRRhE[y:3Dsz=Br,>6Vyj3[xkg6ruwjcqsrPw;5r*Ku]D\'Zt-@3r(~?r.i[vwv]dU1a--U#`a4(g/vsRhPOu!5RhLj:rmu9Wo!~@:wdh@g/vsRiTjXuvvNr}:RhBj^v(pyw8unRn]dz1UYa\'a+^Y(!aETZalaRY.Ta?a4[yDJw1!#qLsW>6Vyrfzq-pLflpwRe|Js>%!Dt@3Dt&Jvy_[xs~HrnjMuwpsw\'RecKu+D#\'!t<~Grl~?rjg5u-x,gwp{ah!-(~@:Rg~Ou!5Rh\'jXuvvNr}:Rh#cW#X/c;&!#2sLi[v7u7RgpJv)(!iLrxu,Re6j7v@s@5Se[e7d`aW!Za(a`T.a#!a3!&aDa-!9)Dt_=6s+3[x~~DR|h~DS6avhGun5RkZj3w)v-]mkKunB!&*]kb97R|i<ARk<c:Z(6Vy}Juh\'!wziMRoS:F|vkLuauJv5vtvQRh1d=\'T+Y#VyO~DR|jcF#T\'7R|g97R|kJv3\'!ay<Rj,Jvh&!:ReXcsa6*a+#a#_aIRf9aLRf?c,Z&Rf5Rf7c.Z&Rf;Rf>cQ#%T\'p-Rf8Rf=ct#%\'(*!,p,Rf4p+Rf6Rf:Rf<d~\'Ua%U*^UYa(!a,-!#a4YaTalaEX0a8a<Weo3Dt/3Dsx=Br93Wen~Dr;~<5p<JwNZt2@3p=Pw:5p;Ou!5r3c7&!#:p>3Ds}KvGB)_6Vyk2sM=<r7x\'eovA(!hFu1ARf}cV#X&@r5j6rvwQa^Rf3c=Za\'wkghJv__g;unRggA53B9=b^}%j6uduo5Jq;!(hIv%2Re`Ou4ARe_e%a#^^^Xa&!a*a2!&a6YaP!*ad!#a:aE/5Rn?[y@>6Vyp;:pE~DrY~<5pBJwNZt8@3pCh=rt3rWPw:5pAJup_[xoNuPpF9c!#\'45pD5ARn)d8#X\'X*3@rU72s]h>v<<sSjJpqvewOJq/(!hNw\'5ReBk0s2u3w/w\'5ReE5@Jq.!a+JQ!&WeU23d(#Y&RjG5]jBk!u7w&u0udARjEe#+^^^Ub#!a2/a`Z(agT1!a-a;|@TaG!aS[yV=Re~fow\'RguNuPRe?bz#\'>RoUWeL>:Cbb|?JwPZtVg6ruRmzJvD\'!6Vz(g/vmRh~Jvy_[y(g9voRgyx*cy(#2>Ri2B9b]~9kIw9u7rluJu3Rg]dI#a%UY\'@=p%CAx.gQZ&RhwwygtRm{x5g_Z\'+ABqR9Woa=Bp&dV#^*Xa\'!&@o{g4v]Rk;Jv{!%Rk[wkkiA5RkiwwfUB=x,fUuqC&*!>RfTg8v0RfV~ARfSd;rJsAuAv9wR\'ae+/aO!a@aza/a#[yQ@Wg!2Wemg3sEr0JvB_g>uvReWg2v+Re=KupB_+[y!2AbY~-~Hr2AJwD!(h<~El>h<~El?Kun@+_:9b`}Kg-v/Ri3g;vtwyk_9]k_d=&T#*U.6qh@Ab`|K9:H|CJv[!&3Dtex\'fDwC%!Rf[9WlMd[(^X,!a%Z06Vz!@WgBg=v~Rgvg,QRe@awd,#Y+jTv|Q~EfWj]uNr|~FRfXdy#Y&^Ua%!aO.!(a)Ua;=!a@aKap!a-,a!Ta]a[rSa]p?[y82sK=Bq~;:p:~<5p8Pw:5p7d\'#Y\'Wf(;RnRi[u4w&RgJJvG\'!6Vyh=<r#ijuuv/sIKuYD\'ZtG@3p9~Gr&d2#`(g<vtRgFj`u5w&rqpxRf2CJuY!+:wfnTOu!5Rg}jNs1ucv&RfwJvA!&3@q|BDcC#T,k/unq8w8Q5RkTklwQuzunq8w8Q5Rk9dga#!a\'!a=#a0!:+Tb*b@aO.a4!aba8aFJv^}?!VyR~Dr<g;u%Rn.~<5p[x\'e`wNZtR@3p]Pw:5pZhNvjBp.woe_g5u-r4JwF!%DtO3:ooc7&!#:p^3DtpLuGw(!+%)Dtk6Vz#2sd=<r8d\'#Y([y#<x3gJt`w@!)%}MRiowzikRij=]ilxAf3,U(#B2Rf#g0v-Rm[ck{`U#]giKv3>)!&6Ri154s,KuGB_%@r68r:dJ|t`#X(9<E|u2@H|rx3gJu?w\'!+\'1Nu7Reg4=H~+9<wxgY95Rm]xLggZ-`(X}U2:Ri4h<uOawRmsJv__5@bb{jbV~3dka#a\'a]!,#a+U=a>b6a3b%!/aKa/)!arwve^VyJ;:pR~DpTg3uJpS~<5pOPw;5qmPw:5pNOu!5pQJvG\'!6Vyx=<qoJvA!{~Jup!%@qk7Rn/KvyD!}\'\'[xz;>wkh\'?Rh,x8gyt`w5D!&),(SgyccRgztJ@3pPB5p#d\'(Y#<]mmifubw&RgoJvE&!82s^JvF&!8Rf,ADb]~;x=h\'rNu]vK!,%\'*0RnORh)4Rh*AqQg-vaRnNg;wHwkh\'ba~4cE#Ta*x3gctyw@\'!+%RnFRnD<4Rn@hFvK5RnCxWg[#`&a0Ua()`1Rm75Rg[c]%X#qi8Rg^NvdRj>BwzgZauwji7Rm6A4wgg]d1#&(*,.0a#Rm;Rm<Rm=Rm>Rm?Rm@RmARmBe%#^^^Xaea?aC/b+(,!a+a#!a/!>a&Ta<aKbD!2wphBRnk[yPw}hE|.=Br-3Dtm>6Vy~g6urRf.x,hPrNav!%\'RnqRo%Ro#Nu;q[Pw;5r+JwNZtM@3r)d\'#Y\'Weh;xChL#`&RnmRnoKu}>%(!Rne~Bs-;2wjcussJv+\'!aYSO}6@B<5?ba~8LrNvj!.%*ROwungw~ng~:9;Ri^>wtnig;wHRnixDh@|(UZ.x1h@|)!#:2<H|*xHn]#-UX\'3Ro)z=iT}6ARns=Bwsn_wpnaRncw]aR(#UXa&Ua*a/=]iPd\'#Y&Ro\'WnXf{QRm2hNvj]nZd`\'T~&1`{|`#9b]{}c:\'!#Wl{>@=be}]?cl{{U#:5Abb}Jds#^YaF!a*b4a#a3aPa>&Tb!bH!*a_!Eau?/a&RjY<]gj>6Vz*;:pe~DrZg,QRj1JwNZtX@wihspcJvZ&!VyX9WmOJu|!|N2WmHJvh&!]ht~Bpbcn&T(!#RmQ<s7Nu;padH#X\'`+WmJ@>RmKCARhnKup=!)&Wf+:RhqNuPpf9c!#\'45pd5AwghpARn(Ls@w!%,)!RmP@Wfe<E|IJva!&WmNg8vsRmLd`*.`#Y\'Xa!axRn*]hrA8Rhug5s@rXg8u!RmMd8#X\'X*3@rV72smdI*#UY&RmICARho~GsgxVgd)Ta\'U-Y&Xa!T#RnEWnA@Wffg1uDRi0hFvK5RnBxGnG&#`%owp)@wsf+bX}Ze-*1!a*^^^Ua|!#a.aq&Ya2!a>.a6!a:aO`aJDtL[y`@Wg#>6Vz12@wzoYRoZNuPRi!NuPRhzg=ucRi,@=b`{Yg=ucRi-ACJvB!&Sh[ebSh]ebi`wUuFRm4Jw2_[y0JvB!.<Ju(!&SoG}6Shd}6<Ju(!&SoH}6She}6Kur@._g5vHRieJvx!{L2G{Kx6gd\'T#?Rh82Wi5cZ#X(g1w)Rm5dW-Y(Ta#!a)!#aYa=wnfE=su2>>bU{0j9udv:<svj8uQv-7RgHdE%#^\'sq9sp=>Bb_{TJv`!&g/r|snj6v(us5d,#Y(56H}[978H}]Jw5!&g1rushJvB!+j;v{u5?zDhd}6}bj;v{u5?zDhe}6}ce*#`(^^^a[aea!=!a6a*aoXb1a.!aAbL!b>,b\'aL!aV@Wf|2Wlg3[y/JwNZt^@3piPw:5pgJunZou3@rsJva&!Vy_g<v~Rm#JvG\'!6Vz0=<r{Ju{%!:pj@WfsiXuJu3Rm:JvZ&!WfA~Bph@c4Z&Dtwax5rubx(#:awRk1@d,#Y&RfjRfid1#,Y(@Wfp2Wlrg5s@ryKu[@!,\'=]ig9wlk?Rk>g5u-rqJvy\'!@9RkQcH(T#=>Ri~@<wkj(Wj(KuZB*!&<7rw@9RkRcH(T#=>Ri}@<wkj)Wj)dg(Ta2Xa9X#`-!a*CARhg@@=I}d9x;c~#X%so=<sj>2@@=aybb}XjWv0Q~EfEj3vLv;<d,#Y(56H}`978H}_dgaPaFa\'a/!#a3Y0a_a;a|!1(a7-[yE3[xt;:pJNvZrrg3uJrvJwNZt=@3pIh=rt3rxPw:5pGOu!5rpJvG\'!6Vys=<rz@c4Z&Dt(ax5rtJvZ!&~BpH@wsfNg-vaRlNci*U#=<wei<F}a5@Jq.!a*JQ!%@qZ23d(#Y&RjH5]jCk!u7w&u0udARjFd/prq=tyvpaEa(a:.!a1aZ(@@=I}:9wpd%=<sX55w_h}@@=I{t=ay<aU@@=I}T=ay<2@@=I})?C9:9au@9Cb]}DP~=x-fAZ(2Wl1=ay<aU@@=I}>5@d##Y+jTv|vV~EfFj]uNpn~FRfGdgaK!Z2&!a8a-Tb({E!acTbM*!a(DtY[yYd\'%Y#sl[y*hHvh>Re5x2c{Z}.j4uCvcawRiMd+#X+_x&d!},<5RkX;2Hzw@x,gavfB-!{CcF&T#Roe;RodwWbBg5urRgaKvHC*_6Vz+<4opieuew&Rmq@d]&Y)X,T#X0Rh}<BqP=4qS9:ReMg/ujReNJw0!/<Jui%!bd{kawwnemRelAxUa?a3#*.&UX(Ya+a/RhvRnQ<o}9Wmtd-#Y&RgSRmw9;Rmxay=Rmyg-vaRmuxEhSrNu,v-voC!%(aR.a(a7+1Ro1>Ro5CE{A9b]{@;5x#eO{:g;urRi+KrNA!%(Ro3>Ro79;Ri_Ku@>{;&!x%gX|{KunA_+g5QRj/g3u5Rj#g>uERj%wio/xRhS&!,!#^1U}wba{8>>@=be}qC@:D5ba{7Ku+A&!}x?ba}t>>@=be}se(aA^^^Uat!b0#{pa+awUazbGa#aLb9bgaWac\'a5TbS=Br!d1#`%scp_Jvl!#rT>Re0JvX&!VyN=H{Fcm#U&:pY=ReaJv2&!]h0=]nUJvG\'!6Vy|=<r%JrM_=]h2@Wlud\'#)U\'Wf\'b]{i=]h/Jvh!&~BpWg=v]RnMx+ny#\'Nu;pVwjnu=]nwxJnx,T#`&Reqwjnt=]nvieu9vrRjLLuYwP(#+!th@wih5pX~Gr\'g5v/Rh4KunA\'!-CARnP@wwiN:Rm_9x\'cvw>!|l=<saKvAA!0&3@q}>w^e1bp#&Re2Re3BDx7gH#T|f5H|eKuZ>!%(:qNAH{]Jv6!+3B2B9=b^{X<5<B92:E{ZLvhwA(a;a%!igQuyRmad+#Y}m@3Rh5d8#X\'X*:AqUAHzmaxwbh<aXRnVcF}RT#Nw&cj#U(BWnug/vsRntdka)(a3+.Zb7aYYan1!bVa@Xa}[y^@b[{G=H{+hFu73Rj&Pv#5ReQcK%T#sig1v{Rj\'Ku+D#\'!t]~Grm~?rkKuMB!01d5#`\'Vy.ta3Dtu~Hroc8#\'{^45s85AwZbP&!#Rn!wghxWn#KvEA!)&2RlA2RlBx:h|#(T,=]j09Wobz>x]z/@awRoTd+#Y(az]hFhCrm4d,#Y+jTv|Q~EfMj]uNr|~FRfOdCa!Xa9_X#@<plJvf!%b`{(9;Rgwc;.!#2x7cw#T|UDb]|T5Ju={(!=@E{&Jv)&!Ab`{\'awJvf!~*>>@=be{#KuY>!+&4Ezyi[ugv&RjIdea+T)#UXa&T-T&a!Rh9auRmW=]kLg5vuRn+g3u4Rn-Ow6ARn,hHus5xNk?#UX(U~)/g8v0RkD~AwkkF?Ri.OuNBwkkA?Ri/d|a2`a*^UYa.!aBTZaTa\'Xa;!(!2!-a#b2[yC>6Vyq3[xr2Wi?g1rusVh%s?DtF~<5rbJs;%!DtBfswKtCj[uvuSsEu3RgVx3o:u+wN\'*Zt;@3rd~Grh~?rfg8w)Lq)qE&-a%!>bI|`jWv0vV~EfCjTv|vV~Ef@j]uNpn~FRfBcK#T\']gWNu7x,k7q4ai(0!hHv8<RhmkMu9vrsBuev/RhlCJvB!,g<v{wchh~@:Rhji[vrv{wchi~@:RhkdS&a5UY#Ta!RgPwwiI5BwciI~@:Rh`x\'iJvj\'!5]iJPu8Bwch]~@:Rhach)U#h3rp]gLh@t|Ax,hTq3ah!-(~@:Ro0Ou!5RhXj^v(pyw8unRhVd|)`,^UYas!a?/a2Z\'a^Ta{Tb7Ta(a#!a,Wf&9sZ3DtAadamov=Bqt3[xig8vsRm~>waiL2b`{QJv*_Ouv2qgj<v]v2BqfdR\'X*X#Y-@3qr~Gqv~?p6hHv-]glPup5Lq+q?_%*b_{qF{n9b^{rOu4ARhpKvCD!+&~Bqp:5Dbb}nwoiKl&unuTuBv]v+ueunaXRf0=Jvh!0nKufu8v1w&w7q%w&uHrz:Rgnj5w,uxDJq/(!hNw\'5ReCk0s2u3w/w\'5ReFd>Za&!*UaA=<wkgsRnSJv^!%Refifw3vyRgOKu_B\'!,<]gkiiu:w&Rh<=C@a^<B57@2F{[<B5@aW:=3away9A5aW=<B=C@a^<B57@2F{Ie-#`(^^^bCara.b8aza6!/bZ,!adTbnTbOb+aFaS!aAT9@Wf~2Wli3Dtl2@d,#Y&RfnRfmJwJZtN~GqyJva&!VyMg<v~Rm%iXuJu3Rm9Jv[_=]ih9wlkDRkCd1#`(@Wg>2Wls3cH#T(@<Rj*=>Ri|b~\'#23s9h<~El.d\'#Y&Dtxi^rzvdRl#d*#U%(o|B2s`hJwSaxRmDKv4B&!1:Rmdd5#`\'Vx}to~Hq{x\'f1v3(!BA5ba|bJv_&!Wfug1v]ReIdO+U/Y#&G}-8wze=Rh{g1v]ReHg/uQRf/by#)ibQwERl/cH#T(@<Rj+=>Ri{cNu+vlax-!(#a0qa9<Rii2;;bU{H;x<i=&X#Rk`<4wwi=C9H~8xAI(Y#<azRi@45wXI<B9;5bb~7dL(X#Xa(+!aL6Vy{g5QqOau:5au2@ay547EzbxOcU(UX-T#Ta#:Cbb|A?wjh/b_|SOw6ARgtihr}u7Rhy<d1#T)X1@@=I|~=ay<2@@=aybb}Sj3vLv;<d,#Y(56H}A978H}@dGpvs@uAu`vcw9*!aFa+ai%(b!aXa8.a?a[ozWey=sU2@G}Nch&U#Rf_WexKu+D#\'!t:~Gr`~?r^j]uNr|~FRg*j^psurwJt|RmcKv)@&!)7Rkv~Br[@wxfO:Rl3co#U\'6Rezj_q#vIuavjRltwzeyh@vr5JqD0!>aY?C9:9au@9Cb]}9cl#U*5;5<H||jbuus1ucv&Rfvg1v~d/pppzqFr^a--a~!aMat1(hFv;Wiz@@=Izoj5uuv-7Rix~Cw`fk2WlVcZ#X,k)u3vWs@u2]ktg;wEx\'fBq(_2Wg/jTv|vV~EfoJv]!15x\'hzqG!(P~EfU~CRl_j6v(us5x4i-#T(2WmZ?C2F|d>Kq<aj1!*jTqIsBv=Wl`~Cw`fi2WlWj`v0u*~>RlR=c>Z,k#u3vWs@u2]kr<c1Z+jTqIsBv=Wla~Cw`fm2WlXdmb3!a{(arZa`bkTa%TbQTa-a9+c\'!aM!/[yL=Bqug.w\'RifhFvyDRj.g>vgwyk^9]k^Jv3_@WfbAARkhJw2_[x|JvB_wkoIRoKwkoJRoLd\'(Y#<]gm=<9<H|yd\'%_X#skDtb3awwqkgNulRkgdB#^\',9:p\'hJwSaxRmEBwVb8@4=H|qLu+w50&!)@3qs~?pU>Awwn;;Rn=c:Z\'ARn<=<qwKvC@!/&~BqqJv6!&]eVb^z^xRge\'/a%+^`#Sge}6<4Rn3=]n0Pw2>Rn8Jw0!&>Rn:>Rn6cY#a7+!a&=<wkaNw~h3z_c5Z{=wjh#=]nLKv^D!&)Vyz=bW|swYb<WetcG#T(2wxa@qVx@gD#Y&b^|V5JwG&!5bb|pg/w&RgD@x=kHs=uAvn!a%%/\'+RmSRh694Ro`g-vaRmRhHv-]mlxCcS#`&ba~.5cD#Ta)P~=d,#Y(56H{>978H{Dd_#{2^Y%_+qbbb{6g3sERhsbU{?dfa.,`a(Xa<!aiX#(55RiG54RiHcI#T\'WiU3RiVNvdwtfcRlKNvdd,#Y&RlHRlExQgf.1*^T\'X#Sgf}6Wn4=]hfPrk>Rn7Jw0!&>Rn5>Rn9Lunw?&a2!,5<oq@@wqfdRlJj5Q~=d,#Y(~ARfcOuN]fdDKw;ay(}i!547E}j?cI#T(@5bV}iCbV}hdv(^^Tb?a40,b##Tbo!a*bR!a<b|a/!aKai!aU[yK=]o^g:v>ReGJwPZtK<7Rh+h<~El,Pv#5ReR@awwxjCg,ulRjDJv6&!]j!z?aQeeg>w=Sh<eeJw;!&axEzOg,Qosc!#*:wkeJ]eJ>x\'h-u(!%Ro.w~h.zPdNZ(X,Ya![x{;9ReY;wkgxRiF:x?ap#Y&RmUg<s2Rkod]+UY0TZ\'!a&A9sw<=bczLNvuw{gqzNhJwSaxRmCKuLay!#&s_Rf-55b^{uJvZa!!c%#(55Ri654wmiu5RiuawLu,vp!+}^%b_}Y9;wkgxba}o>A9:=b^}zKuh=a\'\'!3awRk3c*\'!#aHRk6c+Z&Rk5Rk4Jv)&!awRjSawd9*`#0?C2@EzMj8u<uJ5RmbjQrquJu3x,k>uq@_+=ayb^|W~ARkEOuN]k@7dhzV^X/X&a-#zRzSb`zXcJzTT#2WkVKvDBzW!%FzY9;5bbzWjQrquJu3Jw3%!b`zU=ayb^zQd:#X(T-a!6Vyywxh}=b]{Jg=u1RiAdGp~qHtzv!w(wA+a+a;<!aJaYai\'anasb(=azRmV:Cbb{MLq2vb!%\')RjuRjrRjtRjqx3jnqCw3!%\')Rk(Rk+Rk&Rk)Lq2vb!%\')Rj{RjxRjzRjwLq2vb!%\')RjsRjpRjfRjex3jcqCw3!%\')Rk\'Rk*RjkRjl9<CbbzfOu4ARhxLq2vb!%\')RjyRjvRjhRjgx=joq*uKvb!%\')+-Rk.Rk%Rj~Rk-Rk#Rj}x=jdq*uKvb!%\')+-Rk,Rk!Rj|RjmRjjRjidAq&qKs@uAv8Aa.\'*-a@a&0!aM@a5[y73Dsy3Ds|3Dt):wxgI2sHJwJZt.~Gqxwsf0ikrzt}Rl0Jvy_[xj~HqzKv_A|D!&WfP8axRoVcf,U#k(v]v+ueunaXRf1Ju}\'!g8u#Ri=jQw!sCunLprq>!,\')~<5qeGzq9F{W=c##%s5au:5aU3CBE|;d4#X(D!a&6Vygx(b;#(=]ed?C2F{N<capoq2r[a&!aPa9,\'Pw;5s:@@=I|,55w_h|@@=IzcP~=x\'fCqB_2Wl2>aU@@=I|1OuNBc1Z+jTqIsBv=Wlc~Cw`fl2WlZ~AcTa%!Z+jTqIsBv=Wlb~Cw`fh2WlYk+uNqJsBv=WlSg,u3dca3#UXaMYa)TaB-=cM|7T#<bI}l5@B932:aV2G{BOuNBJq:|M!5Ezt=<B=C@a^<B57@2F{v>cB{/T#=ay<bI{3Jv6!a.6BKq0ah&+!5E}HP~Ef{978BaU@@=Iza<7d#.Y#978BaU@@=IzH~AJq0!(@@=IzG978BaU@@=IzFe,aU*Y&^^^bvJb,b:bFad!a,c2Ta>aL.bo6!a#CbTa\'T#Re{2Wlh2@G{yg6t~Ro_NvdRfticuRQRllJv3&!x&c|zs@Jw3!%RflwpfkRlpKuL;%(!Re<@G|C2GzdhIvuBwgjAg-u0RjAKQB%!(GzZ@G|5NuuRl7d=\'T+Y#Vy[g<v~Rm!==G|>JvA!)@wma=]m1ifuaw&RmnLs@vT\'!|/+[y,g:v>ReTJw1!#qX=x!eC{bLu+wT&)ZtZauq_~Graci&U#F|89:r_Lupvq!.)&2RlG8RfaC=x!eF{_h?rpWlmd&\'!#X|&]k::xJey#`\'T|+<E|&2@H|%dE#(^,g;u.RiEg6vjRiC9xCkA{O|zY#g=ucRmXKs0@!&*@G|m@awRknJuh!,3d(}gY}eJvj!%Rm):Jw3!%Rm+Rm-Ls0w(&!a(a#@b[|6cZ#X\'7RkxWgAOu4ARn\'dH\'U#Y*Vz-Wm\'CARm}d]*#a%^a*T\'aK!a<9bV{PC=p*Jw4!&SgxcbB5r]idw(wBRmF7xFkt#&`(Rm/Rm8E|!JuY_9:Rl5=wrgr2:bbxd@xXfB(a*#T+!.X0X1Ta/a\'T&RlDRfL>RlyARl9b[z[>RfZ:RlL:RfRwlg/ARl;9;RlxKv,A/!%7s69<74=BA5ba{-8Bde#`a<XaKYa1,a\'P~=wxfB2bZ}}?C972@@=I}r8@55B9;5bb}G978B2@@=aybb}3j3vLv;<Jw3&!>Rfk=ayb^}4~Ad1#`*@@=aybb{w2@>==<bbz]dx+UY#^UaF!a9!bB\'Ya1.!ajXa#%olRhD[y=3Dt#Ov5BrHKuMB%!(Rf^Wep~HrJwkiQjKr|~FRg)Ku+D#\'!t5~GrF~?rDdV)UY,Z/_7RkuG{<~BrBg,rlsO:235B@bX}|d?a1!#`(6Vyn5@d##Y+jTv|vV~EfIj]uNpn~FRfH7Lq2vb1!a9-978BaU@@=Iz9978BbU}#~AJq0!(@@=Iz8978BaU@@=Iz7~AJQ|}!978BbU}!JvkaK!AdUa21-U#`a+(g/vsRn~Ou!5RPj:rmu9WhOjXuvvNr}:RhAj^v(pyw8unRn[kPr}p|u7vwv]RiSBd;pppzq@qHQa?(b.!a.a`@.|xa(hFv;Wiyj5uuv-7Riw~Cw`fg2WlU978BbU|wOuNBJqG!(P~EfD~CRlQcZ#X,k)u3vWs@u2]ksg;wEx\'f@q1_2Wg.j]uNpn~FRfqJv]!15x\'h{qG!(@@=IzK~CRl^j6v(us5x4i,#T(2WmY?C2F{1>Kq<aj1!*jTqIsBv=Wld~Cw`fj2Wl[j`v0u*~>RlT=c>Z,k#u3vWs@u2]kq<c1Z+jTqIsBv=Wle~Cw`fn2Wl]dn1#c(a(b^a2!b/bAT(bj!aDa7bu,a_a{c0!2T0g:v>ReD2@G{42@G{5~DpM~<5rc=Bx6i>{RT#RnI@zCx]y]z:2Jv[!zr5Awyk]9]k]dD(Y+X#6Vz.g=wKtgwhaCwgmTWj2Lu,w%_+/[y-B;b^xeg3u3Rj-2@bX{*KrJ<!+\'@Wg(g?QRlC@Jv`!%b[zIwsfII}8JQ_@w|kW|=Jv(%!AqcOuNBJvEzh!bYzjLs@wP#(0!oy@>RkdJwMZtc3Dtd@BcG#T\'9bWxg2@2Fznd*#Y+;2x\'c}w<zizixNgwa#Z\'U+!/!a\'!a+w~g~z6wcn{Rn}wcnzRn|5Rh%=]nJg5vuRmvNvdRlvcprJu}w*az*a#!%.a.\'Bot9qT]kj@Wg\'ay2Gzv@Jv`!%b[zEwsfHI}1;ck#Ux`<Cbbx_Lu+w!a&0*!wko*wwo,So,}6Juqxf!E}PigQuyRm`d3(`#8>Rn%:A5B;bZ~%KvhCa!a2!x>k7#Uxb@b{#xaRk7Jw0!)>wwhlShl}6>wwhmShm}6CJvB!.x\'hhvj{!!5Bwkhhbaz}x\'hivjz~!5Bwkhibaz|xEhTrNu,v-vpD!a%&/)a3a.,%Ro2t[CE{)@3re9b]{%wjo09:rgc:Z&Ro6=<riifuaw&RmoKrNA!%(Ro4>Ro89;Ri`dSaL\'UYzxZb)7Rka3xRhT&!,!#^1U}vbaz{>>@=be}yC@:D5bazzKu+A&!}{?ba}y>>@=be}wxBh[t`u~vJvr!%a!a()a,a0a4RoC=]o;Ju(!%RoGRhdwjh`=]oAg>w#Ro?g5vuRo=NvdRl|Ku]C.!&;RoEJvB!%RoORoMBx\'h[v+_?w~h`}~5?w~hd~!xKh]oiptu-utv.vp!#%&a30a@a\'a+(a/aOp(o~p!RoDJu(!%RoHRhewjha=]oBNvdRl}g>w#Ro@g5vuRo>c[#X\']o<CauRoRAd-#Y\':RkpauRoQKu]C.!&;RoFJvB!%RoNRoPBx\'h]v+_?w~ha}t5?w~he}ue!/UbhYacXaW^Tc&a;b:a-c/#b&aja1(!cL+!bKbt!bmcRc9aIc?8[yW3Dtt94Rg`Jv}!&SiRMzBhEebShEMNuPRe>x7gL#TzuwjirRipc<Z&>on;>z=h-MSh.Mwqczx\'a7vj&!>Re4@=ResJt__NuPRi*NuPRi)j]uNr|~FRfzKrJ>_+@Wfy@Wf]2WocKrJ<!+\'@Wg%g/QRl@@Jv`!&awRl<wsfFIzgLu(w*!.*&ShBMwvhIRhI9;RhNx1hK\'!#Sn]Mx1hK~0!#:2<H~7cNu+w7D*\'1ZtW>Rn1~?rOc:Z&Rn2=<rQ<7wjh&=BSnLMc]#X(6Vz)w[b=a!U#9wzgMc3#&(RgMRitRis<x,gKt`ax!&+SioM=BSilMc3#&(RgKRinRimKurB,!&SiQMzBhDebShDM6BJQ!(P~Efx978B2@@=I}WLrJw!!,a*&@G}O@9wkibRid@@x\'fKwC!&SlDMSfLMjUv~Q~EfKKv3@a+!(hFv-]mpx/hYZ(C5RiWz<o/MwkhY?So/M@x,gbvfB*&!SgEM:SoeeehFu3:Rgbda(,^TZa)X/7Sg[eb:2RgI~BrMC@wgkc:wwkcRerx3h(uUvK!&*,SnOM4Sh*MArRg;wHRh(x=h;rJvPwI!a4\',a\'0@Wg&=BSh/Mg>w=Rh=g3w*wwgGRgGcW(X#;Sg}M2Gzk@Jv`!&awRl=wsfGIz`dKZ*T\'Y-:RhR7RhQg5u-p`j6v(us5d,#Y+~Awkia?RicOuNBwkibba}Ld6p~tyu_vbAa\'a+!a/\'a3aEa8a!>Sh,ebJv{!&Sh@ebSaReb9;SgwebNuPRi(NvdRl)NuPRi\'hHu^<Rm^Jvv_@Wl(g;u1Si/ebKu\'B&!*Sh?eb@Wl\'z@aPeb95Si.ebcpputyvjB)!,&a+0a%ShAMWeK@G}C@WfJ9;RhMwvhH9w{ia}ix,hJvRA1(!zAn[MRhHx1hJ~*!#hFv(BSn[MBJQ!(@@=I~\'978B2@@=I}2db.Ua<\'X}+T#a0XaG2G}E;wkg|wuh!Rh!x,hZu,@)!&So0MVy)C5RiXACJvB!&5RiY5RiZg8w)cG}*T#2@bU}=KsA>(!a.3wkhZba~(x,h^u(A!&(SoCMRhb5Bz=h[eb?w~hb~6x,h_u(A!&(SoDMRhc5Bz=h]eb?w~hc~6e)aA1T#T,^^^c-bMb&blcPaP(a/!0!bA=b5c@a(!bfbrc#2afwmhARnjwchORnp2Wlf3DtsNvdRl-2@wpa<]m0bx(#:awRk2@Jw3!%RfhwpfgRlnKQB%!(G{V@G|\'NuuRl6d=\'T+Y#VyUg<v~Rl~==G|<Jv+\'!aYShC}6@B<5?ba~8@Jw3\'!g2QRljhLrpWlOd+#Y\'g.w\'rIg>w*wgj@g-u0Rj@Lu+wT&)ZtUauq]~GrGci&U#F|39:rELrNvj!.%*RhCwunfw~nf~:9;Ri]>wtnhg;wHRnhx3hDs@v~!/+\'@Wfr@9RkSNu&Rlo=@<5GzoKs0@_+@Wl+@awRkmJuh!-3d(}pY#qWJvj!%Rm(:Jw3!%Rm,Rm*de&!1U-U#`)Re;@G|.@9Ri82@wjfvRlq=@<5GzpLvOvr!).&2RlF8Rf`C=x!eE{.Jw3_g2QRlkhLrpWlPde(!#U{s,UXa*Ta\'[y\'g:v>ReS;x0PZ&RnlRnn~HrKJw1}f!=x!eB|2w]aP(#Xa&a*Ta.Ua2a7=]iOd\'#Y&Ro&WnWg;u.RiDg6vjRiBNvdRlzhNvj]nYJuW_2Wm3x)kFze{9d])!a.!,Y01!#&aC!a3RndC=ox~BrC@2b^{pg,rlse7x\'ksuq!%Rm.E{xidw(wBRmGx9o+)X#wwo-So-}69:Rl4@xSf@a#XZ\'X)X,Ta(/ARl8b[xc>RfY:RlI:RfQwlg.ARl:9;Rlwdn\'#^XafaQa1X1TaHTa)@b[{zcZ#X\'7RkwWg@Ou4ARn&x)kG#{,g7u/RkGdH\'U#Y*Vz\'Wm&CARm|bx#(A]gUbUzJj9Q~=d,#Y(56H}l978H{U7d,0#U*2>ABb_xZ978BbU{e~AJQ{g!978BbU{hxMh?ad{oUYZ.x1h?{l!#:2<H{mx3n[t{vl!,&a%3Ro(z=iS}6ARnr=Bwsn^wvn`Rnbd`*T}B0!#^X\'BG{c9b]{a>>@=be}F?JvS!&BG{d7BG}(Bde#`a1X,Ya@!a\'P~=wxf@2bZ}I56B2@@=aybb}08@55B9;5bb}<j3vLv;<Jw3&!>Rfg=ayb^}&OuNBKuLA!)a!P~=x#fD{f2@>==<bbzl?C972@@=Ix^d6rSu,v7w*C(0a)a6#B+a%!sQ[y?3Dt%3[xn~<5rLOu!5p@Ku+D#\'!t7~GrP~?rNKvlaya7\'!h+v-5qMg=t|cd,U#5AAaa5Abb{S@52B5@a[@52B5Gx[iXueu;d<#`a(!/549C;ag>23ExY5@Dah89b^~689Jv)!~2b[~1Lv\'w(%*!a#bX|aPrmawRe]keu7uhv-q6rxu,q`xTo]/a5aU!bNaDXbi!b-!ao!b<bwA!#5@B932:aV2G|:d-)Y#hJrL>RhG<7@C5<H|_=Cau:5aj5@B932:bJ|ng>vIbs)#?C2F|9jPv0w.vISh-MKvUaz(.!9ABbb|[5;5<H|Eg>unwfh;9:4E|YjQsBt|vjx\'hYq3!(?C2F|J:2<BaY?C2F|GOu!5x,g|p{ah!-(?C2F|c9:4E|OjXuvvNr}:Rh&i[w*t|cd+U#jJvsu)vsSn~Mkfrmu9p}u7vwv]So!McW#Xa!ax5@A5aY:5;5<H|>kJv~vYrquJu3x4ib#T)2@SmZM?C2F|Bj:rmu9@xPhI(a*a#U#`a3-5Abb|L~@:RhK9:4E|0@52B5G|#C::aY?C2F|-:2<BaY?C2F|.5Jvk!a)javYrquJu3x4ia#T)2@SmYM?C2F|HAxPhH(!a#U#`a*-5Abb|4~@:RhJ9:4E|R@52B5G|F:2<BaY?C2F|Sc^#Xa2j=Qq5CJvB!-g<v{z;hhM?C2F|Zi[vrv{z;hiM?C2F|XKsA>!a)-g<v{z;h[eb?C2F|]i[vrv{z;h]eb?C2F|^iZu.vix,hZq3ah!.(?C2F|QOu!5ShXM:2<BaY?C2F|P", 13494, 2713, 49, 25, 61);\n\n  // ../../plugin-src/node_modules/entities/dist/internal/bin-trie-flags.js\n  var BinTrieFlags;\n  (function(BinTrieFlags2) {\n    BinTrieFlags2[BinTrieFlags2["VALUE_LENGTH"] = 49152] = "VALUE_LENGTH";\n    BinTrieFlags2[BinTrieFlags2["FLAG13"] = 8192] = "FLAG13";\n    BinTrieFlags2[BinTrieFlags2["BRANCH_LENGTH"] = 8064] = "BRANCH_LENGTH";\n    BinTrieFlags2[BinTrieFlags2["JUMP_TABLE"] = 127] = "JUMP_TABLE";\n    BinTrieFlags2[BinTrieFlags2["VALUE_MASK"] = 8191] = "VALUE_MASK";\n  })(BinTrieFlags || (BinTrieFlags = {}));\n\n  // ../../plugin-src/node_modules/entities/dist/decode.js\n  var CharCodes;\n  (function(CharCodes2) {\n    CharCodes2[CharCodes2["AMP"] = 38] = "AMP";\n    CharCodes2[CharCodes2["NUM"] = 35] = "NUM";\n    CharCodes2[CharCodes2["SEMI"] = 59] = "SEMI";\n    CharCodes2[CharCodes2["EQUALS"] = 61] = "EQUALS";\n    CharCodes2[CharCodes2["ZERO"] = 48] = "ZERO";\n    CharCodes2[CharCodes2["NINE"] = 57] = "NINE";\n    CharCodes2[CharCodes2["LOWER_A"] = 97] = "LOWER_A";\n    CharCodes2[CharCodes2["LOWER_X"] = 120] = "LOWER_X";\n  })(CharCodes || (CharCodes = {}));\n  var TO_LOWER_BIT = 32;\n  var CONSUMED_SHIFT = 21;\n  var CODE_POINT_MASK = 2097151;\n  var CONSUMED_OVERFLOW = 2047;\n  var longNumericConsumed = 0;\n  function unpackConsumed(packed) {\n    const consumed = packed >>> CONSUMED_SHIFT;\n    return consumed === CONSUMED_OVERFLOW ? longNumericConsumed : consumed;\n  }\n  function isNumber(code2) {\n    return code2 - CharCodes.ZERO >>> 0 <= 9;\n  }\n  function isHexadecimalCharacter(code2) {\n    return (code2 | TO_LOWER_BIT) - CharCodes.LOWER_A >>> 0 <= 5;\n  }\n  function isAlpha(code2) {\n    return (code2 | TO_LOWER_BIT) - CharCodes.LOWER_A >>> 0 <= 25;\n  }\n  function isEntityInAttributeInvalidEnd(code2) {\n    return code2 === CharCodes.EQUALS || isAlpha(code2) || isNumber(code2);\n  }\n  var EntityDecoderState;\n  (function(EntityDecoderState2) {\n    EntityDecoderState2[EntityDecoderState2["EntityStart"] = 0] = "EntityStart";\n    EntityDecoderState2[EntityDecoderState2["NumericStart"] = 1] = "NumericStart";\n    EntityDecoderState2[EntityDecoderState2["NumericDecimal"] = 2] = "NumericDecimal";\n    EntityDecoderState2[EntityDecoderState2["NumericHex"] = 3] = "NumericHex";\n    EntityDecoderState2[EntityDecoderState2["NamedEntity"] = 4] = "NamedEntity";\n  })(EntityDecoderState || (EntityDecoderState = {}));\n  var DecodingMode;\n  (function(DecodingMode2) {\n    DecodingMode2[DecodingMode2["Legacy"] = 0] = "Legacy";\n    DecodingMode2[DecodingMode2["Strict"] = 1] = "Strict";\n    DecodingMode2[DecodingMode2["Attribute"] = 2] = "Attribute";\n  })(DecodingMode || (DecodingMode = {}));\n  function determineBranch(decodeTree, current, nodeIndex, char) {\n    const branchCount = (current & BinTrieFlags.BRANCH_LENGTH) >> 7;\n    const jumpOffset = current & BinTrieFlags.JUMP_TABLE;\n    if (jumpOffset) {\n      if (branchCount === 0) {\n        return char === jumpOffset ? nodeIndex : -1;\n      }\n      const slot = char - jumpOffset;\n      if (slot >>> 0 >= branchCount)\n        return -1;\n      const stored = decodeTree[nodeIndex + slot];\n      return stored === 0 ? -1 : nodeIndex + branchCount + stored - 1 & 65535;\n    }\n    if (branchCount === 0)\n      return -1;\n    const packedKeySlots = branchCount + 1 >> 1;\n    const branchEnd = nodeIndex + packedKeySlots + branchCount;\n    for (let index = 0; index < branchCount; index++) {\n      const packed = decodeTree[nodeIndex + (index >> 1)];\n      const key = packed >> ((index & 1) << 3) & 255;\n      if (key === char) {\n        const pointerIndex = nodeIndex + packedKeySlots + index;\n        return branchEnd + decodeTree[pointerIndex] & 65535;\n      }\n      if (key > char)\n        return -1;\n    }\n    return -1;\n  }\n  function readTrieValue(decodeTree, nodeIndex, valueLength) {\n    if (valueLength === 1) {\n      return String.fromCharCode(decodeTree[nodeIndex] & BinTrieFlags.VALUE_MASK);\n    }\n    if (valueLength === 2) {\n      return String.fromCharCode(decodeTree[nodeIndex + 1]);\n    }\n    return String.fromCharCode(decodeTree[nodeIndex + 1], decodeTree[nodeIndex + 2]);\n  }\n  function parseNumericEntity(input, numberStart, inputLength) {\n    let offset = numberStart + 1;\n    let cp = 0;\n    let digitStart = offset;\n    if (offset < inputLength && (input.charCodeAt(offset) | TO_LOWER_BIT) === CharCodes.LOWER_X) {\n      offset += 1;\n      digitStart = offset;\n      while (offset < inputLength) {\n        const char = input.charCodeAt(offset);\n        if (isNumber(char)) {\n          cp = cp * 16 + (char - CharCodes.ZERO);\n        } else if (isHexadecimalCharacter(char)) {\n          cp = cp * 16 + ((char | TO_LOWER_BIT) - CharCodes.LOWER_A + 10);\n        } else {\n          break;\n        }\n        offset += 1;\n      }\n    } else {\n      while (offset < inputLength) {\n        const digit = input.charCodeAt(offset) - CharCodes.ZERO;\n        if (digit >>> 0 > 9)\n          break;\n        cp = cp * 10 + digit;\n        offset += 1;\n      }\n    }\n    if (offset === digitStart)\n      return 0;\n    if (offset < inputLength && input.charCodeAt(offset) === CharCodes.SEMI) {\n      offset += 1;\n    }\n    if (cp > 1114111)\n      cp = 1114112;\n    let consumed = offset - numberStart;\n    if (consumed >= CONSUMED_OVERFLOW) {\n      longNumericConsumed = consumed;\n      consumed = CONSUMED_OVERFLOW;\n    }\n    return consumed << CONSUMED_SHIFT | cp;\n  }\n  function decodeWithTrie(input, isStrict, isAttribute) {\n    const decodeTree = htmlDecodeTree;\n    let offset = input.indexOf("&");\n    if (offset < 0)\n      return input;\n    const inputLength = input.length;\n    let chunkStart = 0;\n    let result = "";\n    const root = decodeTree[0];\n    const rootJumpOffset = root & BinTrieFlags.JUMP_TABLE;\n    const rootBranchCount = (root & BinTrieFlags.BRANCH_LENGTH) >> 7;\n    do {\n      const entityStart = offset + 1;\n      const firstChar = input.charCodeAt(entityStart);\n      let consumed;\n      let value;\n      if (firstChar === CharCodes.NUM) {\n        const packed = parseNumericEntity(input, entityStart, inputLength);\n        consumed = unpackConsumed(packed);\n        if (isStrict && consumed > 0 && input.charCodeAt(entityStart + consumed - 1) !== CharCodes.SEMI) {\n          consumed = 0;\n        }\n        value = consumed === 0 ? "" : codePointToString(packed & CODE_POINT_MASK);\n      } else if (isAlpha(firstChar)) {\n        consumed = 0;\n        value = "";\n        const rootSlotIndex = firstChar - rootJumpOffset;\n        let nodeIndex;\n        if (rootSlotIndex >>> 0 < rootBranchCount) {\n          const stored = decodeTree[1 + rootSlotIndex];\n          nodeIndex = stored === 0 ? -1 : rootBranchCount + stored & 65535;\n        } else {\n          nodeIndex = -1;\n        }\n        let bestNodeIndex = 0;\n        let bestValueLength = 0;\n        let current = nodeIndex < 0 ? 0 : decodeTree[nodeIndex];\n        let index = entityStart + 1;\n        trie: while (index < inputLength) {\n          while (\n            // Value-less, non-run node with a nonzero jump offset.\n            (current & (BinTrieFlags.VALUE_LENGTH | BinTrieFlags.FLAG13)) === 0 && (current & BinTrieFlags.JUMP_TABLE) !== 0\n          ) {\n            const jumpOffset = current & BinTrieFlags.JUMP_TABLE;\n            const branchCount = (current & BinTrieFlags.BRANCH_LENGTH) >> 7;\n            if (branchCount === 0) {\n              if (input.charCodeAt(index) !== jumpOffset)\n                break trie;\n              nodeIndex += 1;\n            } else {\n              const slot = input.charCodeAt(index) - jumpOffset;\n              if (slot >>> 0 >= branchCount)\n                break trie;\n              const stored = decodeTree[nodeIndex + 1 + slot];\n              if (stored === 0)\n                break trie;\n              nodeIndex = nodeIndex + branchCount + stored & 65535;\n            }\n            current = decodeTree[nodeIndex];\n            index += 1;\n            if (index >= inputLength)\n              break trie;\n          }\n          if ((current & (BinTrieFlags.VALUE_LENGTH | BinTrieFlags.FLAG13)) === BinTrieFlags.FLAG13) {\n            const runLength = (current & BinTrieFlags.BRANCH_LENGTH) >> 7;\n            if (input.charCodeAt(index) !== (current & BinTrieFlags.JUMP_TABLE)) {\n              break;\n            }\n            index += 1;\n            const remaining = runLength - 1;\n            let wordIndex = nodeIndex + 1;\n            let charIndexInPacked = 0;\n            for (; charIndexInPacked + 1 < remaining; charIndexInPacked += 2) {\n              const packed = decodeTree[wordIndex];\n              if (input.charCodeAt(index) !== (packed & 255))\n                break trie;\n              index += 1;\n              if (input.charCodeAt(index) !== (packed >> 8 & 255))\n                break trie;\n              index += 1;\n              wordIndex += 1;\n            }\n            if (charIndexInPacked < remaining) {\n              if (input.charCodeAt(index) !== (decodeTree[wordIndex] & 255))\n                break;\n              index += 1;\n            }\n            nodeIndex += 1 + (runLength >> 1);\n            current = decodeTree[nodeIndex];\n            continue;\n          }\n          const valueLength = current >>> 14;\n          const char = input.charCodeAt(index);\n          if (valueLength !== 0) {\n            if (char === CharCodes.SEMI) {\n              consumed = index - entityStart + 1;\n              value = valueLength === 1 ? String.fromCharCode(current & BinTrieFlags.VALUE_MASK) : readTrieValue(decodeTree, nodeIndex, valueLength);\n              break;\n            }\n            if (!isStrict && (current & BinTrieFlags.FLAG13) === 0) {\n              consumed = index - entityStart;\n              bestNodeIndex = nodeIndex;\n              bestValueLength = valueLength;\n            }\n            if (valueLength === 1)\n              break;\n          }\n          const next = determineBranch(decodeTree, current, nodeIndex + (valueLength || 1), char);\n          if (next < 0)\n            break;\n          nodeIndex = next;\n          current = decodeTree[nodeIndex];\n          index += 1;\n        }\n        if (value === "") {\n          const finalVL = current >>> 14;\n          if (finalVL !== 0 && !isStrict && (current & BinTrieFlags.FLAG13) === 0) {\n            consumed = index - entityStart;\n            bestNodeIndex = nodeIndex;\n            bestValueLength = finalVL;\n          }\n          if (consumed > 0) {\n            value = readTrieValue(decodeTree, bestNodeIndex, bestValueLength);\n          }\n        }\n      } else {\n        consumed = 0;\n        value = "";\n      }\n      if (consumed === 0 || isAttribute && firstChar !== CharCodes.NUM && input.charCodeAt(entityStart + consumed - 1) !== CharCodes.SEMI && entityStart + consumed < inputLength && isEntityInAttributeInvalidEnd(input.charCodeAt(entityStart + consumed))) {\n        offset = entityStart;\n      } else {\n        if (chunkStart < offset) {\n          result += input.slice(chunkStart, offset);\n        }\n        result += value;\n        offset = chunkStart = entityStart + consumed;\n      }\n      if (input.charCodeAt(offset) !== CharCodes.AMP) {\n        offset = input.indexOf("&", offset);\n      }\n    } while (offset >= 0);\n    return result + input.slice(chunkStart);\n  }\n  function decodeHTMLStrict(htmlString) {\n    return decodeWithTrie(htmlString, true, false);\n  }\n\n  // ../../plugin-src/node_modules/entities/dist/index.js\n  var EntityLevel;\n  (function(EntityLevel2) {\n    EntityLevel2[EntityLevel2["XML"] = 0] = "XML";\n    EntityLevel2[EntityLevel2["HTML"] = 1] = "HTML";\n  })(EntityLevel || (EntityLevel = {}));\n  var EncodingMode;\n  (function(EncodingMode2) {\n    EncodingMode2[EncodingMode2["UTF8"] = 0] = "UTF8";\n    EncodingMode2[EncodingMode2["ASCII"] = 1] = "ASCII";\n    EncodingMode2[EncodingMode2["Extensive"] = 2] = "Extensive";\n    EncodingMode2[EncodingMode2["Attribute"] = 3] = "Attribute";\n    EncodingMode2[EncodingMode2["Text"] = 4] = "Text";\n  })(EncodingMode || (EncodingMode = {}));\n\n  // ../../plugin-src/node_modules/linkify-it/build/index.mjs\n  var REBuilder = class {\n    constructor(opts = {}) {\n      __publicField(this, "src_Any", Any.source);\n      __publicField(this, "src_Cc", Cc.source);\n      __publicField(this, "src_Z", Z.source);\n      __publicField(this, "src_P", P.source);\n      __publicField(this, "src_ZPCc", [\n        this.src_Z,\n        this.src_P,\n        this.src_Cc\n      ].join("|"));\n      __publicField(this, "src_ZCc", [this.src_Z, this.src_Cc].join("|"));\n      __publicField(this, "cache", {});\n      __publicField(this, "opts", {\n        maxLength: 1e4,\n        urlAuth: false,\n        schema_names: []\n      });\n      this.opts = {\n        ...this.opts,\n        ...opts\n      };\n    }\n    set(opts = {}) {\n      this.opts = {\n        ...this.opts,\n        ...opts\n      };\n      this.cache = {};\n      return this;\n    }\n    escapeRE(str) {\n      return str.replace(/[.?*+^$[\\]\\\\(){}|-]/g, "\\\\$&");\n    }\n    nestedPairRE(open, close, depth = 4) {\n      const openRE = this.escapeRE(open);\n      const closeRE = this.escapeRE(close);\n      const atom = `(?:(?!${this.src_ZCc}|${openRE}|${closeRE}).)`;\n      let pair2 = `${openRE}${atom}{0,1000}${closeRE}`;\n      for (let level = 2; level <= depth; level++) pair2 = `${openRE}(?:${atom}|${pair2}){0,1000}${closeRE}`;\n      return pair2;\n    }\n    get_text_separators() {\n      var _a;\n      return (_a = this.cache).text_separators ?? (_a.text_separators = /[><\\uff5c]/);\n    }\n    get_pseudo_letter() {\n      var _a;\n      return (_a = this.cache).src_pseudo_letter ?? (_a.src_pseudo_letter = new RegExp(`(?:(?!${this.get_text_separators().source}|${this.src_ZPCc})${this.src_Any})`));\n    }\n    get_ipv4_addr() {\n      var _a;\n      return (_a = this.cache).src_ip4 ?? (_a.src_ip4 = /* @__PURE__ */ new RegExp("(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])"));\n    }\n    get_ipv6_addr() {\n      var _a;\n      const h16 = "[0-9A-Fa-f]{1,4}";\n      const ls32 = `(?:(?:${h16}:${h16})|${this.get_ipv4_addr().source})`;\n      return (_a = this.cache).src_ip6_addr ?? (_a.src_ip6_addr = new RegExp(`(?:(?:${h16}:){6}${ls32}|::(?:${h16}:){5}${ls32}|(?:${h16})?::(?:${h16}:){4}${ls32}|(?:(?:${h16}:){0,1}${h16})?::(?:${h16}:){3}${ls32}|(?:(?:${h16}:){0,2}${h16})?::(?:${h16}:){2}${ls32}|(?:(?:${h16}:){0,3}${h16})?::${h16}:${ls32}|(?:(?:${h16}:){0,4}${h16})?::${ls32}|(?:(?:${h16}:){0,5}${h16})?::${h16}|(?:(?:${h16}:){0,6}${h16})?::)`));\n    }\n    get_ipv6_url_host() {\n      var _a;\n      return (_a = this.cache).src_ip6_host ?? (_a.src_ip6_host = new RegExp(`\\\\[${this.get_ipv6_addr().source}\\\\]`));\n    }\n    get_ipv6_mail_host() {\n      var _a;\n      return (_a = this.cache).src_ipv6_mail_host ?? (_a.src_ipv6_mail_host = new RegExp(`\\\\[IPv6:${this.get_ipv6_addr().source}\\\\]`));\n    }\n    get_auth() {\n      var _a;\n      return (_a = this.cache).src_auth ?? (_a.src_auth = new RegExp(`(?:(?:(?!${this.src_ZCc}|[@/\\\\[\\\\]()]).){1,50}@)?`));\n    }\n    get_port() {\n      var _a;\n      return (_a = this.cache).src_port ?? (_a.src_port = /* @__PURE__ */ new RegExp("(?::(?:6(?:[0-4]\\\\d{3}|5(?:[0-4]\\\\d{2}|5(?:[0-2]\\\\d|3[0-5])))|[1-5]?\\\\d{1,4}))?"));\n    }\n    get_host_terminator() {\n      var _a;\n      return (_a = this.cache).src_host_terminator ?? (_a.src_host_terminator = new RegExp(`(?=$|${this.get_text_separators().source}|${this.src_ZPCc})(?!${this.opts["---"] ? "-(?!--)|" : "-|"}_|:\\\\d|\\\\.-|\\\\.(?!$|${this.src_ZPCc}))`));\n    }\n    get_path_terminator() {\n      var _a;\n      return (_a = this.cache).src_path_terminator ?? (_a.src_path_terminator = new RegExp(`${this.src_ZPCc}|${this.get_text_separators().source}`));\n    }\n    get_path() {\n      var _a;\n      return (_a = this.cache).src_path ?? (_a.src_path = new RegExp(`(?:[/?#](?:${this.nestedPairRE("[", "]")}|${this.nestedPairRE("(", ")")}|${this.nestedPairRE("{", "}")}|\\\\"(?:(?!${this.src_ZCc}|["]).){1,100}\\\\"|\\\\\'(?:(?!${this.src_ZCc}|[\']).){1,100}\\\\\'|\\\\\'(?=${this.get_pseudo_letter().source}|[-])|\\\\.{2,20}[:]?[a-zA-Z0-9%/&]|\\\\.(?!${this.src_ZCc}|[.]|$)|` + (this.opts["---"] ? "\\\\-(?!--(?:[^-]|$))(?:-{0,19})|" : "\\\\-{1,20}|") + `,(?!${this.src_ZCc}|$)|;(?!${this.src_ZCc}|$)|\\\\!{1,20}(?!${this.src_ZCc}|[!]|$)|\\\\?(?!${this.src_ZCc}|[?]|$)|` + this.get_path_extra().source + `[\\\\\\\\/:%@#&=_~*]|(?!${this.get_path_terminator().source}).){1,${this.opts.maxLength}}|\\\\/)?`));\n    }\n    get_mail_name() {\n      var _a;\n      return (_a = this.cache).src_mail_name ?? (_a.src_mail_name = /* @__PURE__ */ new RegExp("[-!#$%&\'*+/=?^_`{|}~a-zA-Z0-9](?:[-!#$%&\'*+/=?^_`{|}~a-zA-Z0-9]|[.](?=[-!#$%&\'*+/=?^_`{|}~a-zA-Z0-9])){0,63}"));\n    }\n    get_xn() {\n      var _a;\n      return (_a = this.cache).src_xn ?? (_a.src_xn = /* @__PURE__ */ new RegExp("xn--[a-z0-9\\\\-]{1,59}"));\n    }\n    get_tld() {\n      if (this.cache.tld) return this.cache.tld;\n      const tlds_src = [...new Set(this.opts.tlds || [])].sort().reverse().join("|");\n      this.cache.tld = new RegExp(`${tlds_src || "$#none#$"}|${this.get_xn().source}`);\n      return this.cache.tld;\n    }\n    get_domain_root() {\n      var _a;\n      return (_a = this.cache).src_domain_root ?? (_a.src_domain_root = new RegExp("(?:" + this.get_xn().source + `|${this.get_pseudo_letter().source}{1,63})`));\n    }\n    get_domain() {\n      var _a;\n      return (_a = this.cache).src_domain ?? (_a.src_domain = new RegExp("(?:" + this.get_xn().source + `|(?:${this.get_pseudo_letter().source})|(?:${this.get_pseudo_letter().source}(?:-|${this.get_pseudo_letter().source}){0,61}${this.get_pseudo_letter().source}))`));\n    }\n    get_url_host_port() {\n      var _a;\n      return (_a = this.cache).url_host_port ?? (_a.url_host_port = new RegExp("(?:" + this.get_ipv6_url_host().source + `|(?:(?:(?:${this.get_domain().source})\\\\.){0,10}${this.get_domain().source}))` + this.get_port().source + this.get_host_terminator().source));\n    }\n    get_fuzzy_url_host_port() {\n      var _a;\n      return (_a = this.cache).fuzzy_url_host_port ?? (_a.fuzzy_url_host_port = new RegExp("(?:" + (this.opts.fuzzyIP ? this.get_ipv4_addr().source + "|" : "") + `(?:(?:(?:${this.get_domain().source})\\\\.){1,10}(?:${this.get_tld().source})))` + this.get_host_terminator().source));\n    }\n    get_mail_host() {\n      var _a;\n      return (_a = this.cache).src_mail_host ?? (_a.src_mail_host = new RegExp("(?:" + this.get_ipv6_mail_host().source + `|(?:(?:(?:${this.get_domain().source})\\\\.){0,4}${this.get_domain().source}))` + this.get_host_terminator().source));\n    }\n    get_fuzzy_mail_host() {\n      var _a;\n      return (_a = this.cache).src_fuzzy_mail_host ?? (_a.src_fuzzy_mail_host = new RegExp("(?:" + this.get_ipv6_mail_host().source + `|(?:(?:(?:${this.get_domain().source})[.]){1,4}${this.get_domain_root().source}))` + this.get_host_terminator().source));\n    }\n    get_path_extra() {\n      var _a;\n      return (_a = this.cache).src_path_extra ?? (_a.src_path_extra = /* @__PURE__ */ new RegExp(""));\n    }\n    get_fuzzy_mail_host_search() {\n      var _a;\n      return (_a = this.cache).mail_fuzzy_host_search ?? (_a.mail_fuzzy_host_search = new RegExp(`@${this.get_fuzzy_mail_host().source}`, "ig"));\n    }\n    get_fuzzy_link_search() {\n      var _a;\n      return (_a = this.cache).link_fuzzy_search ?? (_a.link_fuzzy_search = new RegExp(`(^|(?![.:/\\\\-_@])(?:[$+<=>^\\`|\\uFF5C]|${this.src_ZPCc}))(?:(?![$+<=>^\\`|\\uFF5C])${this.get_fuzzy_url_host_port().source}${this.get_path().source})`, "ig"));\n    }\n    get_http_validator() {\n      var _a;\n      return (_a = this.cache).http_validator ?? (_a.http_validator = new RegExp("\\\\/\\\\/" + (this.opts.urlAuth ? this.get_auth().source : "") + this.get_url_host_port().source + this.get_path().source, "iy"));\n    }\n    get_relative_proto_validator() {\n      var _a;\n      return (_a = this.cache).relative_proto_validator ?? (_a.relative_proto_validator = new RegExp((this.opts.urlAuth ? this.get_auth().source : "") + `(?:localhost|${this.get_ipv6_url_host().source}|(?:(?:${this.get_domain().source})[.]){1,10}${this.get_domain_root().source})` + this.get_port().source + this.get_host_terminator().source + this.get_path().source, "iy"));\n    }\n    get_mail_name_validator() {\n      var _a;\n      return (_a = this.cache).mail_name_validator ?? (_a.mail_name_validator = new RegExp(`(?:^|${this.get_text_separators().source}|"|\\\\(|${this.src_ZCc})(${this.get_mail_name().source})$`));\n    }\n    get_mailto_validator() {\n      var _a;\n      return (_a = this.cache).mailto_validator ?? (_a.mailto_validator = new RegExp(`${this.get_mail_name().source}@${this.get_mail_host().source}`, "iy"));\n    }\n    get_schema_names() {\n      var _a;\n      return (_a = this.cache).schema_names ?? (_a.schema_names = new RegExp((this.opts.schema_names || []).map((name) => this.escapeRE(name)).join("|")));\n    }\n    get_schema_search() {\n      var _a;\n      return (_a = this.cache).schema_search ?? (_a.schema_search = new RegExp(`(^|(?!_)(?:[><\\uFF5C]|${this.src_ZPCc}))(${this.get_schema_names().source})`, "ig"));\n    }\n    get_schema_at_start() {\n      var _a;\n      return (_a = this.cache).schema_at_start ?? (_a.schema_at_start = new RegExp(`^${this.get_schema_search().source}`, "i"));\n    }\n  };\n  var web_schema = {\n    validate: (text2, pos, self) => {\n      const re = self.re.get_http_validator();\n      re.lastIndex = pos;\n      const m = re.exec(text2);\n      return m ? m[0].length : 0;\n    },\n    normalize: (match, self) => self.normalize(match)\n  };\n  var defaultSchemas = {\n    "http:": web_schema,\n    "https:": web_schema,\n    "ftp:": web_schema,\n    "//": {\n      validate: function(text2, pos, self) {\n        const re = self.re.get_relative_proto_validator();\n        re.lastIndex = pos;\n        const m = re.exec(text2);\n        if (m) {\n          if (pos >= 3 && text2[pos - 3] === ":") return 0;\n          if (pos >= 3 && text2[pos - 3] === "/") return 0;\n          return m[0].length;\n        }\n        return 0;\n      },\n      normalize: (match, self) => self.normalize(match)\n    },\n    "mailto:": {\n      validate: function(text2, pos, self) {\n        const re = self.re.get_mailto_validator();\n        re.lastIndex = pos;\n        const m = re.exec(text2);\n        return m ? m[0].length : 0;\n      },\n      normalize: (match, self) => self.normalize(match)\n    }\n  };\n  var tlds_2ch = "a:cdefgilmnoqrstuwxz|b:abdefghijmnorstvwyz|c:acdfghiklmnoruvwxyz|d:ejkmoz|e:cegrstu|f:ijkmor|g:abdefghilmnpqrstuwy|h:kmnrtu|i:delmnoqrst|j:emop|k:eghimnprwyz|l:abcikrstuvy|m:acdeghklmnopqrstuvwxyz|n:acefgilopruz|o:m|p:aefghklmnrstwy|q:a|r:eosuw|s:abcdeghijklmnortuvxyz|t:cdfghjklmnortvwz|u:agksyz|v:aceginu|w:fs|y:et|z:amw";\n  var tlds_default = "biz|com|edu|gov|net|org|pro|web|xxx|aero|asia|coop|info|museum|name|shop|\\u0440\\u0444";\n  function unpackTlds() {\n    const result = tlds_default.split("|");\n    tlds_2ch.split("|").forEach((item) => {\n      const sep = item.indexOf(":");\n      const prefix = item.slice(0, sep);\n      for (const suffix of item.slice(sep + 1)) result.push(prefix + suffix);\n    });\n    return result;\n  }\n  var defaultOptions = {\n    fuzzyLink: false,\n    fuzzyEmail: true,\n    fuzzyIP: false,\n    "---": false,\n    tlds: unpackTlds(),\n    urlAuth: false,\n    maxLength: 1e4\n  };\n  var Match = class {\n    constructor(text2, schema, index, lastIndex) {\n      /** Prefix (protocol) for matched string. Empty for fuzzy links. */\n      __publicField(this, "schema");\n      /** First position of matched string. */\n      __publicField(this, "index");\n      /** Next position after matched string. */\n      __publicField(this, "lastIndex");\n      /** Matched string. */\n      __publicField(this, "raw");\n      /** Normalized text of matched string. */\n      __publicField(this, "text");\n      /** Normalized URL of matched string. */\n      __publicField(this, "url");\n      const raw = text2.slice(index, lastIndex);\n      this.schema = schema.toLowerCase();\n      this.index = index;\n      this.lastIndex = lastIndex;\n      this.raw = raw;\n      this.text = raw;\n      this.url = raw;\n    }\n  };\n  var LinkifyIt = class {\n    /**\n    * Creates new linkifier instance.\n    *\n    * By default understands:\n    *\n    * - `http(s)://...` , `ftp://...`, `mailto:...` & `//...` links\n    * - "fuzzy" emails (foo@bar.com).\n    *\n    * See {@link LinkifyConstructorOptions} for available options.\n    *\n    * @param options Recognition options.\n    *\n    * @example\n    * ```javascript\n    * import { LinkifyIt } from \'linkify-it\'\n    *\n    * const linkify = new LinkifyIt({ fuzzyLink: true })\n    *\n    * linkify\n    *   .tlds(require(\'tlds\'))       // Reload with full TLD list\n    *   .tlds(\'onion\', true)         // Add unofficial `.onion` domain\n    *   .add(\'ftp:\', null)           // Disable `ftp:` protocol\n    *   .set({ fuzzyIP: true })      // Enable IPs in fuzzy links\n    *\n    * console.log(linkify.test(\'Site github.com!\')) // true\n    * console.log(linkify.match(\'Site github.com!\'))\n    * ```\n    */\n    constructor(options = {}) {\n      __publicField(this, "__opts__");\n      __publicField(this, "__schemas__");\n      __publicField(this, "re");\n      const { rebuilder, ...linkifyOptions } = options;\n      this.__opts__ = {\n        ...defaultOptions,\n        ...linkifyOptions\n      };\n      this.__schemas__ = { ...defaultSchemas };\n      this.re = rebuilder || new REBuilder();\n      this.re.set({\n        ...this.__opts__,\n        schema_names: Object.keys(this.__schemas__)\n      });\n    }\n    /**\n    * Add new rule definition.\n    *\n    * `schema` is a link prefix (usually, protocol name with `:` at the end,\n    * `skype:` for example). `linkify-it` makes sure that prefix is not\n    * preceded with alphanumeric char and symbols. Only whitespaces and\n    * punctuation allowed.\n    *\n    * `definition` is a rule to check tail after link prefix. To disable an\n    * existing rule, pass `null`.\n    *\n    * @param schema Rule name (fixed pattern prefix).\n    * @param definition Schema definition, or `null` to disable the rule.\n    *\n    * See [twitter mentions example](https://github.com/markdown-it/linkify-it/blob/master/examples/twitter.mjs).\n    */\n    add(schema, definition = null) {\n      if (!definition) delete this.__schemas__[schema];\n      else {\n        const def = {\n          normalize: (match, self) => self.normalize(match),\n          ...definition\n        };\n        this.__schemas__[schema] = def;\n      }\n      this.re.set({\n        ...this.__opts__,\n        schema_names: Object.keys(this.__schemas__)\n      });\n      return this;\n    }\n    /**\n    * Set recognition options for links without schema.\n    *\n    * @param options Recognition options.\n    */\n    set(options = {}) {\n      this.__opts__ = {\n        ...this.__opts__,\n        ...options\n      };\n      this.re.set({\n        ...this.__opts__,\n        schema_names: Object.keys(this.__schemas__)\n      });\n      return this;\n    }\n    /**\n    * Searches linkifiable pattern and returns `true` on success or `false` on fail.\n    *\n    * @param text Text to scan.\n    */\n    test(text2) {\n      if (!text2.length) return false;\n      let m, re;\n      re = this.re.get_schema_search();\n      re.lastIndex = 0;\n      while ((m = re.exec(text2)) !== null) if (this.testSchemaAt(text2, m[2], re.lastIndex)) return true;\n      if (this.__opts__.fuzzyLink && this.__schemas__["http:"]) {\n        re = this.re.get_fuzzy_link_search();\n        re.lastIndex = 0;\n        if (re.exec(text2) !== null) return true;\n      }\n      if (this.__opts__.fuzzyEmail && this.__schemas__["mailto:"]) {\n        if (text2.indexOf("@") >= 0) {\n          const mailHostRe = this.re.get_fuzzy_mail_host_search();\n          const mailNameRe = this.re.get_mail_name_validator();\n          mailHostRe.lastIndex = 0;\n          while ((m = mailHostRe.exec(text2)) !== null) {\n            const name = text2.slice(Math.max(0, m.index - 65), m.index);\n            if (mailNameRe.test(name)) return true;\n          }\n        }\n      }\n      return false;\n    }\n    /**\n    * Similar to {@link LinkifyIt.test} but checks only specific protocol tail exactly\n    * at given position. Returns length of found pattern (0 on fail).\n    *\n    * @param text Text to scan.\n    * @param schema Rule (schema) name.\n    * @param pos Text offset to check from.\n    */\n    testSchemaAt(text2, schema, pos) {\n      if (!this.__schemas__[schema.toLowerCase()]) return 0;\n      return this.__schemas__[schema.toLowerCase()].validate(text2.slice(0, pos + this.__opts__.maxLength), pos, this);\n    }\n    /**\n    * Returns array of found link descriptions or `null` on fail. We strongly\n    * recommend to use {@link LinkifyIt.test} first, for best speed.\n    *\n    * @param text Text to scan.\n    */\n    match(text2) {\n      const result = [];\n      const schemaRe = this.re.get_schema_search();\n      let fuzzyLinkRe;\n      let mailHostRe;\n      let mailNameRe;\n      let fuzzyLinkCandidate;\n      let fuzzyEmailCandidate;\n      let schemaPrefix;\n      let schemaDone = false;\n      let fuzzyLinkDone = false;\n      let fuzzyEmailDone = false;\n      let pos = 0;\n      if (!text2.length) return null;\n      schemaRe.lastIndex = 0;\n      if (this.__opts__.fuzzyLink && this.__schemas__["http:"]) {\n        fuzzyLinkRe = this.re.get_fuzzy_link_search();\n        fuzzyLinkRe.lastIndex = 0;\n      }\n      if (this.__opts__.fuzzyEmail && this.__schemas__["mailto:"]) {\n        mailHostRe = this.re.get_fuzzy_mail_host_search();\n        mailHostRe.lastIndex = 0;\n        mailNameRe = this.re.get_mail_name_validator();\n      }\n      for (; ; ) {\n        const scanFrom = Math.max(pos - 1, 0);\n        if (mailHostRe && mailNameRe && !fuzzyEmailDone && (!fuzzyEmailCandidate || fuzzyEmailCandidate.index < pos)) {\n          if (mailHostRe.lastIndex < scanFrom) mailHostRe.lastIndex = scanFrom;\n          for (; ; ) {\n            const m = mailHostRe.exec(text2);\n            if (!m) {\n              fuzzyEmailDone = true;\n              fuzzyEmailCandidate = void 0;\n              break;\n            }\n            const name = mailNameRe.exec(text2.slice(Math.max(0, m.index - 65), m.index));\n            if (!name) continue;\n            fuzzyEmailCandidate = {\n              schema: "mailto:",\n              index: m.index - name[1].length,\n              lastIndex: m.index + m[0].length\n            };\n            if (fuzzyEmailCandidate.index >= pos) break;\n            if (mailHostRe.lastIndex < scanFrom) mailHostRe.lastIndex = scanFrom;\n          }\n        }\n        if (fuzzyLinkRe && !fuzzyLinkDone && (!fuzzyLinkCandidate || fuzzyLinkCandidate.index < pos)) {\n          if (fuzzyLinkRe.lastIndex < scanFrom) fuzzyLinkRe.lastIndex = scanFrom;\n          for (; ; ) {\n            const m = fuzzyLinkRe.exec(text2);\n            if (!m) {\n              fuzzyLinkDone = true;\n              fuzzyLinkCandidate = void 0;\n              break;\n            }\n            fuzzyLinkCandidate = {\n              schema: "",\n              index: m.index + m[1].length,\n              lastIndex: m.index + m[0].length\n            };\n            if (fuzzyLinkCandidate.index >= pos) break;\n            if (fuzzyLinkRe.lastIndex < scanFrom) fuzzyLinkRe.lastIndex = scanFrom;\n          }\n        }\n        let fuzzyCandidate = fuzzyEmailCandidate;\n        if (!fuzzyCandidate || fuzzyLinkCandidate && (fuzzyLinkCandidate.index < fuzzyCandidate.index || fuzzyLinkCandidate.index === fuzzyCandidate.index && fuzzyLinkCandidate.lastIndex > fuzzyCandidate.lastIndex)) fuzzyCandidate = fuzzyLinkCandidate;\n        let schemaCandidate;\n        if (!schemaDone) for (; ; ) {\n          if (!schemaPrefix) {\n            if (schemaRe.lastIndex < scanFrom) schemaRe.lastIndex = scanFrom;\n            const m = schemaRe.exec(text2);\n            if (!m) {\n              schemaDone = true;\n              break;\n            }\n            schemaPrefix = {\n              schema: m[2],\n              index: m.index + m[1].length,\n              lastIndex: m.index + m[0].length\n            };\n          }\n          if (schemaPrefix.index < pos) {\n            schemaPrefix = void 0;\n            continue;\n          }\n          if (fuzzyCandidate && schemaPrefix.index > fuzzyCandidate.index) break;\n          const prefix = schemaPrefix;\n          schemaPrefix = void 0;\n          const len = this.testSchemaAt(text2, prefix.schema, prefix.lastIndex);\n          if (len) {\n            schemaCandidate = {\n              schema: prefix.schema,\n              index: prefix.index,\n              lastIndex: prefix.lastIndex + len\n            };\n            break;\n          }\n        }\n        let candidate = schemaCandidate;\n        if (!candidate || fuzzyEmailCandidate && (fuzzyEmailCandidate.index < candidate.index || fuzzyEmailCandidate.index === candidate.index && fuzzyEmailCandidate.lastIndex > candidate.lastIndex)) candidate = fuzzyEmailCandidate;\n        if (!candidate || fuzzyLinkCandidate && (fuzzyLinkCandidate.index < candidate.index || fuzzyLinkCandidate.index === candidate.index && fuzzyLinkCandidate.lastIndex > candidate.lastIndex)) candidate = fuzzyLinkCandidate;\n        if (!candidate) break;\n        if (candidate === fuzzyEmailCandidate) fuzzyEmailCandidate = void 0;\n        else if (candidate === fuzzyLinkCandidate) fuzzyLinkCandidate = void 0;\n        const match = new Match(text2, candidate.schema, candidate.index, candidate.lastIndex);\n        if (match.schema) this.__schemas__[match.schema].normalize(match, this);\n        else this.normalize(match);\n        result.push(match);\n        pos = candidate.lastIndex;\n      }\n      if (result.length) return result;\n      return null;\n    }\n    /**\n    * Returns fully-formed (not fuzzy) link if it starts at the beginning\n    * of the string, and null otherwise.\n    *\n    * @param text Text to scan.\n    */\n    matchAtStart(text2) {\n      if (!text2.length) return null;\n      const m = this.re.get_schema_at_start().exec(text2);\n      if (!m) return null;\n      const len = this.testSchemaAt(text2, m[2], m[0].length);\n      if (!len) return null;\n      const match = new Match(text2, m[2], m.index + m[1].length, m.index + m[0].length + len);\n      this.__schemas__[match.schema].normalize(match, this);\n      return match;\n    }\n    /**\n    * Load (or merge) new TLDs list. Those are used for fuzzy links (without\n    * prefix) to avoid false positives. By default this algorithm is used:\n    *\n    * - hostname with any 2-letter root zones are ok.\n    * - biz|com|edu|gov|net|org|pro|web|xxx|aero|asia|coop|info|museum|name|shop|\u0440\u0444\n    *   are ok.\n    * - encoded (`xn--...`) root zones are ok.\n    *\n    * If list is replaced, then exact match for 2-chars root zones will be checked.\n    *\n    * @param list List of TLDs.\n    * @param keepOld Merge with current list if `true` (`false` by default).\n    */\n    tlds(list2, keepOld = false) {\n      list2 = Array.isArray(list2) ? list2 : [list2];\n      if (!keepOld) this.__opts__.tlds = list2;\n      else this.__opts__.tlds = this.__opts__.tlds.concat(list2);\n      this.re.set({\n        ...this.__opts__,\n        schema_names: Object.keys(this.__schemas__)\n      });\n      return this;\n    }\n    /**\n    * Default normalizer (if schema does not define its own).\n    *\n    * @param match Match to normalize.\n    */\n    normalize(match) {\n      if (!match.schema) match.url = `http://${match.url}`;\n      if (match.schema === "mailto:" && !/^mailto:/i.test(match.url)) match.url = `mailto:${match.url}`;\n    }\n  };\n\n  // ../../plugin-src/node_modules/punycode.js/punycode.es6.js\n  var maxInt = 2147483647;\n  var base = 36;\n  var tMin = 1;\n  var tMax = 26;\n  var skew = 38;\n  var damp = 700;\n  var initialBias = 72;\n  var initialN = 128;\n  var delimiter = "-";\n  var regexPunycode = /^xn--/;\n  var regexNonASCII = /[^\\0-\\x7F]/;\n  var regexSeparators = /[\\x2E\\u3002\\uFF0E\\uFF61]/g;\n  var errors = {\n    "overflow": "Overflow: input needs wider integers to process",\n    "not-basic": "Illegal input >= 0x80 (not a basic code point)",\n    "invalid-input": "Invalid input"\n  };\n  var baseMinusTMin = base - tMin;\n  var floor = Math.floor;\n  var stringFromCharCode = String.fromCharCode;\n  function error(type) {\n    throw new RangeError(errors[type]);\n  }\n  function map(array, callback) {\n    const result = [];\n    let length = array.length;\n    while (length--) {\n      result[length] = callback(array[length]);\n    }\n    return result;\n  }\n  function mapDomain(domain, callback) {\n    const parts = domain.split("@");\n    let result = "";\n    if (parts.length > 1) {\n      result = parts[0] + "@";\n      domain = parts[1];\n    }\n    domain = domain.replace(regexSeparators, ".");\n    const labels = domain.split(".");\n    const encoded = map(labels, callback).join(".");\n    return result + encoded;\n  }\n  function ucs2decode(string) {\n    const output = [];\n    let counter = 0;\n    const length = string.length;\n    while (counter < length) {\n      const value = string.charCodeAt(counter++);\n      if (value >= 55296 && value <= 56319 && counter < length) {\n        const extra = string.charCodeAt(counter++);\n        if ((extra & 64512) == 56320) {\n          output.push(((value & 1023) << 10) + (extra & 1023) + 65536);\n        } else {\n          output.push(value);\n          counter--;\n        }\n      } else {\n        output.push(value);\n      }\n    }\n    return output;\n  }\n  var ucs2encode = (codePoints) => String.fromCodePoint(...codePoints);\n  var basicToDigit = function(codePoint) {\n    if (codePoint >= 48 && codePoint < 58) {\n      return 26 + (codePoint - 48);\n    }\n    if (codePoint >= 65 && codePoint < 91) {\n      return codePoint - 65;\n    }\n    if (codePoint >= 97 && codePoint < 123) {\n      return codePoint - 97;\n    }\n    return base;\n  };\n  var digitToBasic = function(digit, flag) {\n    return digit + 22 + 75 * (digit < 26) - ((flag != 0) << 5);\n  };\n  var adapt = function(delta, numPoints, firstTime) {\n    let k = 0;\n    delta = firstTime ? floor(delta / damp) : delta >> 1;\n    delta += floor(delta / numPoints);\n    for (; delta > baseMinusTMin * tMax >> 1; k += base) {\n      delta = floor(delta / baseMinusTMin);\n    }\n    return floor(k + (baseMinusTMin + 1) * delta / (delta + skew));\n  };\n  var decode2 = function(input) {\n    const output = [];\n    const inputLength = input.length;\n    let i = 0;\n    let n = initialN;\n    let bias = initialBias;\n    let basic = input.lastIndexOf(delimiter);\n    if (basic < 0) {\n      basic = 0;\n    }\n    for (let j = 0; j < basic; ++j) {\n      if (input.charCodeAt(j) >= 128) {\n        error("not-basic");\n      }\n      output.push(input.charCodeAt(j));\n    }\n    for (let index = basic > 0 ? basic + 1 : 0; index < inputLength; ) {\n      const oldi = i;\n      for (let w = 1, k = base; ; k += base) {\n        if (index >= inputLength) {\n          error("invalid-input");\n        }\n        const digit = basicToDigit(input.charCodeAt(index++));\n        if (digit >= base) {\n          error("invalid-input");\n        }\n        if (digit > floor((maxInt - i) / w)) {\n          error("overflow");\n        }\n        i += digit * w;\n        const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;\n        if (digit < t) {\n          break;\n        }\n        const baseMinusT = base - t;\n        if (w > floor(maxInt / baseMinusT)) {\n          error("overflow");\n        }\n        w *= baseMinusT;\n      }\n      const out = output.length + 1;\n      bias = adapt(i - oldi, out, oldi == 0);\n      if (floor(i / out) > maxInt - n) {\n        error("overflow");\n      }\n      n += floor(i / out);\n      i %= out;\n      output.splice(i++, 0, n);\n    }\n    return String.fromCodePoint(...output);\n  };\n  var encode2 = function(input) {\n    const output = [];\n    input = ucs2decode(input);\n    const inputLength = input.length;\n    let n = initialN;\n    let delta = 0;\n    let bias = initialBias;\n    for (const currentValue of input) {\n      if (currentValue < 128) {\n        output.push(stringFromCharCode(currentValue));\n      }\n    }\n    const basicLength = output.length;\n    let handledCPCount = basicLength;\n    if (basicLength) {\n      output.push(delimiter);\n    }\n    while (handledCPCount < inputLength) {\n      let m = maxInt;\n      for (const currentValue of input) {\n        if (currentValue >= n && currentValue < m) {\n          m = currentValue;\n        }\n      }\n      const handledCPCountPlusOne = handledCPCount + 1;\n      if (m - n > floor((maxInt - delta) / handledCPCountPlusOne)) {\n        error("overflow");\n      }\n      delta += (m - n) * handledCPCountPlusOne;\n      n = m;\n      for (const currentValue of input) {\n        if (currentValue < n && ++delta > maxInt) {\n          error("overflow");\n        }\n        if (currentValue === n) {\n          let q = delta;\n          for (let k = base; ; k += base) {\n            const t = k <= bias ? tMin : k >= bias + tMax ? tMax : k - bias;\n            if (q < t) {\n              break;\n            }\n            const qMinusT = q - t;\n            const baseMinusT = base - t;\n            output.push(\n              stringFromCharCode(digitToBasic(t + qMinusT % baseMinusT, 0))\n            );\n            q = floor(qMinusT / baseMinusT);\n          }\n          output.push(stringFromCharCode(digitToBasic(q, 0)));\n          bias = adapt(delta, handledCPCountPlusOne, handledCPCount === basicLength);\n          delta = 0;\n          ++handledCPCount;\n        }\n      }\n      ++delta;\n      ++n;\n    }\n    return output.join("");\n  };\n  var toUnicode = function(input) {\n    return mapDomain(input, function(string) {\n      return regexPunycode.test(string) ? decode2(string.slice(4).toLowerCase()) : string;\n    });\n  };\n  var toASCII = function(input) {\n    return mapDomain(input, function(string) {\n      return regexNonASCII.test(string) ? "xn--" + encode2(string) : string;\n    });\n  };\n  var punycode = {\n    /**\n     * A string representing the current Punycode.js version number.\n     * @memberOf punycode\n     * @type String\n     */\n    "version": "2.3.1",\n    /**\n     * An object of methods to convert from JavaScript\'s internal character\n     * representation (UCS-2) to Unicode code points, and back.\n     * @see <https://mathiasbynens.be/notes/javascript-encoding>\n     * @memberOf punycode\n     * @type Object\n     */\n    "ucs2": {\n      "decode": ucs2decode,\n      "encode": ucs2encode\n    },\n    "decode": decode2,\n    "encode": encode2,\n    "toASCII": toASCII,\n    "toUnicode": toUnicode\n  };\n  var punycode_es6_default = punycode;\n\n  // ../../plugin-src/node_modules/markdown-it/dist/markdown-it.mjs\n  var __defProp2 = Object.defineProperty;\n  var __exportAll = (all, no_symbols) => {\n    let target = {};\n    for (var name in all) __defProp2(target, name, {\n      get: all[name],\n      enumerable: true\n    });\n    if (!no_symbols) __defProp2(target, Symbol.toStringTag, { value: "Module" });\n    return target;\n  };\n  var utils_exports = /* @__PURE__ */ __exportAll({\n    arrayReplaceAt: () => arrayReplaceAt,\n    asciiTrim: () => asciiTrim,\n    callable: () => callable,\n    escapeHtml: () => escapeHtml,\n    escapeRE: () => escapeRE,\n    fromCodePoint: () => fromCodePoint,\n    isMdAsciiPunct: () => isMdAsciiPunct,\n    isPunctChar: () => isPunctChar,\n    isPunctCharCode: () => isPunctCharCode,\n    isSpace: () => isSpace,\n    isValidEntityCode: () => isValidEntityCode,\n    isWhiteSpace: () => isWhiteSpace,\n    lib: () => lib,\n    normalizeReference: () => normalizeReference,\n    unescapeAll: () => unescapeAll,\n    unescapeMd: () => unescapeMd\n  });\n  function callable(cls) {\n    const wrapper = function(...args) {\n      return Reflect.construct(cls, args, new.target && new.target !== wrapper ? new.target : cls);\n    };\n    Object.defineProperty(wrapper, "name", { value: cls.name });\n    Object.setPrototypeOf(wrapper, cls);\n    wrapper.prototype = cls.prototype;\n    return wrapper;\n  }\n  function arrayReplaceAt(src, pos, newElements) {\n    return [].concat(src.slice(0, pos), newElements, src.slice(pos + 1));\n  }\n  function isValidEntityCode(c) {\n    if (c >= 55296 && c <= 57343) return false;\n    if (c >= 64976 && c <= 65007) return false;\n    if ((c & 65535) === 65535 || (c & 65535) === 65534) return false;\n    if (c >= 0 && c <= 8) return false;\n    if (c === 11) return false;\n    if (c >= 14 && c <= 31) return false;\n    if (c >= 127 && c <= 159) return false;\n    if (c > 1114111) return false;\n    return true;\n  }\n  function fromCodePoint(c) {\n    if (c > 65535) {\n      c -= 65536;\n      const surrogate1 = 55296 + (c >> 10);\n      const surrogate2 = 56320 + (c & 1023);\n      return String.fromCharCode(surrogate1, surrogate2);\n    }\n    return String.fromCharCode(c);\n  }\n  var UNESCAPE_MD_RE = /\\\\([!"#$%&\'()*+,\\-./:;<=>?@[\\\\\\]^_`{|}~])/g;\n  var UNESCAPE_ALL_RE = new RegExp(`${UNESCAPE_MD_RE.source}|${/&([a-z#][a-z0-9]{1,31});/gi.source}`, "gi");\n  var DIGITAL_ENTITY_TEST_RE = /^#((?:x[a-f0-9]{1,8}|[0-9]{1,8}))$/i;\n  function replaceEntityPattern(match, name) {\n    if (name.charCodeAt(0) === 35 && DIGITAL_ENTITY_TEST_RE.test(name)) {\n      const code2 = name[1].toLowerCase() === "x" ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);\n      if (isValidEntityCode(code2)) return fromCodePoint(code2);\n      return match;\n    }\n    const decoded = decodeHTMLStrict(match);\n    if (decoded !== match) return decoded;\n    return match;\n  }\n  function unescapeMd(str) {\n    if (str.indexOf("\\\\") < 0) return str;\n    return str.replace(UNESCAPE_MD_RE, "$1");\n  }\n  function unescapeAll(str) {\n    if (str.indexOf("\\\\") < 0 && str.indexOf("&") < 0) return str;\n    return str.replace(UNESCAPE_ALL_RE, function(match, escaped, entity2) {\n      if (escaped) return escaped;\n      return replaceEntityPattern(match, entity2);\n    });\n  }\n  var HTML_ESCAPE_TEST_RE = /[&<>"]/;\n  var HTML_ESCAPE_REPLACE_RE = /[&<>"]/g;\n  var HTML_REPLACEMENTS = {\n    "&": "&amp;",\n    "<": "&lt;",\n    ">": "&gt;",\n    \'"\': "&quot;"\n  };\n  function replaceUnsafeChar(ch) {\n    return HTML_REPLACEMENTS[ch];\n  }\n  function escapeHtml(str) {\n    if (HTML_ESCAPE_TEST_RE.test(str)) return str.replace(HTML_ESCAPE_REPLACE_RE, replaceUnsafeChar);\n    return str;\n  }\n  var REGEXP_ESCAPE_RE = /[.?*+^$[\\]\\\\(){}|-]/g;\n  function escapeRE(str) {\n    return str.replace(REGEXP_ESCAPE_RE, "\\\\$&");\n  }\n  function isSpace(code2) {\n    switch (code2) {\n      case 9:\n      case 32:\n        return true;\n    }\n    return false;\n  }\n  function isWhiteSpace(code2) {\n    if (code2 >= 8192 && code2 <= 8202) return true;\n    switch (code2) {\n      case 9:\n      case 10:\n      case 11:\n      case 12:\n      case 13:\n      case 32:\n      case 160:\n      case 5760:\n      case 8239:\n      case 8287:\n      case 12288:\n        return true;\n    }\n    return false;\n  }\n  function isPunctChar(ch) {\n    return P.test(ch) || S.test(ch);\n  }\n  function isPunctCharCode(code2) {\n    return isPunctChar(fromCodePoint(code2));\n  }\n  function isMdAsciiPunct(ch) {\n    switch (ch) {\n      case 33:\n      case 34:\n      case 35:\n      case 36:\n      case 37:\n      case 38:\n      case 39:\n      case 40:\n      case 41:\n      case 42:\n      case 43:\n      case 44:\n      case 45:\n      case 46:\n      case 47:\n      case 58:\n      case 59:\n      case 60:\n      case 61:\n      case 62:\n      case 63:\n      case 64:\n      case 91:\n      case 92:\n      case 93:\n      case 94:\n      case 95:\n      case 96:\n      case 123:\n      case 124:\n      case 125:\n      case 126:\n        return true;\n      default:\n        return false;\n    }\n  }\n  function normalizeReference(str) {\n    str = str.trim().replace(/\\s+/g, " ");\n    return str.toLowerCase().toUpperCase();\n  }\n  function isAsciiTrimmable(c) {\n    return c === 32 || c === 9 || c === 10 || c === 13;\n  }\n  function asciiTrim(str) {\n    let start = 0;\n    for (; start < str.length; start++) if (!isAsciiTrimmable(str.charCodeAt(start))) break;\n    let end = str.length - 1;\n    for (; end >= start; end--) if (!isAsciiTrimmable(str.charCodeAt(end))) break;\n    return str.slice(start, end + 1);\n  }\n  var lib = {\n    mdurl: mdurl_exports,\n    ucmicro: build_exports\n  };\n  function parseLinkLabel(state, start, disableNested) {\n    let level, found, marker, prevPos;\n    const max = state.posMax;\n    const oldPos = state.pos;\n    state.pos = start + 1;\n    level = 1;\n    while (state.pos < max) {\n      marker = state.src.charCodeAt(state.pos);\n      if (marker === 93) {\n        level--;\n        if (level === 0) {\n          found = true;\n          break;\n        }\n      }\n      prevPos = state.pos;\n      state.md.inline.skipToken(state);\n      if (marker === 91) {\n        if (prevPos === state.pos - 1) level++;\n        else if (disableNested) {\n          state.pos = oldPos;\n          return -1;\n        }\n      }\n    }\n    let labelEnd = -1;\n    if (found) labelEnd = state.pos;\n    state.pos = oldPos;\n    return labelEnd;\n  }\n  function parseLinkDestination(str, start, max) {\n    let code2;\n    let pos = start;\n    const result = {\n      ok: false,\n      pos: 0,\n      str: ""\n    };\n    if (str.charCodeAt(pos) === 60) {\n      pos++;\n      while (pos < max) {\n        code2 = str.charCodeAt(pos);\n        if (code2 === 10) return result;\n        if (code2 === 60) return result;\n        if (code2 === 62) {\n          result.pos = pos + 1;\n          result.str = unescapeAll(str.slice(start + 1, pos));\n          result.ok = true;\n          return result;\n        }\n        if (code2 === 92 && pos + 1 < max) {\n          pos += 2;\n          continue;\n        }\n        pos++;\n      }\n      return result;\n    }\n    let level = 0;\n    while (pos < max) {\n      code2 = str.charCodeAt(pos);\n      if (code2 === 32) break;\n      if (code2 < 32 || code2 === 127) break;\n      if (code2 === 92 && pos + 1 < max) {\n        if (str.charCodeAt(pos + 1) === 32) {\n          pos++;\n          continue;\n        }\n        pos += 2;\n        continue;\n      }\n      if (code2 === 40) {\n        level++;\n        if (level > 32) return result;\n      }\n      if (code2 === 41) {\n        if (level === 0) break;\n        level--;\n      }\n      pos++;\n    }\n    if (start === pos) return result;\n    if (level !== 0) return result;\n    result.str = unescapeAll(str.slice(start, pos));\n    result.pos = pos;\n    result.ok = true;\n    return result;\n  }\n  function parseLinkTitle(str, start, max, prev_state) {\n    let code2;\n    let pos = start;\n    const state = {\n      ok: false,\n      can_continue: false,\n      pos: 0,\n      str: "",\n      marker: 0\n    };\n    if (prev_state) {\n      state.str = prev_state.str;\n      state.marker = prev_state.marker;\n    } else {\n      if (pos >= max) return state;\n      let marker = str.charCodeAt(pos);\n      if (marker !== 34 && marker !== 39 && marker !== 40) return state;\n      start++;\n      pos++;\n      if (marker === 40) marker = 41;\n      state.marker = marker;\n    }\n    while (pos < max) {\n      code2 = str.charCodeAt(pos);\n      if (code2 === state.marker) {\n        state.pos = pos + 1;\n        state.str += unescapeAll(str.slice(start, pos));\n        state.ok = true;\n        return state;\n      } else if (code2 === 40 && state.marker === 41) return state;\n      else if (code2 === 92 && pos + 1 < max) pos++;\n      pos++;\n    }\n    state.can_continue = true;\n    state.str += unescapeAll(str.slice(start, pos));\n    return state;\n  }\n  var helpers_exports = /* @__PURE__ */ __exportAll({\n    parseLinkDestination: () => parseLinkDestination,\n    parseLinkLabel: () => parseLinkLabel,\n    parseLinkTitle: () => parseLinkTitle\n  });\n  function _typeof(o) {\n    "@babel/helpers - typeof";\n    return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function(o2) {\n      return typeof o2;\n    } : function(o2) {\n      return o2 && "function" == typeof Symbol && o2.constructor === Symbol && o2 !== Symbol.prototype ? "symbol" : typeof o2;\n    }, _typeof(o);\n  }\n  function toPrimitive(t, r) {\n    if ("object" != _typeof(t) || !t) return t;\n    var e = t[Symbol.toPrimitive];\n    if (void 0 !== e) {\n      var i = e.call(t, r || "default");\n      if ("object" != _typeof(i)) return i;\n      throw new TypeError("@@toPrimitive must return a primitive value.");\n    }\n    return ("string" === r ? String : Number)(t);\n  }\n  function toPropertyKey(t) {\n    var i = toPrimitive(t, "string");\n    return "symbol" == _typeof(i) ? i : i + "";\n  }\n  function _defineProperty(e, r, t) {\n    return (r = toPropertyKey(r)) in e ? Object.defineProperty(e, r, {\n      value: t,\n      enumerable: true,\n      configurable: true,\n      writable: true\n    }) : e[r] = t, e;\n  }\n  var Token = class {\n    constructor(type, tag, nesting) {\n      _defineProperty(\n        this,\n        /**\n        * Source map info. Format: `[ line_begin, line_end ]`\n        */\n        "map",\n        null\n      );\n      _defineProperty(\n        this,\n        /**\n        * nesting level, the same as `state.level`\n        */\n        "level",\n        0\n      );\n      _defineProperty(\n        this,\n        /**\n        * An array of child nodes (inline and img tokens)\n        */\n        "children",\n        null\n      );\n      _defineProperty(\n        this,\n        /**\n        * In a case of self-closing tag (code, html, fence, etc.),\n        * it has contents of this tag.\n        */\n        "content",\n        ""\n      );\n      _defineProperty(\n        this,\n        /**\n        * \'*\' or \'_\' for emphasis, fence string for fence, etc.\n        */\n        "markup",\n        ""\n      );\n      _defineProperty(\n        this,\n        /**\n        * Additional information:\n        *\n        * - Info string for "fence" tokens\n        * - The value "auto" for autolink "link_open" and "link_close" tokens\n        * - The string value of the item marker for ordered-list "list_item_open" tokens\n        */\n        "info",\n        ""\n      );\n      _defineProperty(\n        this,\n        /**\n        * True for block-level tokens, false for inline tokens.\n        * Used in renderer to calculate line breaks\n        */\n        "block",\n        false\n      );\n      _defineProperty(\n        this,\n        /**\n        * If it\'s true, ignore this element when rendering. Used for tight lists\n        * to hide paragraphs.\n        */\n        "hidden",\n        false\n      );\n      this.type = type;\n      this.tag = tag;\n      this.attrs = null;\n      this.nesting = nesting;\n      this.meta = null;\n    }\n    /**\n    * Search attribute index by name.\n    */\n    attrIndex(name) {\n      if (!this.attrs) return -1;\n      const attrs = this.attrs;\n      for (let i = 0, len = attrs.length; i < len; i++) if (attrs[i][0] === name) return i;\n      return -1;\n    }\n    /**\n    * Add `[ name, value ]` attribute to list. Init attrs if necessary\n    */\n    attrPush(attrData) {\n      if (this.attrs) this.attrs.push(attrData);\n      else this.attrs = [attrData];\n    }\n    /**\n    * Set `name` attribute to `value`. Override old value if exists.\n    */\n    attrSet(name, value) {\n      const idx = this.attrIndex(name);\n      const attrData = [name, value];\n      if (idx < 0) this.attrPush(attrData);\n      else this.attrs[idx] = attrData;\n    }\n    /**\n    * Get the value of attribute `name`, or null if it does not exist.\n    */\n    attrGet(name) {\n      const idx = this.attrIndex(name);\n      let value = null;\n      if (idx >= 0) value = this.attrs[idx][1];\n      return value;\n    }\n    /**\n    * Join value to existing attribute via space. Or create new attribute if not\n    * exists. Useful to operate with token classes.\n    */\n    attrJoin(name, value) {\n      const idx = this.attrIndex(name);\n      if (idx < 0) this.attrPush([name, value]);\n      else this.attrs[idx][1] = `${this.attrs[idx][1]} ${value}`;\n    }\n  };\n  var Ruler = class {\n    constructor() {\n      _defineProperty(\n        this,\n        /** @internal */\n        "__rules__",\n        []\n      );\n      _defineProperty(\n        this,\n        /** @internal */\n        "__cache__",\n        null\n      );\n    }\n    /** @internal */\n    __find__(name) {\n      for (let i = 0; i < this.__rules__.length; i++) if (this.__rules__[i].name === name) return i;\n      return -1;\n    }\n    /** @internal */\n    __compile__() {\n      const chains = /* @__PURE__ */ new Set();\n      this.__rules__.forEach((rule) => {\n        if (!rule.enabled) return;\n        rule.alt.forEach((altName) => {\n          if (altName) chains.add(altName);\n        });\n      });\n      this.__cache__ = /* @__PURE__ */ Object.create(null);\n      this.__cache__[""] = [];\n      this.__rules__.forEach((rule) => {\n        if (rule.enabled) this.__cache__[""].push(rule.fn);\n      });\n      chains.forEach((chain) => {\n        this.__cache__[chain] = [];\n        this.__rules__.forEach((rule) => {\n          if (rule.enabled && rule.alt.indexOf(chain) >= 0) this.__cache__[chain].push(rule.fn);\n        });\n      });\n    }\n    /**\n    * Replace rule by name with new function & options. Throws error if name not\n    * found.\n    *\n    * @example Replace existing typographer replacement rule with new one\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    * const md = new MarkdownIt()\n    *\n    * md.core.ruler.at(\'replacements\', function replace(state) {\n    *   //...\n    * });\n    * ```\n    */\n    at(name, fn, options = {}) {\n      const index = this.__find__(name);\n      if (index === -1) throw new Error(`Parser rule not found: ${name}`);\n      this.__rules__[index].fn = fn;\n      this.__rules__[index].alt = options.alt || [];\n      this.__cache__ = null;\n    }\n    /**\n    * Add new rule to chain before one with given name. See also\n    * {@link Ruler.after}, {@link Ruler.push}.\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    * const md = new MarkdownIt()\n    *\n    * md.block.ruler.before(\'paragraph\', \'my_rule\', function replace(state) {\n    *   //...\n    * });\n    * ```\n    */\n    before(beforeName, ruleName, fn, options = {}) {\n      const index = this.__find__(beforeName);\n      if (index === -1) throw new Error(`Parser rule not found: ${beforeName}`);\n      this.__rules__.splice(index, 0, {\n        name: ruleName,\n        enabled: true,\n        fn,\n        alt: options.alt || []\n      });\n      this.__cache__ = null;\n    }\n    /**\n    * Add new rule to chain after one with given name. See also\n    * {@link Ruler.before}, {@link Ruler.push}.\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    * const md = new MarkdownIt()\n    *\n    * md.inline.ruler.after(\'text\', \'my_rule\', function replace(state) {\n    *   //...\n    * });\n    * ```\n    */\n    after(afterName, ruleName, fn, options = {}) {\n      const index = this.__find__(afterName);\n      if (index === -1) throw new Error(`Parser rule not found: ${afterName}`);\n      this.__rules__.splice(index + 1, 0, {\n        name: ruleName,\n        enabled: true,\n        fn,\n        alt: options.alt || []\n      });\n      this.__cache__ = null;\n    }\n    /**\n    * Push new rule to the end of chain. See also\n    * {@link Ruler.before}, {@link Ruler.after}.\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    * const md = new MarkdownIt()\n    *\n    * md.core.ruler.push(\'my_rule\', function replace(state) {\n    *   //...\n    * });\n    * ```\n    */\n    push(ruleName, fn, options = {}) {\n      this.__rules__.push({\n        name: ruleName,\n        enabled: true,\n        fn,\n        alt: options.alt || []\n      });\n      this.__cache__ = null;\n    }\n    /**\n    * Enable rules with given names. If any rule name not found - throw Error.\n    * Errors can be disabled by second param.\n    *\n    * See also {@link Ruler.disable}, {@link Ruler.enableOnly}.\n    *\n    * Returns list of found rule names (if no exception happened).\n    */\n    enable(list2, ignoreInvalid = false) {\n      if (!Array.isArray(list2)) list2 = [list2];\n      const result = [];\n      list2.forEach((name) => {\n        const idx = this.__find__(name);\n        if (idx < 0) {\n          if (ignoreInvalid) return;\n          throw new Error(`Rules manager: invalid rule name ${name}`);\n        }\n        this.__rules__[idx].enabled = true;\n        result.push(name);\n      });\n      this.__cache__ = null;\n      return result;\n    }\n    /**\n    * Enable rules with given names, and disable everything else. If any rule name\n    * not found - throw Error. Errors can be disabled by second param.\n    *\n    * See also {@link Ruler.disable}, {@link Ruler.enable}.\n    */\n    enableOnly(list2, ignoreInvalid = false) {\n      if (!Array.isArray(list2)) list2 = [list2];\n      this.__rules__.forEach((rule) => {\n        rule.enabled = false;\n      });\n      this.enable(list2, ignoreInvalid);\n    }\n    /**\n    * Disable rules with given names. If any rule name not found - throw Error.\n    * Errors can be disabled by second param.\n    *\n    * See also {@link Ruler.enable}, {@link Ruler.enableOnly}.\n    *\n    * Returns list of found rule names (if no exception happened).\n    */\n    disable(list2, ignoreInvalid = false) {\n      if (!Array.isArray(list2)) list2 = [list2];\n      const result = [];\n      list2.forEach((name) => {\n        const idx = this.__find__(name);\n        if (idx < 0) {\n          if (ignoreInvalid) return;\n          throw new Error(`Rules manager: invalid rule name ${name}`);\n        }\n        this.__rules__[idx].enabled = false;\n        result.push(name);\n      });\n      this.__cache__ = null;\n      return result;\n    }\n    /**\n    * Return array of active functions (rules) for given chain name. It analyzes\n    * rules configuration, compiles caches if not exists and returns result.\n    *\n    * Default chain name is `\'\'` (empty string). It can\'t be skipped. That\'s\n    * done intentionally, to keep signature monomorphic for high speed.\n    */\n    getRules(chainName) {\n      if (!this.__cache__) this.__compile__();\n      return this.__cache__[chainName] || [];\n    }\n  };\n  var default_rules = {};\n  default_rules.code_inline = function(tokens, idx, options, env, slf) {\n    const token = tokens[idx];\n    return `<code${slf.renderAttrs(token)}>${escapeHtml(token.content)}</code>`;\n  };\n  default_rules.code_block = function(tokens, idx, options, env, slf) {\n    const token = tokens[idx];\n    return `<pre${slf.renderAttrs(token)}><code>${escapeHtml(tokens[idx].content)}</code></pre>\n`;\n  };\n  default_rules.fence = function(tokens, idx, options, env, slf) {\n    const token = tokens[idx];\n    const info = token.info ? unescapeAll(token.info).trim() : "";\n    let langName = "";\n    let langAttrs = "";\n    if (info) {\n      const arr = info.split(/(\\s+)/g);\n      langName = arr[0];\n      langAttrs = arr.slice(2).join("");\n    }\n    let highlighted;\n    if (options.highlight) highlighted = options.highlight(token.content, langName, langAttrs) || escapeHtml(token.content);\n    else highlighted = escapeHtml(token.content);\n    if (highlighted.indexOf("<pre") === 0) return highlighted + "\\n";\n    if (info) {\n      const i = token.attrIndex("class");\n      const tmpAttrs = token.attrs ? token.attrs.slice() : [];\n      if (i < 0) tmpAttrs.push(["class", `${options.langPrefix}${langName}`]);\n      else {\n        tmpAttrs[i] = [tmpAttrs[i][0], tmpAttrs[i][1]];\n        tmpAttrs[i][1] += ` ${options.langPrefix}${langName}`;\n      }\n      const tmpToken = { attrs: tmpAttrs };\n      return `<pre><code${slf.renderAttrs(tmpToken)}>${highlighted}</code></pre>\n`;\n    }\n    return `<pre><code${slf.renderAttrs(token)}>${highlighted}</code></pre>\n`;\n  };\n  default_rules.image = function(tokens, idx, options, env, slf) {\n    const token = tokens[idx];\n    token.attrs[token.attrIndex("alt")][1] = slf.renderInlineAsText(token.children, options, env);\n    return slf.renderToken(tokens, idx, options);\n  };\n  default_rules.hardbreak = function(tokens, idx, options) {\n    return options.xhtmlOut ? "<br />\\n" : "<br>\\n";\n  };\n  default_rules.softbreak = function(tokens, idx, options) {\n    return options.breaks ? options.xhtmlOut ? "<br />\\n" : "<br>\\n" : "\\n";\n  };\n  default_rules.text = function(tokens, idx) {\n    return escapeHtml(tokens[idx].content);\n  };\n  default_rules.html_block = function(tokens, idx) {\n    return tokens[idx].content;\n  };\n  default_rules.html_inline = function(tokens, idx) {\n    return tokens[idx].content;\n  };\n  var Renderer = class {\n    constructor() {\n      _defineProperty(\n        this,\n        /**\n        * Contains render rules for tokens. Can be updated and extended.\n        *\n        * See [source code](https://github.com/markdown-it/markdown-it/blob/master/src/renderer.ts)\n        * for more details and examples.\n        *\n        * @example Custom render rules\n        * ```javascript\n        * import MarkdownIt from \'markdown-it\'\n        * const md = new MarkdownIt()\n        *\n        * md.renderer.rules.strong_open  = function () { return \'<b>\'; };\n        * md.renderer.rules.strong_close = function () { return \'</b>\'; };\n        *\n        * const result = md.renderInline(...);\n        * ```\n        *\n        * @example Each rule is called as independent static function with fixed signature\n        * ```javascript\n        * function my_token_render(tokens, idx, options, env, renderer) {\n        *   // ...\n        *   return renderedHTML;\n        * }\n        * ```\n        */\n        "rules",\n        Object.assign({}, default_rules)\n      );\n    }\n    /**\n    * Render token attributes to string.\n    */\n    renderAttrs(token) {\n      let i, l, result;\n      if (!token.attrs) return "";\n      result = "";\n      for (i = 0, l = token.attrs.length; i < l; i++) result += ` ${escapeHtml(token.attrs[i][0])}="${escapeHtml(String(token.attrs[i][1]))}"`;\n      return result;\n    }\n    /**\n    * Default token renderer. Can be overriden by custom function\n    * in {@link Renderer.rules}.\n    */\n    renderToken(tokens, idx, options) {\n      const token = tokens[idx];\n      let result = "";\n      if (token.hidden) return "";\n      let prev = idx - 1;\n      while (prev >= 0 && tokens[prev].hidden && tokens[prev].nesting === 0) prev--;\n      if (token.block && token.nesting !== -1 && prev >= 0 && tokens[prev].hidden && tokens[prev].nesting === -1) result += "\\n";\n      result += (token.nesting === -1 ? "</" : "<") + token.tag;\n      result += this.renderAttrs(token);\n      if (token.nesting === 0 && options.xhtmlOut) result += " /";\n      let needLf = false;\n      if (token.block) {\n        needLf = true;\n        if (token.nesting === 1) {\n          let next = idx + 1;\n          while (next < tokens.length && tokens[next].hidden && tokens[next].nesting === 0) next++;\n          if (next < tokens.length) {\n            const nextToken = tokens[next];\n            if (nextToken.type === "inline" || nextToken.hidden) needLf = false;\n            else if (nextToken.nesting === -1 && nextToken.tag === token.tag) needLf = false;\n          }\n        }\n      }\n      result += needLf ? ">\\n" : ">";\n      return result;\n    }\n    /**\n    * The same as {@link Renderer.render}, but for single token of `inline` type.\n    */\n    renderInline(tokens, options, env) {\n      let result = "";\n      const rules = this.rules;\n      for (let i = 0, len = tokens.length; i < len; i++) {\n        const type = tokens[i].type;\n        if (typeof rules[type] !== "undefined") result += rules[type](tokens, i, options, env, this);\n        else result += this.renderToken(tokens, i, options);\n      }\n      return result;\n    }\n    /**\n    * Special kludge for image `alt` attributes to conform CommonMark spec.\n    * Don\'t try to use it! Spec requires to show `alt` content with stripped markup,\n    * instead of simple escaping.\n    */\n    renderInlineAsText(tokens, options, env) {\n      let result = "";\n      for (let i = 0, len = tokens.length; i < len; i++) switch (tokens[i].type) {\n        case "text":\n        case "code_inline":\n          result += tokens[i].content;\n          break;\n        case "image":\n          result += this.renderInlineAsText(tokens[i].children, options, env);\n          break;\n        case "html_inline":\n        case "html_block":\n          result += tokens[i].content;\n          break;\n        case "softbreak":\n        case "hardbreak":\n          result += "\\n";\n      }\n      return result;\n    }\n    /**\n    * Takes token stream and generates HTML. Probably, you will never need to call\n    * this method directly.\n    */\n    render(tokens, options, env) {\n      let result = "";\n      const rules = this.rules;\n      for (let i = 0, len = tokens.length; i < len; i++) {\n        const type = tokens[i].type;\n        if (type === "inline") result += this.renderInline(tokens[i].children, options, env);\n        else if (typeof rules[type] !== "undefined") result += rules[type](tokens, i, options, env, this);\n        else result += this.renderToken(tokens, i, options);\n      }\n      return result;\n    }\n  };\n  var StateCore = class {\n    constructor(src, md, env) {\n      _defineProperty(this, "tokens", []);\n      _defineProperty(this, "inlineMode", false);\n      _defineProperty(this, "Token", Token);\n      this.src = src;\n      this.env = env;\n      this.md = md;\n    }\n  };\n  var UNNORMALIZED_NEWLINE_RE = /\\r\\n?/g;\n  var NULL_RE = /\\0/g;\n  function normalize(state) {\n    let str;\n    str = state.src.replace(UNNORMALIZED_NEWLINE_RE, "\\n");\n    str = str.replace(NULL_RE, "\\uFFFD");\n    state.src = str;\n  }\n  function block(state) {\n    let token;\n    if (state.inlineMode) {\n      token = new state.Token("inline", "", 0);\n      token.content = state.src;\n      token.map = [0, 1];\n      token.children = [];\n      state.tokens.push(token);\n    } else state.md.block.parse(state.src, state.md, state.env, state.tokens);\n  }\n  function strip_references(state) {\n    const tokens = state.tokens;\n    let last = 0;\n    for (let curr = 0; curr < tokens.length; curr++) {\n      if (tokens[curr].type === "reference_definition") continue;\n      if (curr !== last) tokens[last] = tokens[curr];\n      last++;\n    }\n    if (tokens.length !== last) tokens.length = last;\n  }\n  function inline(state) {\n    const tokens = state.tokens;\n    for (let i = 0, l = tokens.length; i < l; i++) {\n      const tok = tokens[i];\n      if (tok.type === "inline") state.md.inline.parse(tok.content, state.md, state.env, tok.children);\n    }\n  }\n  function isLinkOpen$1(str) {\n    return /^<a[>\\s]/i.test(str);\n  }\n  function isLinkClose$1(str) {\n    return /^<\\/a\\s*>/i.test(str);\n  }\n  function linkify$1(state) {\n    const blockTokens = state.tokens;\n    if (!state.md.options.linkify) return;\n    for (let j = 0, l = blockTokens.length; j < l; j++) {\n      if (blockTokens[j].type !== "inline" || !state.md.linkify.test(blockTokens[j].content)) continue;\n      const tokens = blockTokens[j].children;\n      const replacements = [];\n      let htmlLinkLevel = 0;\n      for (let i = tokens.length - 1; i >= 0; i--) {\n        const currentToken = tokens[i];\n        if (currentToken.type === "link_close") {\n          i--;\n          while (tokens[i].level !== currentToken.level && tokens[i].type !== "link_open") i--;\n          continue;\n        }\n        if (currentToken.type === "html_inline") {\n          if (isLinkOpen$1(currentToken.content) && htmlLinkLevel > 0) htmlLinkLevel--;\n          if (isLinkClose$1(currentToken.content)) htmlLinkLevel++;\n        }\n        if (htmlLinkLevel > 0) continue;\n        if (currentToken.type === "text" && state.md.linkify.test(currentToken.content)) {\n          const text2 = currentToken.content;\n          let links = state.md.linkify.match(text2);\n          const nodes = [];\n          let level = currentToken.level;\n          let lastPos = 0;\n          if (links.length > 0 && links[0].index === 0 && i > 0 && tokens[i - 1].type === "text_special") links = links.slice(1);\n          for (let ln = 0; ln < links.length; ln++) {\n            const url = links[ln].url;\n            const fullUrl = state.md.normalizeLink(url);\n            if (!state.md.validateLink(fullUrl)) continue;\n            let urlText = links[ln].text;\n            if (!links[ln].schema) urlText = state.md.normalizeLinkText(`http://${urlText}`).replace(/^http:\\/\\//, "");\n            else if (links[ln].schema === "mailto:" && !/^mailto:/i.test(urlText)) urlText = state.md.normalizeLinkText(`mailto:${urlText}`).replace(/^mailto:/, "");\n            else urlText = state.md.normalizeLinkText(urlText);\n            const pos = links[ln].index;\n            if (pos > lastPos) {\n              const token = new state.Token("text", "", 0);\n              token.content = text2.slice(lastPos, pos);\n              token.level = level;\n              nodes.push(token);\n            }\n            const token_o = new state.Token("link_open", "a", 1);\n            token_o.attrs = [["href", fullUrl]];\n            token_o.level = level++;\n            token_o.markup = "linkify";\n            token_o.info = "auto";\n            nodes.push(token_o);\n            const token_t = new state.Token("text", "", 0);\n            token_t.content = urlText;\n            token_t.level = level;\n            nodes.push(token_t);\n            const token_c = new state.Token("link_close", "a", -1);\n            token_c.level = --level;\n            token_c.markup = "linkify";\n            token_c.info = "auto";\n            nodes.push(token_c);\n            lastPos = links[ln].lastIndex;\n          }\n          if (lastPos < text2.length) {\n            const token = new state.Token("text", "", 0);\n            token.content = text2.slice(lastPos);\n            token.level = level;\n            nodes.push(token);\n          }\n          replacements.push({\n            index: i,\n            nodes\n          });\n        }\n      }\n      if (replacements.length > 0) {\n        let newTokensLength = tokens.length;\n        for (const replacement of replacements) newTokensLength += replacement.nodes.length - 1;\n        const newTokens = new Array(newTokensLength);\n        let replacementIndex = 0;\n        let newTokenIndex = 0;\n        replacements.reverse();\n        for (let i = 0; i < tokens.length; i++) {\n          const replacement = replacements[replacementIndex];\n          if ((replacement === null || replacement === void 0 ? void 0 : replacement.index) === i) {\n            for (const node of replacement.nodes) newTokens[newTokenIndex++] = node;\n            replacementIndex++;\n          } else newTokens[newTokenIndex++] = tokens[i];\n        }\n        blockTokens[j].children = newTokens;\n      }\n    }\n  }\n  var RARE_RE = /\\+-|\\.\\.|\\?\\?\\?\\?|!!!!|,,|--/;\n  var SCOPED_ABBR_TEST_RE = /\\((c|tm|r)\\)/i;\n  var SCOPED_ABBR_RE = /\\((c|tm|r)\\)/gi;\n  var SCOPED_ABBR = {\n    c: "\\xA9",\n    r: "\\xAE",\n    tm: "\\u2122"\n  };\n  function replaceFn(match, name) {\n    return SCOPED_ABBR[name.toLowerCase()];\n  }\n  function replace_scoped(inlineTokens) {\n    let inside_autolink = 0;\n    for (let i = inlineTokens.length - 1; i >= 0; i--) {\n      const token = inlineTokens[i];\n      if (token.type === "text" && !inside_autolink) token.content = token.content.replace(SCOPED_ABBR_RE, replaceFn);\n      if (token.type === "link_open" && token.info === "auto") inside_autolink--;\n      if (token.type === "link_close" && token.info === "auto") inside_autolink++;\n    }\n  }\n  function replace_rare(inlineTokens) {\n    let inside_autolink = 0;\n    for (let i = inlineTokens.length - 1; i >= 0; i--) {\n      const token = inlineTokens[i];\n      if (token.type === "text" && !inside_autolink) {\n        if (RARE_RE.test(token.content)) token.content = token.content.replace(/\\+-/g, "\\xB1").replace(/\\.{2,}/g, "\\u2026").replace(/([?!])\u2026/g, "$1..").replace(/([?!]){4,}/g, "$1$1$1").replace(/,{2,}/g, ",").replace(/(^|[^-])---(?=[^-]|$)/gm, "$1\\u2014").replace(/(^|\\s)--(?=\\s|$)/gm, "$1\\u2013").replace(/(^|[^-\\s])--(?=[^-\\s]|$)/gm, "$1\\u2013");\n      }\n      if (token.type === "link_open" && token.info === "auto") inside_autolink--;\n      if (token.type === "link_close" && token.info === "auto") inside_autolink++;\n    }\n  }\n  function replace(state) {\n    let blkIdx;\n    if (!state.md.options.typographer) return;\n    for (blkIdx = state.tokens.length - 1; blkIdx >= 0; blkIdx--) {\n      if (state.tokens[blkIdx].type !== "inline") continue;\n      if (SCOPED_ABBR_TEST_RE.test(state.tokens[blkIdx].content)) replace_scoped(state.tokens[blkIdx].children);\n      if (RARE_RE.test(state.tokens[blkIdx].content)) replace_rare(state.tokens[blkIdx].children);\n    }\n  }\n  var QUOTE_TEST_RE = /[\'"]/;\n  var QUOTE_RE = /[\'"]/g;\n  var APOSTROPHE = "\\u2019";\n  var MAX_OPENERS = 1e3;\n  function truncateStack(stack, heads, length) {\n    while (stack.length > length) {\n      const item = stack.pop();\n      if (item.isSingleQuote) heads.single = item.prevSameQuoteIdx;\n      else heads.double = item.prevSameQuoteIdx;\n    }\n  }\n  function addReplacement(replacements, tokenIdx, pos, ch) {\n    if (!replacements[tokenIdx]) replacements[tokenIdx] = [];\n    replacements[tokenIdx].push({\n      pos,\n      ch\n    });\n  }\n  function applyReplacements(str, replacements) {\n    let result = "";\n    let lastPos = 0;\n    replacements.sort((a, b) => a.pos - b.pos);\n    for (let i = 0; i < replacements.length; i++) {\n      const replacement = replacements[i];\n      result += str.slice(lastPos, replacement.pos) + replacement.ch;\n      lastPos = replacement.pos + 1;\n    }\n    return result + str.slice(lastPos);\n  }\n  function process_inlines(tokens, state) {\n    let j;\n    const stack = [];\n    const heads = {\n      single: -1,\n      double: -1\n    };\n    const replacements = {};\n    for (let i = 0; i < tokens.length; i++) {\n      const token = tokens[i];\n      const thisLevel = tokens[i].level;\n      for (j = stack.length - 1; j >= 0; j--) if (stack[j].level <= thisLevel) break;\n      truncateStack(stack, heads, j + 1);\n      if (token.type !== "text") continue;\n      const text2 = token.content;\n      let pos = 0;\n      const max = text2.length;\n      OUTER: while (pos < max) {\n        QUOTE_RE.lastIndex = pos;\n        const t = QUOTE_RE.exec(text2);\n        if (!t) break;\n        let canOpen = true;\n        let canClose = true;\n        pos = t.index + 1;\n        const isSingle = t[0] === "\'";\n        let lastChar = 32;\n        if (t.index - 1 >= 0) lastChar = text2.charCodeAt(t.index - 1);\n        else for (j = i - 1; j >= 0; j--) {\n          if (tokens[j].type === "softbreak" || tokens[j].type === "hardbreak") break;\n          if (!tokens[j].content) continue;\n          lastChar = tokens[j].content.charCodeAt(tokens[j].content.length - 1);\n          break;\n        }\n        let nextChar = 32;\n        if (pos < max) nextChar = text2.charCodeAt(pos);\n        else for (j = i + 1; j < tokens.length; j++) {\n          if (tokens[j].type === "softbreak" || tokens[j].type === "hardbreak") break;\n          if (!tokens[j].content) continue;\n          nextChar = tokens[j].content.charCodeAt(0);\n          break;\n        }\n        const isLastPunctChar = isMdAsciiPunct(lastChar) || isPunctCharCode(lastChar);\n        const isNextPunctChar = isMdAsciiPunct(nextChar) || isPunctCharCode(nextChar);\n        const isLastWhiteSpace = isWhiteSpace(lastChar);\n        const isNextWhiteSpace = isWhiteSpace(nextChar);\n        if (isNextWhiteSpace) canOpen = false;\n        else if (isNextPunctChar) {\n          if (!(isLastWhiteSpace || isLastPunctChar)) canOpen = false;\n        }\n        if (isLastWhiteSpace) canClose = false;\n        else if (isLastPunctChar) {\n          if (!(isNextWhiteSpace || isNextPunctChar)) canClose = false;\n        }\n        if (nextChar === 34 && t[0] === \'"\') {\n          if (lastChar >= 48 && lastChar <= 57) canClose = canOpen = false;\n        }\n        if (canOpen && canClose) {\n          canOpen = isLastPunctChar;\n          canClose = isNextPunctChar;\n        }\n        if (!canOpen && !canClose) {\n          if (isSingle) addReplacement(replacements, i, t.index, APOSTROPHE);\n          continue;\n        }\n        if (canClose) {\n          j = isSingle ? heads.single : heads.double;\n          if (j >= 0 && stack[j].level === thisLevel) {\n            const item = stack[j];\n            let openQuote;\n            let closeQuote;\n            if (isSingle) {\n              openQuote = state.md.options.quotes[2];\n              closeQuote = state.md.options.quotes[3];\n            } else {\n              openQuote = state.md.options.quotes[0];\n              closeQuote = state.md.options.quotes[1];\n            }\n            addReplacement(replacements, i, t.index, closeQuote);\n            addReplacement(replacements, item.tokenIdx, item.contentPos, openQuote);\n            truncateStack(stack, heads, j);\n            continue OUTER;\n          }\n        }\n        if (canOpen) {\n          if (stack.length >= MAX_OPENERS) return;\n          stack.push({\n            tokenIdx: i,\n            contentPos: t.index,\n            isSingleQuote: isSingle,\n            level: thisLevel,\n            prevSameQuoteIdx: isSingle ? heads.single : heads.double\n          });\n          if (isSingle) heads.single = stack.length - 1;\n          else heads.double = stack.length - 1;\n        } else if (canClose && isSingle) addReplacement(replacements, i, t.index, APOSTROPHE);\n      }\n    }\n    Object.keys(replacements).forEach(function(tokenIdx) {\n      const idx = Number(tokenIdx);\n      tokens[idx].content = applyReplacements(tokens[idx].content, replacements[tokenIdx]);\n    });\n  }\n  function smartquotes(state) {\n    if (!state.md.options.typographer) return;\n    for (let blkIdx = state.tokens.length - 1; blkIdx >= 0; blkIdx--) {\n      if (state.tokens[blkIdx].type !== "inline" || !QUOTE_TEST_RE.test(state.tokens[blkIdx].content)) continue;\n      process_inlines(state.tokens[blkIdx].children, state);\n    }\n  }\n  function join_alt(tokens) {\n    let curr, last;\n    const max = tokens.length;\n    for (curr = 0; curr < max; curr++) if (tokens[curr].type === "text_special") tokens[curr].type = "text";\n    for (curr = last = 0; curr < max; curr++) if (tokens[curr].type === "text" && curr + 1 < max && tokens[curr + 1].type === "text") tokens[curr + 1].content = tokens[curr].content + tokens[curr + 1].content;\n    else {\n      if (curr !== last) tokens[last] = tokens[curr];\n      last++;\n    }\n    if (curr !== last) tokens.length = last;\n  }\n  function text_join(state) {\n    let curr, last;\n    const blockTokens = state.tokens;\n    const l = blockTokens.length;\n    for (let j = 0; j < l; j++) {\n      if (blockTokens[j].type !== "inline") continue;\n      const tokens = blockTokens[j].children;\n      const max = tokens.length;\n      for (curr = 0; curr < max; curr++) {\n        if (tokens[curr].type === "text_special") tokens[curr].type = "text";\n        if (tokens[curr].children) join_alt(tokens[curr].children);\n      }\n      for (curr = last = 0; curr < max; curr++) if (tokens[curr].type === "text" && curr + 1 < max && tokens[curr + 1].type === "text") tokens[curr + 1].content = tokens[curr].content + tokens[curr + 1].content;\n      else {\n        if (curr !== last) tokens[last] = tokens[curr];\n        last++;\n      }\n      if (curr !== last) tokens.length = last;\n    }\n  }\n  var _rules$2 = [\n    ["normalize", normalize],\n    ["block", block],\n    ["strip_references", strip_references],\n    ["inline", inline],\n    ["linkify", linkify$1],\n    ["replacements", replace],\n    ["smartquotes", smartquotes],\n    ["text_join", text_join]\n  ];\n  var ParserCore = class {\n    constructor() {\n      _defineProperty(\n        this,\n        /**\n        * {@link Ruler} instance. Keep configuration of core rules.\n        */\n        "ruler",\n        new Ruler()\n      );\n      _defineProperty(this, "State", StateCore);\n      for (let i = 0; i < _rules$2.length; i++) this.ruler.push(_rules$2[i][0], _rules$2[i][1]);\n    }\n    /**\n    * Executes core chain rules.\n    */\n    process(state) {\n      const rules = this.ruler.getRules("");\n      for (let i = 0, l = rules.length; i < l; i++) rules[i](state);\n    }\n  };\n  var StateBlock = class {\n    constructor(src, md, env, tokens) {\n      _defineProperty(this, "bMarks", []);\n      _defineProperty(this, "eMarks", []);\n      _defineProperty(this, "tShift", []);\n      _defineProperty(this, "sCount", []);\n      _defineProperty(this, "bsCount", []);\n      _defineProperty(this, "blkIndent", 0);\n      _defineProperty(this, "line", 0);\n      _defineProperty(this, "lineMax", 0);\n      _defineProperty(this, "tight", false);\n      _defineProperty(this, "listIndent", -1);\n      _defineProperty(this, "parentType", "root");\n      _defineProperty(this, "level", 0);\n      _defineProperty(this, "Token", Token);\n      this.src = src;\n      this.md = md;\n      this.env = env;\n      this.tokens = tokens;\n      const s = this.src;\n      for (let start = 0, pos = 0, indent = 0, offset = 0, len = s.length, indent_found = false; pos < len; pos++) {\n        const ch = s.charCodeAt(pos);\n        if (!indent_found) {\n          if (isSpace(ch)) {\n            indent++;\n            if (ch === 9) offset += 4 - offset % 4;\n            else offset++;\n            continue;\n          } else indent_found = true;\n        }\n        if (ch === 10 || pos === len - 1) {\n          if (ch !== 10) pos++;\n          this.bMarks.push(start);\n          this.eMarks.push(pos);\n          this.tShift.push(indent);\n          this.sCount.push(offset);\n          this.bsCount.push(0);\n          indent_found = false;\n          indent = 0;\n          offset = 0;\n          start = pos + 1;\n        }\n      }\n      this.bMarks.push(s.length);\n      this.eMarks.push(s.length);\n      this.tShift.push(0);\n      this.sCount.push(0);\n      this.bsCount.push(0);\n      this.lineMax = this.bMarks.length - 1;\n    }\n    push(type, tag, nesting) {\n      const token = new Token(type, tag, nesting);\n      token.block = true;\n      if (nesting < 0) this.level--;\n      token.level = this.level;\n      if (nesting > 0) this.level++;\n      this.tokens.push(token);\n      return token;\n    }\n    isEmpty(line) {\n      return this.bMarks[line] + this.tShift[line] >= this.eMarks[line];\n    }\n    skipEmptyLines(from) {\n      for (let max = this.lineMax; from < max; from++) if (this.bMarks[from] + this.tShift[from] < this.eMarks[from]) break;\n      return from;\n    }\n    skipSpaces(pos) {\n      for (let max = this.src.length; pos < max; pos++) if (!isSpace(this.src.charCodeAt(pos))) break;\n      return pos;\n    }\n    skipSpacesBack(pos, min) {\n      if (pos <= min) return pos;\n      while (pos > min) if (!isSpace(this.src.charCodeAt(--pos))) return pos + 1;\n      return pos;\n    }\n    skipChars(pos, code2) {\n      for (let max = this.src.length; pos < max; pos++) if (this.src.charCodeAt(pos) !== code2) break;\n      return pos;\n    }\n    skipCharsBack(pos, code2, min) {\n      if (pos <= min) return pos;\n      while (pos > min) if (code2 !== this.src.charCodeAt(--pos)) return pos + 1;\n      return pos;\n    }\n    getLines(begin, end, indent, keepLastLF) {\n      if (begin >= end) return "";\n      const queue = new Array(end - begin);\n      for (let i = 0, line = begin; line < end; line++, i++) {\n        let lineIndent = 0;\n        const lineStart = this.bMarks[line];\n        let first = lineStart;\n        let last;\n        if (line + 1 < end || keepLastLF) last = this.eMarks[line] + 1;\n        else last = this.eMarks[line];\n        while (first < last && lineIndent < indent) {\n          const ch = this.src.charCodeAt(first);\n          if (isSpace(ch)) {\n            if (ch === 9) lineIndent += 4 - (lineIndent + this.bsCount[line]) % 4;\n            else lineIndent++;\n          } else if (first - lineStart < this.tShift[line]) lineIndent++;\n          else break;\n          first++;\n        }\n        if (lineIndent > indent) queue[i] = new Array(lineIndent - indent + 1).join(" ") + this.src.slice(first, last);\n        else queue[i] = this.src.slice(first, last);\n      }\n      return queue.join("");\n    }\n  };\n  var MAX_AUTOCOMPLETED_CELLS = 65536;\n  function getLine(state, line) {\n    const pos = state.bMarks[line] + state.tShift[line];\n    const max = state.eMarks[line];\n    return state.src.slice(pos, max);\n  }\n  function escapedSplit(str) {\n    const result = [];\n    const max = str.length;\n    let pos = 0;\n    let ch = str.charCodeAt(pos);\n    let isEscaped = false;\n    let lastPos = 0;\n    let current = "";\n    while (pos < max) {\n      if (ch === 124) {\n        if (!isEscaped) {\n          result.push(current + str.substring(lastPos, pos));\n          current = "";\n          lastPos = pos + 1;\n        } else {\n          current += str.substring(lastPos, pos - 1);\n          lastPos = pos;\n        }\n      }\n      isEscaped = ch === 92;\n      pos++;\n      ch = str.charCodeAt(pos);\n    }\n    result.push(current + str.substring(lastPos));\n    return result;\n  }\n  function table(state, startLine, endLine, silent) {\n    if (startLine + 2 > endLine) return false;\n    let nextLine = startLine + 1;\n    if (state.sCount[nextLine] < state.blkIndent) return false;\n    if (state.sCount[nextLine] - state.blkIndent >= 4) return false;\n    let pos = state.bMarks[nextLine] + state.tShift[nextLine];\n    if (pos >= state.eMarks[nextLine]) return false;\n    const firstCh = state.src.charCodeAt(pos++);\n    if (firstCh !== 124 && firstCh !== 45 && firstCh !== 58) return false;\n    if (pos >= state.eMarks[nextLine]) return false;\n    const secondCh = state.src.charCodeAt(pos++);\n    if (secondCh !== 124 && secondCh !== 45 && secondCh !== 58 && !isSpace(secondCh)) return false;\n    if (firstCh === 45 && isSpace(secondCh)) return false;\n    while (pos < state.eMarks[nextLine]) {\n      const ch = state.src.charCodeAt(pos);\n      if (ch !== 124 && ch !== 45 && ch !== 58 && !isSpace(ch)) return false;\n      pos++;\n    }\n    let lineText = getLine(state, startLine + 1);\n    let columns = lineText.split("|");\n    const aligns = [];\n    for (let i = 0; i < columns.length; i++) {\n      const t = columns[i].trim();\n      if (!t) {\n        if (i === 0 || i === columns.length - 1) continue;\n        else return false;\n      }\n      if (!/^:?-+:?$/.test(t)) return false;\n      if (t.charCodeAt(t.length - 1) === 58) aligns.push(t.charCodeAt(0) === 58 ? "center" : "right");\n      else if (t.charCodeAt(0) === 58) aligns.push("left");\n      else aligns.push("");\n    }\n    lineText = getLine(state, startLine).trim();\n    if (lineText.indexOf("|") === -1) return false;\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    columns = escapedSplit(lineText);\n    if (columns.length && columns[0] === "") columns.shift();\n    if (columns.length && columns[columns.length - 1] === "") columns.pop();\n    const columnCount = columns.length;\n    if (columnCount === 0 || columnCount !== aligns.length) return false;\n    if (silent) return true;\n    const oldParentType = state.parentType;\n    state.parentType = "table";\n    const terminatorRules = state.md.block.ruler.getRules("blockquote");\n    const token_to = state.push("table_open", "table", 1);\n    const tableLines = [startLine, 0];\n    token_to.map = tableLines;\n    const token_tho = state.push("thead_open", "thead", 1);\n    token_tho.map = [startLine, startLine + 1];\n    const token_htro = state.push("tr_open", "tr", 1);\n    token_htro.map = [startLine, startLine + 1];\n    for (let i = 0; i < columns.length; i++) {\n      const token_ho = state.push("th_open", "th", 1);\n      if (aligns[i]) token_ho.attrs = [["style", `text-align:${aligns[i]}`]];\n      const token_il = state.push("inline", "", 0);\n      token_il.content = columns[i].trim();\n      token_il.children = [];\n      state.push("th_close", "th", -1);\n    }\n    state.push("tr_close", "tr", -1);\n    state.push("thead_close", "thead", -1);\n    let tbodyLines;\n    let autocompletedCells = 0;\n    for (nextLine = startLine + 2; nextLine < endLine; nextLine++) {\n      if (state.sCount[nextLine] < state.blkIndent) break;\n      let terminate = false;\n      for (let i = 0, l = terminatorRules.length; i < l; i++) if (terminatorRules[i](state, nextLine, endLine, true)) {\n        terminate = true;\n        break;\n      }\n      if (terminate) break;\n      lineText = getLine(state, nextLine).trim();\n      if (!lineText) break;\n      if (state.sCount[nextLine] - state.blkIndent >= 4) break;\n      columns = escapedSplit(lineText);\n      if (columns.length && columns[0] === "") columns.shift();\n      if (columns.length && columns[columns.length - 1] === "") columns.pop();\n      autocompletedCells += columnCount - columns.length;\n      if (autocompletedCells > MAX_AUTOCOMPLETED_CELLS) break;\n      if (nextLine === startLine + 2) {\n        const token_tbo = state.push("tbody_open", "tbody", 1);\n        token_tbo.map = tbodyLines = [startLine + 2, 0];\n      }\n      const token_tro = state.push("tr_open", "tr", 1);\n      token_tro.map = [nextLine, nextLine + 1];\n      for (let i = 0; i < columnCount; i++) {\n        const token_tdo = state.push("td_open", "td", 1);\n        if (aligns[i]) token_tdo.attrs = [["style", `text-align:${aligns[i]}`]];\n        const token_il = state.push("inline", "", 0);\n        token_il.content = columns[i] ? columns[i].trim() : "";\n        token_il.children = [];\n        state.push("td_close", "td", -1);\n      }\n      state.push("tr_close", "tr", -1);\n    }\n    if (tbodyLines) {\n      state.push("tbody_close", "tbody", -1);\n      tbodyLines[1] = nextLine;\n    }\n    state.push("table_close", "table", -1);\n    tableLines[1] = nextLine;\n    state.parentType = oldParentType;\n    state.line = nextLine;\n    return true;\n  }\n  function code(state, startLine, endLine) {\n    if (state.sCount[startLine] - state.blkIndent < 4) return false;\n    let nextLine = startLine + 1;\n    let last = nextLine;\n    while (nextLine < endLine) {\n      if (state.isEmpty(nextLine)) {\n        nextLine++;\n        continue;\n      }\n      if (state.sCount[nextLine] - state.blkIndent >= 4) {\n        nextLine++;\n        last = nextLine;\n        continue;\n      }\n      break;\n    }\n    state.line = last;\n    const token = state.push("code_block", "code", 0);\n    token.content = state.getLines(startLine, last, 4 + state.blkIndent, false) + "\\n";\n    token.map = [startLine, state.line];\n    return true;\n  }\n  function fence(state, startLine, endLine, silent) {\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    let max = state.eMarks[startLine];\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    if (pos + 3 > max) return false;\n    const marker = state.src.charCodeAt(pos);\n    if (marker !== 126 && marker !== 96) return false;\n    let mem = pos;\n    pos = state.skipChars(pos, marker);\n    let len = pos - mem;\n    if (len < 3) return false;\n    const markup = state.src.slice(mem, pos);\n    const params = state.src.slice(pos, max);\n    if (marker === 96) {\n      if (params.indexOf(String.fromCharCode(marker)) >= 0) return false;\n    }\n    if (silent) return true;\n    let nextLine = startLine;\n    let haveEndMarker = false;\n    for (; ; ) {\n      nextLine++;\n      if (nextLine >= endLine) break;\n      pos = mem = state.bMarks[nextLine] + state.tShift[nextLine];\n      max = state.eMarks[nextLine];\n      if (pos < max && state.sCount[nextLine] < state.blkIndent) break;\n      if (state.src.charCodeAt(pos) !== marker) continue;\n      if (state.sCount[nextLine] - state.blkIndent >= 4) continue;\n      pos = state.skipChars(pos, marker);\n      if (pos - mem < len) continue;\n      pos = state.skipSpaces(pos);\n      if (pos < max) continue;\n      haveEndMarker = true;\n      break;\n    }\n    len = state.sCount[startLine];\n    state.line = nextLine + (haveEndMarker ? 1 : 0);\n    const token = state.push("fence", "code", 0);\n    token.info = params;\n    token.content = state.getLines(startLine + 1, nextLine, len, true);\n    token.markup = markup;\n    token.map = [startLine, state.line];\n    return true;\n  }\n  function blockquote(state, startLine, endLine, silent) {\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    let max = state.eMarks[startLine];\n    const oldLineMax = state.lineMax;\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    if (state.src.charCodeAt(pos) !== 62) return false;\n    if (silent) return true;\n    const oldBMarks = [];\n    const oldBSCount = [];\n    const oldSCount = [];\n    const oldTShift = [];\n    const terminatorRules = state.md.block.ruler.getRules("blockquote");\n    const oldParentType = state.parentType;\n    state.parentType = "blockquote";\n    let lastLineEmpty = false;\n    let nextLine;\n    for (nextLine = startLine; nextLine < endLine; nextLine++) {\n      const isOutdented = state.sCount[nextLine] < state.blkIndent;\n      pos = state.bMarks[nextLine] + state.tShift[nextLine];\n      max = state.eMarks[nextLine];\n      if (pos >= max) break;\n      if (state.src.charCodeAt(pos++) === 62 && !isOutdented) {\n        let initial = state.sCount[nextLine] + 1;\n        let spaceAfterMarker;\n        let adjustTab;\n        if (state.src.charCodeAt(pos) === 32) {\n          pos++;\n          initial++;\n          adjustTab = false;\n          spaceAfterMarker = true;\n        } else if (state.src.charCodeAt(pos) === 9) {\n          spaceAfterMarker = true;\n          if ((state.bsCount[nextLine] + initial) % 4 === 3) {\n            pos++;\n            initial++;\n            adjustTab = false;\n          } else adjustTab = true;\n        } else spaceAfterMarker = false;\n        let offset = initial;\n        oldBMarks.push(state.bMarks[nextLine]);\n        state.bMarks[nextLine] = pos;\n        while (pos < max) {\n          const ch = state.src.charCodeAt(pos);\n          if (isSpace(ch)) {\n            if (ch === 9) offset += 4 - (offset + state.bsCount[nextLine] + (adjustTab ? 1 : 0)) % 4;\n            else offset++;\n          } else break;\n          pos++;\n        }\n        lastLineEmpty = pos >= max;\n        oldBSCount.push(state.bsCount[nextLine]);\n        state.bsCount[nextLine] = state.sCount[nextLine] + 1 + (spaceAfterMarker ? 1 : 0);\n        oldSCount.push(state.sCount[nextLine]);\n        state.sCount[nextLine] = offset - initial;\n        oldTShift.push(state.tShift[nextLine]);\n        state.tShift[nextLine] = pos - state.bMarks[nextLine];\n        continue;\n      }\n      if (lastLineEmpty) break;\n      let terminate = false;\n      for (let i = 0, l = terminatorRules.length; i < l; i++) if (terminatorRules[i](state, nextLine, endLine, true)) {\n        terminate = true;\n        break;\n      }\n      if (terminate) {\n        state.lineMax = nextLine;\n        if (state.blkIndent !== 0) {\n          oldBMarks.push(state.bMarks[nextLine]);\n          oldBSCount.push(state.bsCount[nextLine]);\n          oldTShift.push(state.tShift[nextLine]);\n          oldSCount.push(state.sCount[nextLine]);\n          state.sCount[nextLine] -= state.blkIndent;\n        }\n        break;\n      }\n      oldBMarks.push(state.bMarks[nextLine]);\n      oldBSCount.push(state.bsCount[nextLine]);\n      oldTShift.push(state.tShift[nextLine]);\n      oldSCount.push(state.sCount[nextLine]);\n      state.sCount[nextLine] = -1;\n    }\n    const oldIndent = state.blkIndent;\n    state.blkIndent = 0;\n    const token_o = state.push("blockquote_open", "blockquote", 1);\n    token_o.markup = ">";\n    const lines = [startLine, 0];\n    token_o.map = lines;\n    state.md.block.tokenize(state, startLine, nextLine);\n    const token_c = state.push("blockquote_close", "blockquote", -1);\n    token_c.markup = ">";\n    state.lineMax = oldLineMax;\n    state.parentType = oldParentType;\n    lines[1] = state.line;\n    for (let i = 0; i < oldTShift.length; i++) {\n      state.bMarks[i + startLine] = oldBMarks[i];\n      state.tShift[i + startLine] = oldTShift[i];\n      state.sCount[i + startLine] = oldSCount[i];\n      state.bsCount[i + startLine] = oldBSCount[i];\n    }\n    state.blkIndent = oldIndent;\n    return true;\n  }\n  function hr(state, startLine, endLine, silent) {\n    const max = state.eMarks[startLine];\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    const marker = state.src.charCodeAt(pos++);\n    if (marker !== 42 && marker !== 45 && marker !== 95) return false;\n    let cnt = 1;\n    while (pos < max) {\n      const ch = state.src.charCodeAt(pos++);\n      if (ch !== marker && !isSpace(ch)) return false;\n      if (ch === marker) cnt++;\n    }\n    if (cnt < 3) return false;\n    if (silent) return true;\n    state.line = startLine + 1;\n    const token = state.push("hr", "hr", 0);\n    token.map = [startLine, state.line];\n    token.markup = Array(cnt + 1).join(String.fromCharCode(marker));\n    return true;\n  }\n  function skipBulletListMarker(state, startLine) {\n    const max = state.eMarks[startLine];\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    const marker = state.src.charCodeAt(pos++);\n    if (marker !== 42 && marker !== 45 && marker !== 43) return -1;\n    if (pos < max) {\n      if (!isSpace(state.src.charCodeAt(pos))) return -1;\n    }\n    return pos;\n  }\n  function skipOrderedListMarker(state, startLine) {\n    const start = state.bMarks[startLine] + state.tShift[startLine];\n    const max = state.eMarks[startLine];\n    let pos = start;\n    if (pos + 1 >= max) return -1;\n    let ch = state.src.charCodeAt(pos++);\n    if (ch < 48 || ch > 57) return -1;\n    for (; ; ) {\n      if (pos >= max) return -1;\n      ch = state.src.charCodeAt(pos++);\n      if (ch >= 48 && ch <= 57) {\n        if (pos - start >= 10) return -1;\n        continue;\n      }\n      if (ch === 41 || ch === 46) break;\n      return -1;\n    }\n    if (pos < max) {\n      ch = state.src.charCodeAt(pos);\n      if (!isSpace(ch)) return -1;\n    }\n    return pos;\n  }\n  function markTightParagraphs(state, idx) {\n    const level = state.level + 2;\n    for (let i = idx + 2, l = state.tokens.length - 2; i < l; i++) if (state.tokens[i].level === level && state.tokens[i].type === "paragraph_open") {\n      state.tokens[i + 2].hidden = true;\n      state.tokens[i].hidden = true;\n      i += 2;\n    }\n  }\n  function list(state, startLine, endLine, silent) {\n    let max, pos, start, token;\n    let nextLine = startLine;\n    let tight = true;\n    if (state.sCount[nextLine] - state.blkIndent >= 4) return false;\n    if (state.listIndent >= 0 && state.sCount[nextLine] - state.listIndent >= 4 && state.sCount[nextLine] < state.blkIndent) return false;\n    let isTerminatingParagraph = false;\n    if (silent && state.parentType === "paragraph") {\n      if (state.sCount[nextLine] >= state.blkIndent) isTerminatingParagraph = true;\n    }\n    let isOrdered;\n    let markerValue;\n    let posAfterMarker;\n    if ((posAfterMarker = skipOrderedListMarker(state, nextLine)) >= 0) {\n      isOrdered = true;\n      start = state.bMarks[nextLine] + state.tShift[nextLine];\n      markerValue = Number(state.src.slice(start, posAfterMarker - 1));\n      if (isTerminatingParagraph && markerValue !== 1) return false;\n    } else if ((posAfterMarker = skipBulletListMarker(state, nextLine)) >= 0) isOrdered = false;\n    else return false;\n    if (isTerminatingParagraph) {\n      if (state.skipSpaces(posAfterMarker) >= state.eMarks[nextLine]) return false;\n    }\n    if (silent) return true;\n    const markerCharCode = state.src.charCodeAt(posAfterMarker - 1);\n    const listTokIdx = state.tokens.length;\n    if (isOrdered) {\n      token = state.push("ordered_list_open", "ol", 1);\n      if (markerValue !== 1) token.attrs = [["start", markerValue]];\n    } else token = state.push("bullet_list_open", "ul", 1);\n    const listLines = [nextLine, 0];\n    token.map = listLines;\n    token.markup = String.fromCharCode(markerCharCode);\n    let prevEmptyEnd = false;\n    const terminatorRules = state.md.block.ruler.getRules("list");\n    const oldParentType = state.parentType;\n    state.parentType = "list";\n    while (nextLine < endLine) {\n      pos = posAfterMarker;\n      max = state.eMarks[nextLine];\n      const initial = state.sCount[nextLine] + posAfterMarker - (state.bMarks[nextLine] + state.tShift[nextLine]);\n      let offset = initial;\n      while (pos < max) {\n        const ch = state.src.charCodeAt(pos);\n        if (ch === 9) offset += 4 - (offset + state.bsCount[nextLine]) % 4;\n        else if (ch === 32) offset++;\n        else break;\n        pos++;\n      }\n      const contentStart = pos;\n      let indentAfterMarker;\n      if (contentStart >= max) indentAfterMarker = 1;\n      else indentAfterMarker = offset - initial;\n      if (indentAfterMarker > 4) indentAfterMarker = 1;\n      const indent = initial + indentAfterMarker;\n      token = state.push("list_item_open", "li", 1);\n      token.markup = String.fromCharCode(markerCharCode);\n      const itemLines = [nextLine, 0];\n      token.map = itemLines;\n      if (isOrdered) token.info = state.src.slice(start, posAfterMarker - 1);\n      const oldTight = state.tight;\n      const oldTShift = state.tShift[nextLine];\n      const oldSCount = state.sCount[nextLine];\n      const oldListIndent = state.listIndent;\n      state.listIndent = state.blkIndent;\n      state.blkIndent = indent;\n      state.tight = true;\n      state.tShift[nextLine] = contentStart - state.bMarks[nextLine];\n      state.sCount[nextLine] = offset;\n      if (contentStart >= max && state.isEmpty(nextLine + 1)) state.line = Math.min(state.line + 2, endLine);\n      else state.md.block.tokenize(state, nextLine, endLine);\n      if (!state.tight || prevEmptyEnd) tight = false;\n      prevEmptyEnd = state.line - nextLine > 1 && state.isEmpty(state.line - 1);\n      state.blkIndent = state.listIndent;\n      state.listIndent = oldListIndent;\n      state.tShift[nextLine] = oldTShift;\n      state.sCount[nextLine] = oldSCount;\n      state.tight = oldTight;\n      token = state.push("list_item_close", "li", -1);\n      token.markup = String.fromCharCode(markerCharCode);\n      nextLine = state.line;\n      itemLines[1] = nextLine;\n      if (nextLine >= endLine) break;\n      if (state.sCount[nextLine] < state.blkIndent) break;\n      if (state.sCount[nextLine] - state.blkIndent >= 4) break;\n      let terminate = false;\n      for (let i = 0, l = terminatorRules.length; i < l; i++) if (terminatorRules[i](state, nextLine, endLine, true)) {\n        terminate = true;\n        break;\n      }\n      if (terminate) break;\n      if (isOrdered) {\n        posAfterMarker = skipOrderedListMarker(state, nextLine);\n        if (posAfterMarker < 0) break;\n        start = state.bMarks[nextLine] + state.tShift[nextLine];\n      } else {\n        posAfterMarker = skipBulletListMarker(state, nextLine);\n        if (posAfterMarker < 0) break;\n      }\n      if (markerCharCode !== state.src.charCodeAt(posAfterMarker - 1)) break;\n    }\n    if (isOrdered) token = state.push("ordered_list_close", "ol", -1);\n    else token = state.push("bullet_list_close", "ul", -1);\n    token.markup = String.fromCharCode(markerCharCode);\n    listLines[1] = nextLine;\n    state.line = nextLine;\n    state.parentType = oldParentType;\n    if (tight) markTightParagraphs(state, listTokIdx);\n    return true;\n  }\n  var MAX_LABEL_LENGTH = 999;\n  function countCodePoints(str) {\n    let length = str.length;\n    for (let i = 0; i < str.length - 1; i++) {\n      const high = str.charCodeAt(i);\n      if (high < 55296 || high > 56319) continue;\n      const low = str.charCodeAt(i + 1);\n      if (low >= 56320 && low <= 57343) {\n        length--;\n        i++;\n      }\n    }\n    return length;\n  }\n  function lineEnd(state, line) {\n    return Math.min(state.eMarks[line] + 1, state.src.length);\n  }\n  function getNextLinePos(state, nextLine) {\n    const endLine = state.lineMax;\n    if (nextLine >= endLine || state.isEmpty(nextLine)) return -1;\n    let isContinuation = false;\n    if (state.sCount[nextLine] - state.blkIndent > 3) isContinuation = true;\n    if (state.sCount[nextLine] < 0) isContinuation = true;\n    if (!isContinuation) {\n      const terminatorRules = state.md.block.ruler.getRules("reference");\n      const oldParentType = state.parentType;\n      state.parentType = "reference";\n      let terminate = false;\n      for (let i = 0, l = terminatorRules.length; i < l; i++) if (terminatorRules[i](state, nextLine, endLine, true)) {\n        terminate = true;\n        break;\n      }\n      state.parentType = oldParentType;\n      if (terminate) return -1;\n    }\n    return state.bMarks[nextLine] + state.tShift[nextLine];\n  }\n  function reference(state, startLine, _endLine, silent) {\n    const src = state.src;\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    let nextLine = startLine + 1;\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    if (src.charCodeAt(pos) !== 91) return false;\n    let max = lineEnd(state, startLine);\n    let rawLabel = "";\n    let labelEnd = -1;\n    let segmentStart = ++pos;\n    while (pos < max) {\n      if (rawLabel.length + pos - segmentStart > MAX_LABEL_LENGTH * 2) return false;\n      let ch = src.charCodeAt(pos);\n      if (ch === 91) return false;\n      if (ch === 93) {\n        labelEnd = pos;\n        break;\n      }\n      if (ch === 92) ch = src.charCodeAt(++pos);\n      if (ch === 10 && pos < max) {\n        const nextPos = getNextLinePos(state, nextLine);\n        if (nextPos < 0) return false;\n        rawLabel += src.slice(segmentStart, max);\n        pos = segmentStart = nextPos;\n        max = lineEnd(state, nextLine++);\n        continue;\n      }\n      pos++;\n    }\n    if (labelEnd < 0 || src.charCodeAt(labelEnd + 1) !== 58) return false;\n    rawLabel += src.slice(segmentStart, labelEnd);\n    if (rawLabel.length > MAX_LABEL_LENGTH && countCodePoints(rawLabel) > MAX_LABEL_LENGTH) return false;\n    pos = labelEnd + 2;\n    while (pos < max) {\n      const ch = src.charCodeAt(pos);\n      if (ch === 10) {\n        const nextPos = getNextLinePos(state, nextLine);\n        if (nextPos < 0) break;\n        pos = nextPos;\n        max = lineEnd(state, nextLine++);\n      } else if (isSpace(ch)) pos++;\n      else break;\n    }\n    const destRes = state.md.helpers.parseLinkDestination(src, pos, max);\n    if (!destRes.ok) return false;\n    const href = state.md.normalizeLink(destRes.str);\n    if (!state.md.validateLink(href)) return false;\n    pos = destRes.pos;\n    const destEndPos = pos;\n    const destEndMax = max;\n    const destEndLineNo = nextLine;\n    while (pos < max) {\n      const ch = src.charCodeAt(pos);\n      if (ch === 10) {\n        const nextPos = getNextLinePos(state, nextLine);\n        if (nextPos < 0) break;\n        pos = nextPos;\n        max = lineEnd(state, nextLine++);\n      } else if (isSpace(ch)) pos++;\n      else break;\n    }\n    const titleStart = pos;\n    let titleRes = state.md.helpers.parseLinkTitle(src, pos, max);\n    while (titleRes.can_continue) {\n      const nextPos = getNextLinePos(state, nextLine);\n      if (nextPos < 0) break;\n      pos = nextPos;\n      max = lineEnd(state, nextLine++);\n      titleRes = state.md.helpers.parseLinkTitle(src, pos, max, titleRes);\n    }\n    let title;\n    if (titleStart !== destEndPos && titleRes.ok) {\n      title = titleRes.str;\n      pos = titleRes.pos;\n    } else {\n      title = "";\n      pos = destEndPos;\n      max = destEndMax;\n      nextLine = destEndLineNo;\n    }\n    while (pos < max) {\n      if (!isSpace(src.charCodeAt(pos))) break;\n      pos++;\n    }\n    if (pos < max && src.charCodeAt(pos) !== 10) {\n      if (title) {\n        title = "";\n        pos = destEndPos;\n        max = destEndMax;\n        nextLine = destEndLineNo;\n        while (pos < max) {\n          if (!isSpace(src.charCodeAt(pos))) break;\n          pos++;\n        }\n      }\n    }\n    if (pos < max && src.charCodeAt(pos) !== 10) return false;\n    const label = normalizeReference(rawLabel);\n    if (!label) return false;\n    if (silent) return true;\n    if (typeof state.env.references === "undefined") state.env.references = {};\n    if (typeof state.env.references[label] === "undefined") state.env.references[label] = {\n      title,\n      href\n    };\n    const token = state.push("reference_definition", "", 0);\n    token.map = [startLine, nextLine];\n    token.hidden = true;\n    const meta = /* @__PURE__ */ Object.create(null);\n    meta.label = label;\n    token.meta = meta;\n    state.line = nextLine;\n    return true;\n  }\n  var html_blocks_default = [\n    "address",\n    "article",\n    "aside",\n    "base",\n    "basefont",\n    "blockquote",\n    "body",\n    "caption",\n    "center",\n    "col",\n    "colgroup",\n    "dd",\n    "details",\n    "dialog",\n    "dir",\n    "div",\n    "dl",\n    "dt",\n    "fieldset",\n    "figcaption",\n    "figure",\n    "footer",\n    "form",\n    "frame",\n    "frameset",\n    "h1",\n    "h2",\n    "h3",\n    "h4",\n    "h5",\n    "h6",\n    "head",\n    "header",\n    "hr",\n    "html",\n    "iframe",\n    "legend",\n    "li",\n    "link",\n    "main",\n    "menu",\n    "menuitem",\n    "nav",\n    "noframes",\n    "ol",\n    "optgroup",\n    "option",\n    "p",\n    "param",\n    "search",\n    "section",\n    "summary",\n    "table",\n    "tbody",\n    "td",\n    "tfoot",\n    "th",\n    "thead",\n    "title",\n    "tr",\n    "track",\n    "ul"\n  ];\n  var open_tag = `<[A-Za-z][A-Za-z0-9\\\\-]*(?:\\\\s+[a-zA-Z_:][a-zA-Z0-9:._-]*(?:\\\\s*=\\\\s*(?:[^"\'=<>\\`\\\\x00-\\\\x20]+|\'[^\']*\'|"[^"]*"))?)*\\\\s*\\\\/?>`;\n  var close_tag = "<\\\\/[A-Za-z][A-Za-z0-9\\\\-]*\\\\s*>";\n  new RegExp(`^(?:${open_tag}|${close_tag}|<!---?>|<!--(?:[^-]|-[^-]|--[^>])*-->|<[?][\\\\s\\\\S]*?[?]>|<![A-Za-z][^>]*>|<!\\\\[CDATA\\\\[[\\\\s\\\\S]*?\\\\]\\\\]>)`);\n  var HTML_OPEN_CLOSE_TAG_RE = new RegExp(`^(?:${open_tag}|${close_tag})`);\n  var HTML_SEQUENCES = [\n    [\n      /^<(script|pre|style|textarea)(?=(\\s|>|$))/i,\n      /<\\/(script|pre|style|textarea)>/i,\n      true\n    ],\n    [\n      /^<!--/,\n      /-->/,\n      true\n    ],\n    [\n      /^<\\?/,\n      /\\?>/,\n      true\n    ],\n    [\n      /^<![A-Za-z]/,\n      />/,\n      true\n    ],\n    [\n      /^<!\\[CDATA\\[/,\n      /\\]\\]>/,\n      true\n    ],\n    [\n      new RegExp(`^</?(${html_blocks_default.join("|")})(?=(\\\\s|/?>|$))`, "i"),\n      /^$/,\n      true\n    ],\n    [\n      new RegExp(`${HTML_OPEN_CLOSE_TAG_RE.source}\\\\s*$`),\n      /^$/,\n      false\n    ]\n  ];\n  function html_block(state, startLine, endLine, silent) {\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    let max = state.eMarks[startLine];\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    if (!state.md.options.html) return false;\n    if (state.src.charCodeAt(pos) !== 60) return false;\n    let lineText = state.src.slice(pos, max);\n    let i = 0;\n    for (; i < HTML_SEQUENCES.length; i++) if (HTML_SEQUENCES[i][0].test(lineText)) break;\n    if (i === HTML_SEQUENCES.length) return false;\n    if (silent) return HTML_SEQUENCES[i][2];\n    let nextLine = startLine + 1;\n    const endsOnBlankLine = HTML_SEQUENCES[i][1].test("");\n    if (!HTML_SEQUENCES[i][1].test(lineText)) for (; nextLine < endLine; nextLine++) {\n      if (state.sCount[nextLine] < state.blkIndent) {\n        if (endsOnBlankLine || !state.isEmpty(nextLine)) break;\n      }\n      pos = state.bMarks[nextLine] + state.tShift[nextLine];\n      max = state.eMarks[nextLine];\n      lineText = state.src.slice(pos, max);\n      if (HTML_SEQUENCES[i][1].test(lineText)) {\n        if (lineText.length !== 0) nextLine++;\n        break;\n      }\n    }\n    state.line = nextLine;\n    const token = state.push("html_block", "", 0);\n    token.map = [startLine, nextLine];\n    token.content = state.getLines(startLine, nextLine, state.blkIndent, true);\n    return true;\n  }\n  function heading(state, startLine, endLine, silent) {\n    let pos = state.bMarks[startLine] + state.tShift[startLine];\n    let max = state.eMarks[startLine];\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    let ch = state.src.charCodeAt(pos);\n    if (ch !== 35 || pos >= max) return false;\n    let level = 1;\n    ch = state.src.charCodeAt(++pos);\n    while (ch === 35 && pos < max && level <= 6) {\n      level++;\n      ch = state.src.charCodeAt(++pos);\n    }\n    if (level > 6 || pos < max && !isSpace(ch)) return false;\n    if (silent) return true;\n    max = state.skipSpacesBack(max, pos);\n    const tmp = state.skipCharsBack(max, 35, pos);\n    if (tmp > pos && isSpace(state.src.charCodeAt(tmp - 1))) max = tmp;\n    state.line = startLine + 1;\n    const token_o = state.push("heading_open", `h${level}`, 1);\n    token_o.markup = "########".slice(0, level);\n    token_o.map = [startLine, state.line];\n    const token_i = state.push("inline", "", 0);\n    token_i.content = asciiTrim(state.src.slice(pos, max));\n    token_i.map = [startLine, state.line];\n    token_i.children = [];\n    const token_c = state.push("heading_close", `h${level}`, -1);\n    token_c.markup = "########".slice(0, level);\n    return true;\n  }\n  function lheading(state, startLine, endLine) {\n    const terminatorRules = state.md.block.ruler.getRules("paragraph");\n    if (state.sCount[startLine] - state.blkIndent >= 4) return false;\n    const oldParentType = state.parentType;\n    state.parentType = "paragraph";\n    let level = 0;\n    let marker;\n    let nextLine = startLine + 1;\n    for (; nextLine < endLine && !state.isEmpty(nextLine); nextLine++) {\n      if (state.sCount[nextLine] - state.blkIndent > 3) continue;\n      if (state.sCount[nextLine] >= state.blkIndent) {\n        let pos = state.bMarks[nextLine] + state.tShift[nextLine];\n        const max = state.eMarks[nextLine];\n        if (pos < max) {\n          marker = state.src.charCodeAt(pos);\n          if (marker === 45 || marker === 61) {\n            pos = state.skipChars(pos, marker);\n            pos = state.skipSpaces(pos);\n            if (pos >= max) {\n              level = marker === 61 ? 1 : 2;\n              break;\n            }\n          }\n        }\n      }\n      if (state.sCount[nextLine] < 0) continue;\n      let terminate = false;\n      for (let i = 0, l = terminatorRules.length; i < l; i++) if (terminatorRules[i](state, nextLine, endLine, true)) {\n        terminate = true;\n        break;\n      }\n      if (terminate) break;\n    }\n    if (!level) {\n      state.parentType = oldParentType;\n      return false;\n    }\n    const content = asciiTrim(state.getLines(startLine, nextLine, state.blkIndent, false));\n    state.line = nextLine + 1;\n    const token_o = state.push("heading_open", `h${level}`, 1);\n    token_o.markup = String.fromCharCode(marker);\n    token_o.map = [startLine, state.line];\n    const token_i = state.push("inline", "", 0);\n    token_i.content = content;\n    token_i.map = [startLine, state.line - 1];\n    token_i.children = [];\n    const token_c = state.push("heading_close", `h${level}`, -1);\n    token_c.markup = String.fromCharCode(marker);\n    state.parentType = oldParentType;\n    return true;\n  }\n  function paragraph(state, startLine, endLine) {\n    const terminatorRules = state.md.block.ruler.getRules("paragraph");\n    const oldParentType = state.parentType;\n    let nextLine = startLine + 1;\n    state.parentType = "paragraph";\n    for (; nextLine < endLine && !state.isEmpty(nextLine); nextLine++) {\n      if (state.sCount[nextLine] - state.blkIndent > 3) continue;\n      if (state.sCount[nextLine] < 0) continue;\n      let terminate = false;\n      for (let i = 0, l = terminatorRules.length; i < l; i++) if (terminatorRules[i](state, nextLine, endLine, true)) {\n        terminate = true;\n        break;\n      }\n      if (terminate) break;\n    }\n    const content = asciiTrim(state.getLines(startLine, nextLine, state.blkIndent, false));\n    state.line = nextLine;\n    const token_o = state.push("paragraph_open", "p", 1);\n    token_o.map = [startLine, state.line];\n    const token_i = state.push("inline", "", 0);\n    token_i.content = content;\n    token_i.map = [startLine, state.line];\n    token_i.children = [];\n    state.push("paragraph_close", "p", -1);\n    state.parentType = oldParentType;\n    return true;\n  }\n  var _rules$1 = [\n    [\n      "table",\n      table,\n      ["paragraph", "reference"]\n    ],\n    ["code", code],\n    [\n      "fence",\n      fence,\n      [\n        "paragraph",\n        "reference",\n        "blockquote",\n        "list"\n      ]\n    ],\n    [\n      "blockquote",\n      blockquote,\n      [\n        "paragraph",\n        "reference",\n        "blockquote",\n        "list"\n      ]\n    ],\n    [\n      "hr",\n      hr,\n      [\n        "paragraph",\n        "reference",\n        "blockquote",\n        "list"\n      ]\n    ],\n    [\n      "list",\n      list,\n      [\n        "paragraph",\n        "reference",\n        "blockquote"\n      ]\n    ],\n    ["reference", reference],\n    [\n      "html_block",\n      html_block,\n      [\n        "paragraph",\n        "reference",\n        "blockquote"\n      ]\n    ],\n    [\n      "heading",\n      heading,\n      [\n        "paragraph",\n        "reference",\n        "blockquote"\n      ]\n    ],\n    ["lheading", lheading],\n    ["paragraph", paragraph]\n  ];\n  var ParserBlock = class {\n    constructor() {\n      _defineProperty(\n        this,\n        /**\n        * {@link Ruler} instance. Keep configuration of block rules.\n        */\n        "ruler",\n        new Ruler()\n      );\n      _defineProperty(this, "State", StateBlock);\n      for (let i = 0; i < _rules$1.length; i++) this.ruler.push(_rules$1[i][0], _rules$1[i][1], { alt: (_rules$1[i][2] || []).slice() });\n    }\n    tokenize(state, startLine, endLine) {\n      const rules = this.ruler.getRules("");\n      const len = rules.length;\n      const maxNesting = state.md.options.maxNesting;\n      let line = startLine;\n      let hasEmptyLines = false;\n      while (line < endLine) {\n        state.line = line = state.skipEmptyLines(line);\n        if (line >= endLine) break;\n        if (state.sCount[line] < state.blkIndent) break;\n        if (state.level >= maxNesting) {\n          state.line = endLine;\n          break;\n        }\n        const prevLine = state.line;\n        let ok = false;\n        for (let i = 0; i < len; i++) {\n          ok = rules[i](state, line, endLine, false);\n          if (ok) {\n            if (prevLine >= state.line) throw new Error("block rule didn\'t increment state.line");\n            break;\n          }\n        }\n        if (!ok) throw new Error("none of the block rules matched");\n        state.tight = !hasEmptyLines;\n        if (state.isEmpty(state.line - 1)) hasEmptyLines = true;\n        line = state.line;\n        if (line < endLine && state.isEmpty(line)) {\n          hasEmptyLines = true;\n          line++;\n          state.line = line;\n        }\n      }\n    }\n    /**\n    * Process input string and push block tokens into `outTokens`\n    */\n    parse(src, md, env, outTokens) {\n      if (!src) return;\n      const state = new this.State(src, md, env, outTokens);\n      this.tokenize(state, state.line, state.lineMax);\n    }\n  };\n  var StateInline = class {\n    constructor(src, md, env, outTokens) {\n      _defineProperty(this, "pos", 0);\n      _defineProperty(this, "level", 0);\n      _defineProperty(this, "pending", "");\n      _defineProperty(this, "pendingLevel", 0);\n      _defineProperty(this, "cache", {});\n      _defineProperty(this, "backticks", {});\n      _defineProperty(this, "backticksScanned", false);\n      _defineProperty(this, "skipHtmlSpecial", false);\n      _defineProperty(this, "linkLevel", 0);\n      _defineProperty(this, "delimiters", []);\n      _defineProperty(this, "_prev_delimiters", []);\n      _defineProperty(this, "Token", Token);\n      this.src = src;\n      this.env = env;\n      this.md = md;\n      this.tokens = outTokens;\n      this.tokens_meta = Array(outTokens.length);\n      this.posMax = this.src.length;\n    }\n    pushPending() {\n      const token = new Token("text", "", 0);\n      token.content = this.pending;\n      token.level = this.pendingLevel;\n      this.tokens.push(token);\n      this.pending = "";\n      return token;\n    }\n    push(type, tag, nesting) {\n      if (this.pending) this.pushPending();\n      const token = new Token(type, tag, nesting);\n      let token_meta = void 0;\n      if (nesting < 0) {\n        this.level--;\n        this.delimiters = this._prev_delimiters.pop();\n      }\n      token.level = this.level;\n      if (nesting > 0) {\n        this.level++;\n        this._prev_delimiters.push(this.delimiters);\n        this.delimiters = [];\n        token_meta = { delimiters: this.delimiters };\n      }\n      this.pendingLevel = this.level;\n      this.tokens.push(token);\n      this.tokens_meta.push(token_meta);\n      return token;\n    }\n    scanDelims(start, canSplitWord) {\n      const max = this.posMax;\n      const marker = this.src.charCodeAt(start);\n      let lastChar;\n      if (start === 0) lastChar = 32;\n      else if (start === 1) {\n        lastChar = this.src.charCodeAt(0);\n        if ((lastChar & 63488) === 55296) lastChar = 65533;\n      } else {\n        lastChar = this.src.charCodeAt(start - 1);\n        if ((lastChar & 64512) === 56320) {\n          const highSurr = this.src.charCodeAt(start - 2);\n          lastChar = (highSurr & 64512) === 55296 ? 65536 + (highSurr - 55296 << 10) + (lastChar - 56320) : 65533;\n        } else if ((lastChar & 64512) === 55296) lastChar = 65533;\n      }\n      let pos = start;\n      while (pos < max && this.src.charCodeAt(pos) === marker) pos++;\n      const count = pos - start;\n      let nextChar = pos < max ? this.src.charCodeAt(pos) : 32;\n      if ((nextChar & 64512) === 55296) {\n        const lowSurr = this.src.charCodeAt(pos + 1);\n        nextChar = (lowSurr & 64512) === 56320 ? 65536 + (nextChar - 55296 << 10) + (lowSurr - 56320) : 65533;\n      } else if ((nextChar & 64512) === 56320) nextChar = 65533;\n      const isLastPunctChar = isMdAsciiPunct(lastChar) || isPunctCharCode(lastChar);\n      const isNextPunctChar = isMdAsciiPunct(nextChar) || isPunctCharCode(nextChar);\n      const isLastWhiteSpace = isWhiteSpace(lastChar);\n      const isNextWhiteSpace = isWhiteSpace(nextChar);\n      const left_flanking = !isNextWhiteSpace && (!isNextPunctChar || isLastWhiteSpace || isLastPunctChar);\n      const right_flanking = !isLastWhiteSpace && (!isLastPunctChar || isNextWhiteSpace || isNextPunctChar);\n      return {\n        can_open: left_flanking && (canSplitWord || !right_flanking || isLastPunctChar),\n        can_close: right_flanking && (canSplitWord || !left_flanking || isNextPunctChar),\n        length: count\n      };\n    }\n  };\n  function isTerminatorChar(ch) {\n    switch (ch) {\n      case 10:\n      case 33:\n      case 35:\n      case 36:\n      case 37:\n      case 38:\n      case 42:\n      case 43:\n      case 45:\n      case 58:\n      case 60:\n      case 61:\n      case 62:\n      case 64:\n      case 91:\n      case 92:\n      case 93:\n      case 94:\n      case 95:\n      case 96:\n      case 123:\n      case 125:\n      case 126:\n        return true;\n      default:\n        return false;\n    }\n  }\n  function text(state, silent) {\n    let pos = state.pos;\n    while (pos < state.posMax && !isTerminatorChar(state.src.charCodeAt(pos))) pos++;\n    if (pos === state.pos) return false;\n    if (!silent) state.pending += state.src.slice(state.pos, pos);\n    state.pos = pos;\n    return true;\n  }\n  function isAsciiAlpha(code2) {\n    return code2 >= 65 && code2 <= 90 || code2 >= 97 && code2 <= 122;\n  }\n  function isSchemeChar(code2) {\n    return code2 >= 65 && code2 <= 90 || code2 >= 97 && code2 <= 122 || code2 >= 48 && code2 <= 57 || code2 === 43 || code2 === 45 || code2 === 46;\n  }\n  function linkify(state, silent) {\n    if (!state.md.options.linkify) return false;\n    if (state.linkLevel > 0) return false;\n    const pos = state.pos;\n    const max = state.posMax;\n    if (pos + 3 > max) return false;\n    if (state.src.charCodeAt(pos) !== 58) return false;\n    if (state.src.charCodeAt(pos + 1) !== 47) return false;\n    if (state.src.charCodeAt(pos + 2) !== 47) return false;\n    const protoMin = pos - Math.min(10, state.pending.length, pos);\n    let protoStart = pos;\n    while (protoStart > protoMin && isSchemeChar(state.src.charCodeAt(protoStart - 1))) protoStart--;\n    if (protoStart === pos || !isAsciiAlpha(state.src.charCodeAt(protoStart))) return false;\n    const protoLength = pos - protoStart;\n    const link2 = state.md.linkify.matchAtStart(state.src.slice(protoStart));\n    if (!link2) return false;\n    let url = link2.url;\n    if (url.length <= protoLength) return false;\n    let urlEnd = url.length;\n    while (urlEnd > 0 && url.charCodeAt(urlEnd - 1) === 42) urlEnd--;\n    if (urlEnd !== url.length) url = url.slice(0, urlEnd);\n    const fullUrl = state.md.normalizeLink(url);\n    if (!state.md.validateLink(fullUrl)) return false;\n    if (!silent) {\n      state.pending = state.pending.slice(0, -protoLength);\n      const token_o = state.push("link_open", "a", 1);\n      token_o.attrs = [["href", fullUrl]];\n      token_o.markup = "linkify";\n      token_o.info = "auto";\n      const token_t = state.push("text", "", 0);\n      token_t.content = state.md.normalizeLinkText(url);\n      const token_c = state.push("link_close", "a", -1);\n      token_c.markup = "linkify";\n      token_c.info = "auto";\n    }\n    state.pos += url.length - protoLength;\n    return true;\n  }\n  function newline(state, silent) {\n    let pos = state.pos;\n    if (state.src.charCodeAt(pos) !== 10) return false;\n    const pmax = state.pending.length - 1;\n    const max = state.posMax;\n    if (!silent) {\n      if (pmax >= 0 && state.pending.charCodeAt(pmax) === 32) {\n        if (pmax >= 1 && state.pending.charCodeAt(pmax - 1) === 32) {\n          let ws = pmax - 1;\n          while (ws >= 1 && state.pending.charCodeAt(ws - 1) === 32) ws--;\n          state.pending = state.pending.slice(0, ws);\n          state.push("hardbreak", "br", 0);\n        } else {\n          state.pending = state.pending.slice(0, -1);\n          state.push("softbreak", "br", 0);\n        }\n      } else state.push("softbreak", "br", 0);\n    }\n    pos++;\n    while (pos < max && isSpace(state.src.charCodeAt(pos))) pos++;\n    state.pos = pos;\n    return true;\n  }\n  var ESCAPED = [];\n  for (let i = 0; i < 256; i++) ESCAPED.push(0);\n  "\\\\!\\"#$%&\'()*+,./:;<=>?@[]^_`{|}~-".split("").forEach(function(ch) {\n    ESCAPED[ch.charCodeAt(0)] = 1;\n  });\n  function escape(state, silent) {\n    let pos = state.pos;\n    const max = state.posMax;\n    if (state.src.charCodeAt(pos) !== 92) return false;\n    pos++;\n    if (pos >= max) return false;\n    let ch1 = state.src.charCodeAt(pos);\n    if (ch1 === 10) {\n      if (!silent) state.push("hardbreak", "br", 0);\n      pos++;\n      while (pos < max) {\n        ch1 = state.src.charCodeAt(pos);\n        if (!isSpace(ch1)) break;\n        pos++;\n      }\n      state.pos = pos;\n      return true;\n    }\n    if (ch1 === 32) {\n      if (!silent) {\n        const token = state.push("text_special", "", 0);\n        token.content = "\\\\";\n        token.markup = "\\\\";\n        token.info = "escape";\n      }\n      state.pos = pos;\n      return true;\n    }\n    let escapedStr = state.src[pos];\n    if (ch1 >= 55296 && ch1 <= 56319 && pos + 1 < max) {\n      const ch2 = state.src.charCodeAt(pos + 1);\n      if (ch2 >= 56320 && ch2 <= 57343) {\n        escapedStr += state.src[pos + 1];\n        pos++;\n      }\n    }\n    const origStr = "\\\\" + escapedStr;\n    if (!silent) {\n      const token = state.push("text_special", "", 0);\n      if (ch1 < 256 && ESCAPED[ch1] !== 0) token.content = escapedStr;\n      else token.content = origStr;\n      token.markup = origStr;\n      token.info = "escape";\n    }\n    state.pos = pos + 1;\n    return true;\n  }\n  function buildLastRuns(src) {\n    const lastRuns = {};\n    let pos = 0;\n    while ((pos = src.indexOf("`", pos)) !== -1) {\n      const start = pos;\n      while (src.charCodeAt(++pos) === 96) ;\n      lastRuns[pos - start] = start;\n    }\n    return lastRuns;\n  }\n  function backtick(state, silent) {\n    var _state$backticks$open;\n    const start = state.pos;\n    if (state.src.charCodeAt(start) !== 96) return false;\n    const max = state.posMax;\n    let pos = start + 1;\n    while (pos < max && state.src.charCodeAt(pos) === 96) pos++;\n    const marker = state.src.slice(start, pos);\n    const openerLength = marker.length;\n    if (!state.backticksScanned) {\n      state.backticks = buildLastRuns(state.src);\n      state.backticksScanned = true;\n    }\n    if (((_state$backticks$open = state.backticks[openerLength]) !== null && _state$backticks$open !== void 0 ? _state$backticks$open : -1) >= pos) {\n      let matchEnd = pos;\n      let matchStart;\n      while ((matchStart = state.src.indexOf("`", matchEnd)) !== -1 && matchStart < max) {\n        matchEnd = matchStart + 1;\n        while (state.src.charCodeAt(matchEnd) === 96) matchEnd++;\n        if (matchEnd > max) break;\n        if (matchEnd - matchStart === openerLength) {\n          if (!silent) {\n            const token = state.push("code_inline", "code", 0);\n            token.markup = marker;\n            let content = state.src.slice(pos, matchStart).replace(/\\n/g, " ");\n            if (content.startsWith(" ") && content.endsWith(" ") && /[^ ]/.test(content)) content = content.slice(1, -1);\n            token.content = content;\n          }\n          state.pos = matchEnd;\n          return true;\n        }\n      }\n    }\n    if (!silent) state.pending += marker;\n    state.pos = pos;\n    return true;\n  }\n  function strikethrough_tokenize(state, silent) {\n    const start = state.pos;\n    const marker = state.src.charCodeAt(start);\n    if (silent) return false;\n    if (marker !== 126) return false;\n    const scanned = state.scanDelims(state.pos, true);\n    let len = scanned.length;\n    const ch = String.fromCharCode(marker);\n    if (len < 2) return false;\n    let token;\n    if (len % 2) {\n      token = state.push("text", "", 0);\n      token.content = ch;\n      len--;\n    }\n    for (let i = 0; i < len; i += 2) {\n      token = state.push("text", "", 0);\n      token.content = ch + ch;\n      state.delimiters.push({\n        marker,\n        length: 0,\n        token: state.tokens.length - 1,\n        end: -1,\n        open: scanned.can_open,\n        close: scanned.can_close\n      });\n    }\n    state.pos += scanned.length;\n    return true;\n  }\n  function postProcess$1(state, delimiters) {\n    let token;\n    const loneMarkers = [];\n    const max = delimiters.length;\n    for (let i = 0; i < max; i++) {\n      const startDelim = delimiters[i];\n      if (startDelim.marker !== 126) continue;\n      if (startDelim.end === -1) continue;\n      const endDelim = delimiters[startDelim.end];\n      token = state.tokens[startDelim.token];\n      token.type = "s_open";\n      token.tag = "s";\n      token.nesting = 1;\n      token.markup = "~~";\n      token.content = "";\n      token = state.tokens[endDelim.token];\n      token.type = "s_close";\n      token.tag = "s";\n      token.nesting = -1;\n      token.markup = "~~";\n      token.content = "";\n      if (state.tokens[endDelim.token - 1].type === "text" && state.tokens[endDelim.token - 1].content === "~") loneMarkers.push(endDelim.token - 1);\n    }\n    while (loneMarkers.length) {\n      const i = loneMarkers.pop();\n      let j = i + 1;\n      while (j < state.tokens.length && state.tokens[j].type === "s_close") j++;\n      j--;\n      if (i !== j) {\n        token = state.tokens[j];\n        state.tokens[j] = state.tokens[i];\n        state.tokens[i] = token;\n      }\n    }\n  }\n  function strikethrough_postProcess(state) {\n    const tokens_meta = state.tokens_meta;\n    const max = state.tokens_meta.length;\n    postProcess$1(state, state.delimiters);\n    for (let curr = 0; curr < max; curr++) {\n      var _tokens_meta$curr;\n      const delimiters = (_tokens_meta$curr = tokens_meta[curr]) === null || _tokens_meta$curr === void 0 ? void 0 : _tokens_meta$curr.delimiters;\n      if (delimiters) postProcess$1(state, delimiters);\n    }\n  }\n  var strikethrough_default = {\n    tokenize: strikethrough_tokenize,\n    postProcess: strikethrough_postProcess\n  };\n  function emphasis_tokenize(state, silent) {\n    const start = state.pos;\n    const marker = state.src.charCodeAt(start);\n    if (silent) return false;\n    if (marker !== 95 && marker !== 42) return false;\n    const scanned = state.scanDelims(state.pos, marker === 42);\n    for (let i = 0; i < scanned.length; i++) {\n      const token = state.push("text", "", 0);\n      token.content = String.fromCharCode(marker);\n      state.delimiters.push({\n        marker,\n        length: scanned.length,\n        token: state.tokens.length - 1,\n        end: -1,\n        open: scanned.can_open,\n        close: scanned.can_close\n      });\n    }\n    state.pos += scanned.length;\n    return true;\n  }\n  function postProcess(state, delimiters) {\n    const max = delimiters.length;\n    for (let i = max - 1; i >= 0; i--) {\n      const startDelim = delimiters[i];\n      if (startDelim.marker !== 95 && startDelim.marker !== 42) continue;\n      if (startDelim.end === -1) continue;\n      const endDelim = delimiters[startDelim.end];\n      const isStrong = i > 0 && delimiters[i - 1].end === startDelim.end + 1 && delimiters[i - 1].marker === startDelim.marker && delimiters[i - 1].token === startDelim.token - 1 && delimiters[startDelim.end + 1].token === endDelim.token + 1;\n      const ch = String.fromCharCode(startDelim.marker);\n      const token_o = state.tokens[startDelim.token];\n      token_o.type = isStrong ? "strong_open" : "em_open";\n      token_o.tag = isStrong ? "strong" : "em";\n      token_o.nesting = 1;\n      token_o.markup = isStrong ? ch + ch : ch;\n      token_o.content = "";\n      const token_c = state.tokens[endDelim.token];\n      token_c.type = isStrong ? "strong_close" : "em_close";\n      token_c.tag = isStrong ? "strong" : "em";\n      token_c.nesting = -1;\n      token_c.markup = isStrong ? ch + ch : ch;\n      token_c.content = "";\n      if (isStrong) {\n        state.tokens[delimiters[i - 1].token].content = "";\n        state.tokens[delimiters[startDelim.end + 1].token].content = "";\n        i--;\n      }\n    }\n  }\n  function emphasis_post_process(state) {\n    const tokens_meta = state.tokens_meta;\n    const max = state.tokens_meta.length;\n    postProcess(state, state.delimiters);\n    for (let curr = 0; curr < max; curr++) {\n      var _tokens_meta$curr;\n      const delimiters = (_tokens_meta$curr = tokens_meta[curr]) === null || _tokens_meta$curr === void 0 ? void 0 : _tokens_meta$curr.delimiters;\n      if (delimiters) postProcess(state, delimiters);\n    }\n  }\n  var emphasis_default = {\n    tokenize: emphasis_tokenize,\n    postProcess: emphasis_post_process\n  };\n  function link(state, silent) {\n    let code2, label, res, ref;\n    let href = "";\n    let title = "";\n    let start = state.pos;\n    let parseReference = true;\n    if (state.src.charCodeAt(state.pos) !== 91) return false;\n    const oldPos = state.pos;\n    const max = state.posMax;\n    const labelStart = state.pos + 1;\n    const labelEnd = state.md.helpers.parseLinkLabel(state, state.pos, true);\n    if (labelEnd < 0) return false;\n    let pos = labelEnd + 1;\n    if (pos < max && state.src.charCodeAt(pos) === 40) {\n      parseReference = false;\n      pos++;\n      for (; pos < max; pos++) {\n        code2 = state.src.charCodeAt(pos);\n        if (!isSpace(code2) && code2 !== 10) break;\n      }\n      if (pos >= max) return false;\n      start = pos;\n      res = state.md.helpers.parseLinkDestination(state.src, pos, state.posMax);\n      if (res.ok) {\n        href = state.md.normalizeLink(res.str);\n        if (state.md.validateLink(href)) pos = res.pos;\n        else href = "";\n        start = pos;\n        for (; pos < max; pos++) {\n          code2 = state.src.charCodeAt(pos);\n          if (!isSpace(code2) && code2 !== 10) break;\n        }\n        res = state.md.helpers.parseLinkTitle(state.src, pos, state.posMax);\n        if (pos < max && start !== pos && res.ok) {\n          title = res.str;\n          pos = res.pos;\n          for (; pos < max; pos++) {\n            code2 = state.src.charCodeAt(pos);\n            if (!isSpace(code2) && code2 !== 10) break;\n          }\n        }\n      }\n      if (pos >= max || state.src.charCodeAt(pos) !== 41) parseReference = true;\n      pos++;\n    }\n    if (parseReference) {\n      if (typeof state.env.references === "undefined") return false;\n      if (pos < max && state.src.charCodeAt(pos) === 91) {\n        start = pos + 1;\n        pos = state.md.helpers.parseLinkLabel(state, pos);\n        if (pos >= 0) label = state.src.slice(start, pos++);\n        else pos = labelEnd + 1;\n      } else pos = labelEnd + 1;\n      if (!label) label = state.src.slice(labelStart, labelEnd);\n      label = normalizeReference(label);\n      ref = state.env.references[label];\n      if (!ref) {\n        state.pos = oldPos;\n        return false;\n      }\n      href = ref.href;\n      title = ref.title;\n    }\n    if (!silent) {\n      state.pos = labelStart;\n      state.posMax = labelEnd;\n      const token_o = state.push("link_open", "a", 1);\n      const attrs = [["href", href]];\n      token_o.attrs = attrs;\n      if (title) attrs.push(["title", title]);\n      if (label) {\n        const meta = /* @__PURE__ */ Object.create(null);\n        meta.label = label;\n        token_o.meta = meta;\n      }\n      state.linkLevel++;\n      state.md.inline.tokenize(state);\n      state.linkLevel--;\n      state.push("link_close", "a", -1);\n    }\n    state.pos = pos;\n    state.posMax = max;\n    return true;\n  }\n  function image(state, silent) {\n    let code2, content, label, pos, ref, res, title, start;\n    let href = "";\n    const oldPos = state.pos;\n    const max = state.posMax;\n    if (state.src.charCodeAt(state.pos) !== 33) return false;\n    if (state.src.charCodeAt(state.pos + 1) !== 91) return false;\n    const labelStart = state.pos + 2;\n    const labelEnd = state.md.helpers.parseLinkLabel(state, state.pos + 1, false);\n    if (labelEnd < 0) return false;\n    pos = labelEnd + 1;\n    if (pos < max && state.src.charCodeAt(pos) === 40) {\n      pos++;\n      for (; pos < max; pos++) {\n        code2 = state.src.charCodeAt(pos);\n        if (!isSpace(code2) && code2 !== 10) break;\n      }\n      if (pos >= max) return false;\n      start = pos;\n      res = state.md.helpers.parseLinkDestination(state.src, pos, state.posMax);\n      if (res.ok) {\n        href = state.md.normalizeLink(res.str);\n        if (state.md.validateLink(href)) pos = res.pos;\n        else href = "";\n      }\n      start = pos;\n      for (; pos < max; pos++) {\n        code2 = state.src.charCodeAt(pos);\n        if (!isSpace(code2) && code2 !== 10) break;\n      }\n      res = state.md.helpers.parseLinkTitle(state.src, pos, state.posMax);\n      if (pos < max && start !== pos && res.ok) {\n        title = res.str;\n        pos = res.pos;\n        for (; pos < max; pos++) {\n          code2 = state.src.charCodeAt(pos);\n          if (!isSpace(code2) && code2 !== 10) break;\n        }\n      } else title = "";\n      if (pos >= max || state.src.charCodeAt(pos) !== 41) {\n        state.pos = oldPos;\n        return false;\n      }\n      pos++;\n    } else {\n      if (typeof state.env.references === "undefined") return false;\n      if (pos < max && state.src.charCodeAt(pos) === 91) {\n        start = pos + 1;\n        pos = state.md.helpers.parseLinkLabel(state, pos);\n        if (pos >= 0) label = state.src.slice(start, pos++);\n        else pos = labelEnd + 1;\n      } else pos = labelEnd + 1;\n      if (!label) label = state.src.slice(labelStart, labelEnd);\n      label = normalizeReference(label);\n      ref = state.env.references[label];\n      if (!ref) {\n        state.pos = oldPos;\n        return false;\n      }\n      href = ref.href;\n      title = ref.title;\n    }\n    if (!silent) {\n      content = state.src.slice(labelStart, labelEnd);\n      const tokens = [];\n      state.md.inline.parse(content, state.md, state.env, tokens);\n      const token = state.push("image", "img", 0);\n      const attrs = [["src", href], ["alt", ""]];\n      token.attrs = attrs;\n      token.children = tokens;\n      token.content = content;\n      if (title) attrs.push(["title", title]);\n      if (label) {\n        const meta = /* @__PURE__ */ Object.create(null);\n        meta.label = label;\n        token.meta = meta;\n      }\n    }\n    state.pos = pos;\n    state.posMax = max;\n    return true;\n  }\n  var EMAIL_RE = /^([a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)$/;\n  var AUTOLINK_RE = /^([a-zA-Z][a-zA-Z0-9+.-]{1,31}):([^<>\\x00-\\x20]*)$/;\n  function autolink(state, silent) {\n    let pos = state.pos;\n    if (state.src.charCodeAt(pos) !== 60) return false;\n    const start = state.pos;\n    const max = state.posMax;\n    for (; ; ) {\n      if (++pos >= max) return false;\n      const ch = state.src.charCodeAt(pos);\n      if (ch === 60) return false;\n      if (ch === 62) break;\n    }\n    const url = state.src.slice(start + 1, pos);\n    if (AUTOLINK_RE.test(url)) {\n      const fullUrl = state.md.normalizeLink(url);\n      if (!state.md.validateLink(fullUrl)) return false;\n      if (!silent) {\n        const token_o = state.push("link_open", "a", 1);\n        token_o.attrs = [["href", fullUrl]];\n        token_o.markup = "autolink";\n        token_o.info = "auto";\n        const token_t = state.push("text", "", 0);\n        token_t.content = state.md.normalizeLinkText(url);\n        const token_c = state.push("link_close", "a", -1);\n        token_c.markup = "autolink";\n        token_c.info = "auto";\n      }\n      state.pos += url.length + 2;\n      return true;\n    }\n    if (EMAIL_RE.test(url)) {\n      const fullUrl = state.md.normalizeLink(`mailto:${url}`);\n      if (!state.md.validateLink(fullUrl)) return false;\n      if (!silent) {\n        const token_o = state.push("link_open", "a", 1);\n        token_o.attrs = [["href", fullUrl]];\n        token_o.markup = "autolink";\n        token_o.info = "auto";\n        const token_t = state.push("text", "", 0);\n        token_t.content = state.md.normalizeLinkText(url);\n        const token_c = state.push("link_close", "a", -1);\n        token_c.markup = "autolink";\n        token_c.info = "auto";\n      }\n      state.pos += url.length + 2;\n      return true;\n    }\n    return false;\n  }\n  function isLinkOpen(str) {\n    return /^<a[>\\s]/i.test(str);\n  }\n  function isLinkClose(str) {\n    return /^<\\/a\\s*>/i.test(str);\n  }\n  function isLetter(ch) {\n    const lc = ch | 32;\n    return lc >= 97 && lc <= 122;\n  }\n  function scanSpecial(state, pos) {\n    const src = state.src;\n    let start;\n    let terminator;\n    if (src.startsWith("<!--", pos)) {\n      if (src.startsWith(">", pos + 4)) return pos + 5;\n      if (src.startsWith("->", pos + 4)) return pos + 6;\n      start = pos + 4;\n      terminator = "-->";\n    } else if (src.startsWith("<![CDATA[", pos)) {\n      start = pos + 9;\n      terminator = "]]>";\n    } else if (src.charCodeAt(pos + 1) === 63) {\n      start = pos + 2;\n      terminator = "?>";\n    } else if (isLetter(src.charCodeAt(pos + 2))) {\n      start = pos + 3;\n      terminator = ">";\n    } else return -1;\n    if (state.skipHtmlSpecial) return -1;\n    const end = src.indexOf(terminator, start);\n    if (end < 0) {\n      state.skipHtmlSpecial = true;\n      return -1;\n    }\n    return end + terminator.length;\n  }\n  function html_inline(state, silent) {\n    if (!state.md.options.html) return false;\n    const max = state.posMax;\n    const pos = state.pos;\n    if (state.src.charCodeAt(pos) !== 60 || pos + 2 >= max) return false;\n    let end;\n    const ch = state.src.charCodeAt(pos + 1);\n    if (ch === 33 || ch === 63) end = scanSpecial(state, pos);\n    else if (ch === 47 || isLetter(ch)) {\n      const match = state.src.slice(pos).match(HTML_OPEN_CLOSE_TAG_RE);\n      end = match ? pos + match[0].length : -1;\n    } else return false;\n    if (end < 0) return false;\n    if (!silent) {\n      const token = state.push("html_inline", "", 0);\n      token.content = state.src.slice(pos, end);\n      if (isLinkOpen(token.content)) state.linkLevel++;\n      if (isLinkClose(token.content)) state.linkLevel--;\n    }\n    state.pos = end;\n    return true;\n  }\n  var DIGITAL_RE = /^&#((?:x[a-f0-9]{1,6}|[0-9]{1,7}));/i;\n  var NAMED_RE = /^&([a-z][a-z0-9]{1,31});/i;\n  function entity(state, silent) {\n    const pos = state.pos;\n    const max = state.posMax;\n    if (state.src.charCodeAt(pos) !== 38) return false;\n    if (pos + 1 >= max) return false;\n    if (state.src.charCodeAt(pos + 1) === 35) {\n      const match = state.src.slice(pos).match(DIGITAL_RE);\n      if (match) {\n        if (!silent) {\n          const code2 = match[1][0].toLowerCase() === "x" ? parseInt(match[1].slice(1), 16) : parseInt(match[1], 10);\n          const token = state.push("text_special", "", 0);\n          token.content = isValidEntityCode(code2) ? fromCodePoint(code2) : fromCodePoint(65533);\n          token.markup = match[0];\n          token.info = "entity";\n        }\n        state.pos += match[0].length;\n        return true;\n      }\n    } else {\n      const match = state.src.slice(pos).match(NAMED_RE);\n      if (match) {\n        const decoded = decodeHTMLStrict(match[0]);\n        if (decoded !== match[0]) {\n          if (!silent) {\n            const token = state.push("text_special", "", 0);\n            token.content = decoded;\n            token.markup = match[0];\n            token.info = "entity";\n          }\n          state.pos += match[0].length;\n          return true;\n        }\n      }\n    }\n    return false;\n  }\n  function processDelimiters(delimiters) {\n    const openersBottom = {};\n    const max = delimiters.length;\n    if (!max) return;\n    let headerIdx = 0;\n    let lastTokenIdx = -2;\n    const jumps = [];\n    for (let closerIdx = 0; closerIdx < max; closerIdx++) {\n      const closer = delimiters[closerIdx];\n      jumps.push(0);\n      if (delimiters[headerIdx].marker !== closer.marker || lastTokenIdx !== closer.token - 1) headerIdx = closerIdx;\n      lastTokenIdx = closer.token;\n      closer.length = closer.length || 0;\n      if (!closer.close) continue;\n      if (!openersBottom.hasOwnProperty(closer.marker)) openersBottom[closer.marker] = [\n        -1,\n        -1,\n        -1,\n        -1,\n        -1,\n        -1\n      ];\n      const minOpenerIdx = openersBottom[closer.marker][(closer.open ? 3 : 0) + closer.length % 3];\n      let openerIdx = headerIdx - jumps[headerIdx] - 1;\n      let newMinOpenerIdx = openerIdx;\n      for (; openerIdx > minOpenerIdx; openerIdx -= jumps[openerIdx] + 1) {\n        const opener = delimiters[openerIdx];\n        if (opener.marker !== closer.marker) continue;\n        if (opener.open && opener.end < 0) {\n          let isOddMatch = false;\n          if (opener.close || closer.open) {\n            if ((opener.length + closer.length) % 3 === 0) {\n              if (opener.length % 3 !== 0 || closer.length % 3 !== 0) isOddMatch = true;\n            }\n          }\n          if (!isOddMatch) {\n            const lastJump = openerIdx > 0 && !delimiters[openerIdx - 1].open ? jumps[openerIdx - 1] + 1 : 0;\n            jumps[closerIdx] = closerIdx - openerIdx + lastJump;\n            jumps[openerIdx] = lastJump;\n            closer.open = false;\n            opener.end = closerIdx;\n            opener.close = false;\n            newMinOpenerIdx = -1;\n            lastTokenIdx = -2;\n            break;\n          }\n        }\n      }\n      if (newMinOpenerIdx !== -1) openersBottom[closer.marker][(closer.open ? 3 : 0) + (closer.length || 0) % 3] = newMinOpenerIdx;\n    }\n  }\n  function link_pairs(state) {\n    const tokens_meta = state.tokens_meta;\n    const max = state.tokens_meta.length;\n    processDelimiters(state.delimiters);\n    for (let curr = 0; curr < max; curr++) {\n      var _tokens_meta$curr;\n      const delimiters = (_tokens_meta$curr = tokens_meta[curr]) === null || _tokens_meta$curr === void 0 ? void 0 : _tokens_meta$curr.delimiters;\n      if (delimiters) processDelimiters(delimiters);\n    }\n  }\n  function fragments_join(state) {\n    let curr, last;\n    let level = 0;\n    const tokens = state.tokens;\n    const max = state.tokens.length;\n    for (curr = last = 0; curr < max; curr++) {\n      if (tokens[curr].nesting < 0) level--;\n      tokens[curr].level = level;\n      if (tokens[curr].nesting > 0) level++;\n      if (tokens[curr].type === "text" && curr + 1 < max && tokens[curr + 1].type === "text") tokens[curr + 1].content = tokens[curr].content + tokens[curr + 1].content;\n      else {\n        if (curr !== last) tokens[last] = tokens[curr];\n        last++;\n      }\n    }\n    if (curr !== last) tokens.length = last;\n  }\n  var _rules = [\n    ["text", text],\n    ["linkify", linkify],\n    ["newline", newline],\n    ["escape", escape],\n    ["backticks", backtick],\n    ["strikethrough", strikethrough_default.tokenize],\n    ["emphasis", emphasis_default.tokenize],\n    ["link", link],\n    ["image", image],\n    ["autolink", autolink],\n    ["html_inline", html_inline],\n    ["entity", entity]\n  ];\n  var _rules2 = [\n    ["balance_pairs", link_pairs],\n    ["strikethrough", strikethrough_default.postProcess],\n    ["emphasis", emphasis_default.postProcess],\n    ["fragments_join", fragments_join]\n  ];\n  var ParserInline = class {\n    constructor() {\n      _defineProperty(\n        this,\n        /**\n        * {@link Ruler} instance. Keep configuration of inline rules.\n        */\n        "ruler",\n        new Ruler()\n      );\n      _defineProperty(\n        this,\n        /**\n        * {@link Ruler} instance. Second ruler used for post-processing\n        * (e.g. in emphasis-like rules).\n        */\n        "ruler2",\n        new Ruler()\n      );\n      _defineProperty(this, "State", StateInline);\n      for (let i = 0; i < _rules.length; i++) this.ruler.push(_rules[i][0], _rules[i][1]);\n      for (let i = 0; i < _rules2.length; i++) this.ruler2.push(_rules2[i][0], _rules2[i][1]);\n    }\n    skipToken(state) {\n      const pos = state.pos;\n      const rules = this.ruler.getRules("");\n      const len = rules.length;\n      const maxNesting = state.md.options.maxNesting;\n      const cache = state.cache;\n      if (typeof cache[pos] !== "undefined") {\n        state.pos = cache[pos];\n        return;\n      }\n      let ok = false;\n      if (state.level < maxNesting) for (let i = 0; i < len; i++) {\n        state.level++;\n        ok = rules[i](state, true);\n        state.level--;\n        if (ok) {\n          if (pos >= state.pos) throw new Error("inline rule didn\'t increment state.pos");\n          break;\n        }\n      }\n      else state.pos = state.posMax;\n      if (!ok) state.pos++;\n      cache[pos] = state.pos;\n    }\n    tokenize(state) {\n      const rules = this.ruler.getRules("");\n      const len = rules.length;\n      const end = state.posMax;\n      const maxNesting = state.md.options.maxNesting;\n      while (state.pos < end) {\n        const prevPos = state.pos;\n        let ok = false;\n        if (state.level < maxNesting) for (let i = 0; i < len; i++) {\n          ok = rules[i](state, false);\n          if (ok) {\n            if (prevPos >= state.pos) throw new Error("inline rule didn\'t increment state.pos");\n            break;\n          }\n        }\n        if (ok) {\n          if (state.pos >= end) break;\n          continue;\n        }\n        state.pending += state.src[state.pos++];\n      }\n      if (state.pending) state.pushPending();\n    }\n    /**\n    * Process input string and push inline tokens into `outTokens`\n    */\n    parse(str, md, env, outTokens) {\n      const state = new this.State(str, md, env, outTokens);\n      this.tokenize(state);\n      const rules = this.ruler2.getRules("");\n      const len = rules.length;\n      for (let i = 0; i < len; i++) rules[i](state);\n    }\n  };\n  var config = {\n    default: {\n      options: {\n        html: false,\n        xhtmlOut: false,\n        breaks: false,\n        langPrefix: "language-",\n        linkify: false,\n        typographer: false,\n        quotes: "\\u201C\\u201D\\u2018\\u2019",\n        highlight: null,\n        maxNesting: 100\n      },\n      components: {\n        core: {},\n        block: {},\n        inline: {}\n      }\n    },\n    zero: {\n      options: {\n        html: false,\n        xhtmlOut: false,\n        breaks: false,\n        langPrefix: "language-",\n        linkify: false,\n        typographer: false,\n        quotes: "\\u201C\\u201D\\u2018\\u2019",\n        highlight: null,\n        maxNesting: 20\n      },\n      components: {\n        core: { rules: [\n          "normalize",\n          "block",\n          "strip_references",\n          "inline",\n          "text_join"\n        ] },\n        block: { rules: ["paragraph"] },\n        inline: {\n          rules: ["text"],\n          rules2: ["balance_pairs", "fragments_join"]\n        }\n      }\n    },\n    commonmark: {\n      options: {\n        html: true,\n        xhtmlOut: true,\n        breaks: false,\n        langPrefix: "language-",\n        linkify: false,\n        typographer: false,\n        quotes: "\\u201C\\u201D\\u2018\\u2019",\n        highlight: null,\n        maxNesting: 20\n      },\n      components: {\n        core: { rules: [\n          "normalize",\n          "block",\n          "strip_references",\n          "inline",\n          "text_join"\n        ] },\n        block: { rules: [\n          "blockquote",\n          "code",\n          "fence",\n          "heading",\n          "hr",\n          "html_block",\n          "lheading",\n          "list",\n          "reference",\n          "paragraph"\n        ] },\n        inline: {\n          rules: [\n            "autolink",\n            "backticks",\n            "emphasis",\n            "entity",\n            "escape",\n            "html_inline",\n            "image",\n            "link",\n            "newline",\n            "text"\n          ],\n          rules2: [\n            "balance_pairs",\n            "emphasis",\n            "fragments_join"\n          ]\n        }\n      }\n    }\n  };\n  var BAD_PROTO_RE = /^(vbscript|javascript|file|data):/;\n  var GOOD_DATA_RE = /^data:image\\/(gif|png|jpeg|webp);/;\n  var RECODE_HOSTNAME_FOR = [\n    "http:",\n    "https:",\n    "mailto:"\n  ];\n  var MarkdownIt = class {\n    /**\n    * Link validation function. CommonMark allows too much in links. By default\n    * we disable `javascript:`, `vbscript:`, `file:` schemas, and almost all `data:...` schemas\n    * except some embedded image types.\n    *\n    * You can change this behaviour:\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    * const md = new MarkdownIt()\n    *\n    * // enable everything\n    * md.validateLink = function () { return true; }\n    * ```\n    */\n    validateLink(url) {\n      const str = url.trim().toLowerCase();\n      return BAD_PROTO_RE.test(str) ? GOOD_DATA_RE.test(str) : true;\n    }\n    /**\n    * Function used to encode link url to a machine-readable format,\n    * which includes url-encoding, punycode, etc.\n    */\n    normalizeLink(url) {\n      const parsed = parse_default(url, true);\n      if (parsed.hostname) {\n        if (!parsed.protocol || RECODE_HOSTNAME_FOR.indexOf(parsed.protocol) >= 0) try {\n          parsed.hostname = punycode_es6_default.toASCII(parsed.hostname);\n        } catch (er) {\n        }\n      }\n      if (parsed.auth) parsed.auth = encode_default(parsed.auth);\n      if (parsed.hostname) parsed.hostname = encode_default(parsed.hostname);\n      if (parsed.pathname) parsed.pathname = encode_default(parsed.pathname);\n      if (parsed.search) parsed.search = encode_default(parsed.search);\n      if (parsed.hash) parsed.hash = encode_default(parsed.hash);\n      return format(parsed);\n    }\n    /**\n    * Function used to decode link url to a human-readable format`\n    */\n    normalizeLinkText(url) {\n      const parsed = parse_default(url, true);\n      if (parsed.hostname) {\n        if (!parsed.protocol || RECODE_HOSTNAME_FOR.indexOf(parsed.protocol) >= 0) try {\n          parsed.hostname = punycode_es6_default.toUnicode(parsed.hostname);\n        } catch (er) {\n        }\n      }\n      return decode_default(format(parsed), decode_default.defaultChars + "%");\n    }\n    constructor(...args) {\n      _defineProperty(\n        this,\n        /**\n        * Instance of {@link ParserInline}. You may need it to add new rules when\n        * writing plugins. For simple rules control use {@link MarkdownIt.disable}\n        * and {@link MarkdownIt.enable}.\n        */\n        "inline",\n        new ParserInline()\n      );\n      _defineProperty(\n        this,\n        /**\n        * Instance of {@link ParserBlock}. You may need it to add new rules when\n        * writing plugins. For simple rules control use {@link MarkdownIt.disable}\n        * and {@link MarkdownIt.enable}.\n        */\n        "block",\n        new ParserBlock()\n      );\n      _defineProperty(\n        this,\n        /**\n        * Instance of {@link ParserCore} chain executor. You may need it to add new\n        * rules when writing plugins. For simple rules control use\n        * {@link MarkdownIt.disable} and {@link MarkdownIt.enable}.\n        */\n        "core",\n        new ParserCore()\n      );\n      _defineProperty(\n        this,\n        /**\n        * Instance of {@link Renderer}. Use it to modify output look. Or to add rendering\n        * rules for new token types, generated by plugins.\n        *\n        * See {@link Renderer} docs and\n        * [source code](https://github.com/markdown-it/markdown-it/blob/master/src/renderer.ts).\n        *\n        * @example\n        * ```javascript\n        * import MarkdownIt from \'markdown-it\'\n        * const md = new MarkdownIt()\n        *\n        * function myToken(tokens, idx, options, env, self) {\n        *   //...\n        *   return result;\n        * };\n        *\n        * md.renderer.rules[\'my_token\'] = myToken\n        * ```\n        */\n        "renderer",\n        new Renderer()\n      );\n      _defineProperty(\n        this,\n        /**\n        * [linkify-it](https://github.com/markdown-it/linkify-it) instance.\n        * Used by [linkify](https://github.com/markdown-it/markdown-it/blob/master/src/rules_core/linkify.ts)\n        * rule.\n        */\n        "linkify",\n        new LinkifyIt()\n      );\n      _defineProperty(\n        this,\n        /**\n        * Assorted utility functions, useful to write plugins. See details\n        * [here](https://github.com/markdown-it/markdown-it/blob/master/src/common/utils.ts).\n        */\n        "utils",\n        utils_exports\n      );\n      _defineProperty(\n        this,\n        /**\n        * Link components parser functions, useful to write plugins. See details\n        * [here](https://github.com/markdown-it/markdown-it/blob/master/src/helpers).\n        */\n        "helpers",\n        Object.assign({}, helpers_exports)\n      );\n      const [presetNameOrOptions, options] = args;\n      if (typeof presetNameOrOptions === "string") {\n        this.configure(presetNameOrOptions);\n        if (options) this.set(options);\n      } else {\n        this.configure("default");\n        this.set(presetNameOrOptions || {});\n      }\n    }\n    /**\n    * Set parser options (in the same format as in constructor). Probably, you\n    * will never need it, but you can change options after constructor call.\n    *\n    * __Note:__ To achieve the best possible performance, don\'t modify a\n    * `markdown-it` instance options on the fly. If you need multiple configurations\n    * it\'s best to create multiple instances and initialize each with separate\n    * config.\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    *\n    * const md = new MarkdownIt()\n    *   .set({ html: true, breaks: true })\n    *   .set({ typographer: true })\n    * ```\n    */\n    set(options) {\n      Object.assign(this.options, options);\n      return this;\n    }\n    /**\n    * Batch load of all options and compenent settings. This is internal method,\n    * and you probably will not need it. But if you will - see available presets\n    * and data structure [here](https://github.com/markdown-it/markdown-it/tree/master/src/presets)\n    *\n    * We strongly recommend to use presets instead of direct config loads. That\n    * will give better compatibility with next versions.\n    */\n    configure(presets) {\n      let p;\n      if (typeof presets === "string") {\n        const presetName = presets;\n        p = config[presetName];\n        if (!p) throw new Error(`Wrong \'markdown-it\' preset "${presetName}", check name`);\n      } else p = presets;\n      if (!p) throw new Error("Wrong `markdown-it` preset, can\'t be empty");\n      if (p.options) this.options = { ...p.options };\n      const components = p.components;\n      if (components) {\n        var _components$inline;\n        [\n          "core",\n          "block",\n          "inline"\n        ].forEach((name) => {\n          var _components$name;\n          const rules = (_components$name = components[name]) === null || _components$name === void 0 ? void 0 : _components$name.rules;\n          if (rules) this[name].ruler.enableOnly(rules);\n        });\n        const rules2 = (_components$inline = components.inline) === null || _components$inline === void 0 ? void 0 : _components$inline.rules2;\n        if (rules2) this.inline.ruler2.enableOnly(rules2);\n      }\n      return this;\n    }\n    /**\n    * Enable list or rules. It will automatically find appropriate components,\n    * containing rules with given names. If rule not found, and `ignoreInvalid`\n    * not set - throws exception.\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    *\n    * const md = new MarkdownIt()\n    *   .enable([\'sub\', \'sup\'])\n    *   .disable(\'smartquotes\')\n    * ```\n    */\n    enable(list2, ignoreInvalid = false) {\n      let result = [];\n      if (!Array.isArray(list2)) list2 = [list2];\n      [\n        "core",\n        "block",\n        "inline"\n      ].forEach((chain) => {\n        result = result.concat(this[chain].ruler.enable(list2, true));\n      });\n      result = result.concat(this.inline.ruler2.enable(list2, true));\n      const missed = list2.filter((name) => result.indexOf(name) < 0);\n      if (missed.length && !ignoreInvalid) throw new Error(`MarkdownIt. Failed to enable unknown rule(s): ${missed}`);\n      return this;\n    }\n    /**\n    * The same as {@link MarkdownIt.enable}, but turn specified rules off.\n    */\n    disable(list2, ignoreInvalid = false) {\n      let result = [];\n      if (!Array.isArray(list2)) list2 = [list2];\n      [\n        "core",\n        "block",\n        "inline"\n      ].forEach((chain) => {\n        result = result.concat(this[chain].ruler.disable(list2, true));\n      });\n      result = result.concat(this.inline.ruler2.disable(list2, true));\n      const missed = list2.filter((name) => result.indexOf(name) < 0);\n      if (missed.length && !ignoreInvalid) throw new Error(`MarkdownIt. Failed to disable unknown rule(s): ${missed}`);\n      return this;\n    }\n    /**\n    * Load specified plugin with given params into current parser instance.\n    * It\'s just a sugar to call `plugin(md, params)` with curring.\n    *\n    * @example\n    * ```javascript\n    * import MarkdownIt from \'markdown-it\'\n    * import iterator from \'markdown-it-for-inline\'\n    *\n    * const md = new MarkdownIt()\n    *   .use(iterator, \'foo_replace\', \'text\', function (tokens, idx) {\n    *     tokens[idx].content = tokens[idx].content.replace(/foo/g, \'bar\')\n    *   })\n    * ```\n    */\n    use(plugin, ...params) {\n      plugin.apply(plugin, [this, ...params]);\n      return this;\n    }\n    /**\n    * Parse input string and return list of block tokens (special token type\n    * "inline" will contain list of inline tokens). You should not call this\n    * method directly, until you write custom renderer (for example, to produce\n    * AST).\n    *\n    * `env` is used to pass data between "distributed" rules and return additional\n    * metadata like reference info, needed for the renderer. It also can be used to\n    * inject data in specific cases. Usually, you will be ok to pass `{}`,\n    * and then pass updated object to renderer.\n    */\n    parse(src, env) {\n      if (typeof src !== "string") throw new Error("Input data should be a String");\n      const state = new this.core.State(src, this, env);\n      this.core.process(state);\n      return state.tokens;\n    }\n    /**\n    * Render markdown string into html. It does all magic for you :).\n    *\n    * `env` can be used to inject additional metadata (`{}` by default).\n    * But you will not need it with high probability. See also comment\n    * in {@link MarkdownIt.parse}.\n    */\n    render(src, env = {}) {\n      return this.renderer.render(this.parse(src, env), this.options, env);\n    }\n    /**\n    * The same as {@link MarkdownIt.parse} but skip all block rules. It returns\n    * the block tokens list with the single `inline` element, containing parsed\n    * inline tokens in `children` property. Also updates `env` object.\n    */\n    parseInline(src, env) {\n      const state = new this.core.State(src, this, env);\n      state.inlineMode = true;\n      this.core.process(state);\n      return state.tokens;\n    }\n    /**\n    * Similar to {@link MarkdownIt.render} but for single paragraph content.\n    * Result will NOT be wrapped into `<p>` tags.\n    */\n    renderInline(src, env = {}) {\n      return this.renderer.render(this.parseInline(src, env), this.options, env);\n    }\n  };\n  _defineProperty(MarkdownIt, "Token", Token);\n  _defineProperty(MarkdownIt, "Ruler", Ruler);\n  _defineProperty(MarkdownIt, "Renderer", Renderer);\n  _defineProperty(MarkdownIt, "ParserCore", ParserCore);\n  _defineProperty(MarkdownIt, "StateCore", StateCore);\n  _defineProperty(MarkdownIt, "ParserBlock", ParserBlock);\n  _defineProperty(MarkdownIt, "StateBlock", StateBlock);\n  _defineProperty(MarkdownIt, "ParserInline", ParserInline);\n  _defineProperty(MarkdownIt, "StateInline", StateInline);\n  var MarkdownItCallable = callable(MarkdownIt);\n\n  // ../../plugin-src/node_modules/diff/libesm/diff/base.js\n  var Diff = class {\n    diff(oldStr, newStr, options = {}) {\n      let callback;\n      if (typeof options === "function") {\n        callback = options;\n        options = {};\n      } else if ("callback" in options) {\n        callback = options.callback;\n      }\n      const oldString = this.castInput(oldStr, options);\n      const newString = this.castInput(newStr, options);\n      const oldTokens = this.removeEmpty(this.tokenize(oldString, options));\n      const newTokens = this.removeEmpty(this.tokenize(newString, options));\n      return this.diffWithOptionsObj(oldTokens, newTokens, options, callback);\n    }\n    diffWithOptionsObj(oldTokens, newTokens, options, callback) {\n      var _a;\n      const done = (value) => {\n        value = this.postProcess(value, options);\n        if (callback) {\n          setTimeout(function() {\n            callback(value);\n          }, 0);\n          return void 0;\n        } else {\n          return value;\n        }\n      };\n      const newLen = newTokens.length, oldLen = oldTokens.length;\n      let editLength = 1;\n      let maxEditLength = newLen + oldLen;\n      if (options.maxEditLength != null) {\n        maxEditLength = Math.min(maxEditLength, options.maxEditLength);\n      }\n      const maxExecutionTime = (_a = options.timeout) !== null && _a !== void 0 ? _a : Infinity;\n      const abortAfterTimestamp = Date.now() + maxExecutionTime;\n      const bestPath = [{ oldPos: -1, lastComponent: void 0 }];\n      let newPos = this.extractCommon(bestPath[0], newTokens, oldTokens, 0, options);\n      if (bestPath[0].oldPos + 1 >= oldLen && newPos + 1 >= newLen) {\n        return done(this.buildValues(bestPath[0].lastComponent, newTokens, oldTokens));\n      }\n      let minDiagonalToConsider = -Infinity, maxDiagonalToConsider = Infinity;\n      const execEditLength = () => {\n        for (let diagonalPath = Math.max(minDiagonalToConsider, -editLength); diagonalPath <= Math.min(maxDiagonalToConsider, editLength); diagonalPath += 2) {\n          let basePath;\n          const removePath = bestPath[diagonalPath - 1], addPath = bestPath[diagonalPath + 1];\n          if (removePath) {\n            bestPath[diagonalPath - 1] = void 0;\n          }\n          let canAdd = false;\n          if (addPath) {\n            const addPathNewPos = addPath.oldPos - diagonalPath;\n            canAdd = addPath && 0 <= addPathNewPos && addPathNewPos < newLen;\n          }\n          const canRemove = removePath && removePath.oldPos + 1 < oldLen;\n          if (!canAdd && !canRemove) {\n            bestPath[diagonalPath] = void 0;\n            continue;\n          }\n          if (!canRemove || canAdd && removePath.oldPos < addPath.oldPos) {\n            basePath = this.addToPath(addPath, true, false, 0, options);\n          } else {\n            basePath = this.addToPath(removePath, false, true, 1, options);\n          }\n          newPos = this.extractCommon(basePath, newTokens, oldTokens, diagonalPath, options);\n          if (basePath.oldPos + 1 >= oldLen && newPos + 1 >= newLen) {\n            return done(this.buildValues(basePath.lastComponent, newTokens, oldTokens)) || true;\n          } else {\n            bestPath[diagonalPath] = basePath;\n            if (basePath.oldPos + 1 >= oldLen) {\n              maxDiagonalToConsider = Math.min(maxDiagonalToConsider, diagonalPath - 1);\n            }\n            if (newPos + 1 >= newLen) {\n              minDiagonalToConsider = Math.max(minDiagonalToConsider, diagonalPath + 1);\n            }\n          }\n        }\n        editLength++;\n      };\n      if (callback) {\n        (function exec() {\n          setTimeout(function() {\n            if (editLength > maxEditLength || Date.now() > abortAfterTimestamp) {\n              return callback(void 0);\n            }\n            if (!execEditLength()) {\n              exec();\n            }\n          }, 0);\n        })();\n      } else {\n        while (editLength <= maxEditLength && Date.now() <= abortAfterTimestamp) {\n          const ret = execEditLength();\n          if (ret) {\n            return ret;\n          }\n        }\n      }\n    }\n    addToPath(path, added, removed, oldPosInc, options) {\n      const last = path.lastComponent;\n      if (last && !options.oneChangePerToken && last.added === added && last.removed === removed) {\n        return {\n          oldPos: path.oldPos + oldPosInc,\n          lastComponent: { count: last.count + 1, added, removed, previousComponent: last.previousComponent }\n        };\n      } else {\n        return {\n          oldPos: path.oldPos + oldPosInc,\n          lastComponent: { count: 1, added, removed, previousComponent: last }\n        };\n      }\n    }\n    extractCommon(basePath, newTokens, oldTokens, diagonalPath, options) {\n      const newLen = newTokens.length, oldLen = oldTokens.length;\n      let oldPos = basePath.oldPos, newPos = oldPos - diagonalPath, commonCount = 0;\n      while (newPos + 1 < newLen && oldPos + 1 < oldLen && this.equals(oldTokens[oldPos + 1], newTokens[newPos + 1], options)) {\n        newPos++;\n        oldPos++;\n        commonCount++;\n        if (options.oneChangePerToken) {\n          basePath.lastComponent = { count: 1, previousComponent: basePath.lastComponent, added: false, removed: false };\n        }\n      }\n      if (commonCount && !options.oneChangePerToken) {\n        basePath.lastComponent = { count: commonCount, previousComponent: basePath.lastComponent, added: false, removed: false };\n      }\n      basePath.oldPos = oldPos;\n      return newPos;\n    }\n    equals(left, right, options) {\n      if (options.comparator) {\n        return options.comparator(left, right);\n      } else {\n        return left === right || !!options.ignoreCase && left.toLowerCase() === right.toLowerCase();\n      }\n    }\n    removeEmpty(array) {\n      const ret = [];\n      for (let i = 0; i < array.length; i++) {\n        if (array[i]) {\n          ret.push(array[i]);\n        }\n      }\n      return ret;\n    }\n    // eslint-disable-next-line @typescript-eslint/no-unused-vars\n    castInput(value, options) {\n      return value;\n    }\n    // eslint-disable-next-line @typescript-eslint/no-unused-vars\n    tokenize(value, options) {\n      return Array.from(value);\n    }\n    join(chars) {\n      return chars.join("");\n    }\n    postProcess(changeObjects, options) {\n      return changeObjects;\n    }\n    get useLongestToken() {\n      return false;\n    }\n    buildValues(lastComponent, newTokens, oldTokens) {\n      const components = [];\n      let nextComponent;\n      while (lastComponent) {\n        components.push(lastComponent);\n        nextComponent = lastComponent.previousComponent;\n        delete lastComponent.previousComponent;\n        lastComponent = nextComponent;\n      }\n      components.reverse();\n      const componentLen = components.length;\n      let componentPos = 0, newPos = 0, oldPos = 0;\n      for (; componentPos < componentLen; componentPos++) {\n        const component = components[componentPos];\n        if (!component.removed) {\n          if (!component.added && this.useLongestToken) {\n            let value = newTokens.slice(newPos, newPos + component.count);\n            value = value.map(function(value2, i) {\n              const oldValue = oldTokens[oldPos + i];\n              return oldValue.length > value2.length ? oldValue : value2;\n            });\n            component.value = this.join(value);\n          } else {\n            component.value = this.join(newTokens.slice(newPos, newPos + component.count));\n          }\n          newPos += component.count;\n          if (!component.added) {\n            oldPos += component.count;\n          }\n        } else {\n          component.value = this.join(oldTokens.slice(oldPos, oldPos + component.count));\n          oldPos += component.count;\n        }\n      }\n      return components;\n    }\n  };\n\n  // ../../plugin-src/node_modules/diff/libesm/diff/array.js\n  var ArrayDiff = class extends Diff {\n    tokenize(value) {\n      return value.slice();\n    }\n    join(value) {\n      return value;\n    }\n    removeEmpty(value) {\n      return value;\n    }\n  };\n  var arrayDiff = new ArrayDiff();\n  function diffArrays(oldArr, newArr, options) {\n    return arrayDiff.diff(oldArr, newArr, options);\n  }\n\n  // src/diff/sequence.ts\n  function boundedOpcodes(A, B, budget = {}) {\n    let prefix = 0;\n    while (prefix < A.length && prefix < B.length && A[prefix] === B[prefix]) prefix++;\n    let ae = A.length, be = B.length;\n    while (ae > prefix && be > prefix && A[ae - 1] === B[be - 1]) {\n      ae--;\n      be--;\n    }\n    const changes = diffArrays(A.slice(prefix, ae), B.slice(prefix, be), {\n      timeout: budget.timeout ?? 25,\n      maxEditLength: budget.maxEditLength ?? 1024\n    });\n    const ops = [];\n    const emit = (op) => {\n      if (op[1] === op[2] && op[3] === op[4]) return;\n      const prev = ops[ops.length - 1];\n      if (prev && prev[0] !== "equal" && op[0] !== "equal") {\n        prev[2] = op[2];\n        prev[4] = op[4];\n        prev[0] = prev[1] === prev[2] ? "insert" : prev[3] === prev[4] ? "delete" : "replace";\n      } else ops.push(op);\n    };\n    if (prefix) emit(["equal", 0, prefix, 0, prefix]);\n    let i = prefix, j = prefix;\n    if (!changes) emit([ae === prefix ? "insert" : be === prefix ? "delete" : "replace", prefix, ae, prefix, be]);\n    else for (const c of changes) {\n      const ni = i + (c.added ? 0 : c.count), nj = j + (c.removed ? 0 : c.count);\n      emit([c.added ? "insert" : c.removed ? "delete" : "equal", i, ni, j, nj]);\n      i = ni;\n      j = nj;\n    }\n    if (ae < A.length) emit(["equal", ae, A.length, be, B.length]);\n    return { ops, simplified: !changes };\n  }\n\n  // src/diff/mddiff.ts\n  var MOD_MIN_SIMILARITY = 0.5;\n  var MAX_APPROX_BLOCKS = 200;\n  var eol = (s) => s.replace(/\\r\\n?/g, "\\n");\n  var space = (s) => s.replace(/[ \\t\\n\\r\\f]+/g, " ");\n  function words(s) {\n    return s.match(/[\\p{L}\\p{M}\\p{N}_]+|[^\\s\\p{L}\\p{M}\\p{N}_]/gu) || [];\n  }\n  function parser(options) {\n    const md = new MarkdownItCallable({ html: true, breaks: !!options.breaks, linkify: true });\n    md.inline.ruler.before("link", "obsidian_link", (state, silent) => {\n      const match = /^(!?)\\[\\[([^\\]\\n]+)\\]\\]/.exec(state.src.slice(state.pos));\n      if (!match) return false;\n      if (!silent) {\n        const split = match[2].indexOf("|");\n        const target = split < 0 ? match[2] : match[2].slice(0, split);\n        const token = state.push(match[1] ? "obsidian_embed" : "obsidian_link", "", 0);\n        token.attrs = [["target", target.trim()]];\n        token.content = split < 0 ? target : match[2].slice(split + 1);\n      }\n      state.pos += match[0].length;\n      return true;\n    });\n    return md;\n  }\n  function semantic(ts, breaks) {\n    const parts = [];\n    let pending = "", visible = "";\n    const flush = () => {\n      if (pending) {\n        parts.push(["text", space(pending)]);\n        pending = "";\n      }\n    };\n    for (const t of ts) {\n      if (t.type === "inline") {\n        flush();\n        const inner = semantic(t.children || [], breaks);\n        parts.push(["inline", inner.key]);\n        visible += inner.text;\n      } else if (t.type === "text" || t.type === "softbreak" && !breaks) {\n        const value = t.type === "softbreak" ? " " : t.content;\n        pending += value;\n        visible += value;\n      } else {\n        flush();\n        if (t.type === "softbreak" || t.type === "hardbreak") {\n          parts.push(["break"]);\n          visible += "\\n";\n        } else if (t.type === "fence" || t.type === "code_block") {\n          parts.push(["code", t.type === "fence" ? t.info.trim() : "", eol(t.content)]);\n          visible += t.content;\n        } else {\n          const attrs = (t.attrs || []).slice().sort((a, b) => a[0].localeCompare(b[0]));\n          parts.push([t.type, t.tag, t.nesting, t.hidden, attrs, t.content]);\n          if (t.children) parts.push(semantic(t.children, breaks).key);\n          if (t.content) visible += t.content;\n          if (t.type.endsWith("_close") && t.block) visible += "\\n";\n        }\n      }\n    }\n    flush();\n    return { key: JSON.stringify(parts), text: visible.trim() };\n  }\n  function tableCells(ts, breaks) {\n    const rows = [];\n    for (const t of ts) {\n      if (t.type === "tr_open") rows.push([]);\n      if (t.type === "inline" && rows.length) {\n        const cell = semantic(t.children || [], breaks);\n        rows[rows.length - 1].push({ text: cell.text, visualKey: cell.key });\n      }\n    }\n    return rows;\n  }\n  function blocks(input, options = {}) {\n    return parseDocument(input, options).blocks;\n  }\n  function parseDocument(input, options = {}) {\n    const source = input || "", rawLines = source.split("\\n"), lines = eol(source).split("\\n");\n    const starts = [];\n    let offset = 0;\n    for (const line of rawLines) {\n      starts.push(offset);\n      offset += line.length + 1;\n    }\n    const md = parser(options);\n    let frontEnd = 0;\n    if (lines[0] === "---") {\n      const close = lines.findIndex((s, i) => i > 0 && /^(---|\\.\\.\\.)\\s*$/.test(s));\n      if (close > 0) frontEnd = close + 1;\n    }\n    const parseLines = lines.slice();\n    for (let i = 0; i < frontEnd; i++) parseLines[i] = "";\n    const env = {};\n    const ts = md.parse(parseLines.join("\\n"), env);\n    const out = [];\n    const makeBlock = (start, end, type, tokens, conservative) => {\n      while (end > start && !lines[end - 1].trim()) end--;\n      if (end <= start) return null;\n      const sourceStart = starts[start];\n      const sourceEnd = starts[end - 1] + rawLines[end - 1].replace(/\\r$/, "").length;\n      const text2 = source.slice(sourceStart, sourceEnd);\n      const meaning = semantic(tokens, !!options.breaks);\n      if (!conservative && type !== "code" && (tokens.some((t) => /html/.test(t.type) || t.children?.some((c) => /html/.test(c.type) || c.type === "text" && /==/.test(c.content))) || /\\$|%%|\\[\\^|(?:^|\\n)\\s*\\^\\S+/.test(text2))) conservative = "Sintaxe estendida: compara\\xE7\\xE3o conservadora do fonte.";\n      if (type === "code" && /^(?:```|~~~)\\s*(dataview|dataviewjs|query|tasks|mermaid)\\b/i.test(text2)) {\n        conservative = "Conte\\xFAdo gerado por plugin: apenas o fonte \\xE9 comparado.";\n      }\n      if (type === "quote" && /^>\\s*\\[![^\\]]+\\]/.test(text2)) type = "callout";\n      const key = conservative ? eol(text2) : meaning.key;\n      const visibleText = meaning.text || text2;\n      const block2 = {\n        text: text2,\n        lineStart: start,\n        lineEnd: end - 1,\n        sourceStart,\n        sourceEnd,\n        type,\n        visualKey: JSON.stringify([type, key]),\n        visibleText,\n        tokens: words(visibleText).map((t) => t.toLocaleLowerCase()),\n        conservative,\n        ...type === "table" ? { cells: tableCells(tokens, !!options.breaks) } : {}\n      };\n      if (type === "list") {\n        block2.listKind = JSON.stringify([tokens[0].type, tokens[0].attrs]);\n        block2.items = [];\n        for (let i = 1; i < tokens.length; i++) {\n          const token = tokens[i];\n          if (token.type !== "list_item_open" || token.level !== tokens[0].level + 1 || !token.map) continue;\n          let endToken = i + 1;\n          while (endToken < tokens.length && !(tokens[endToken].type === "list_item_close" && tokens[endToken].level === token.level)) endToken++;\n          const item = makeBlock(token.map[0], token.map[1], "list-item", tokens.slice(i, endToken + 1));\n          if (item) block2.items.push(item);\n          i = endToken;\n        }\n      }\n      return block2;\n    };\n    const add = (start, end, type, tokens, conservative) => {\n      const block2 = makeBlock(start, end, type, tokens, conservative);\n      if (block2) out.push(block2);\n    };\n    if (frontEnd) add(0, frontEnd, "properties", [], "Propriedades: compara\\xE7\\xE3o conservadora do fonte.");\n    let covered = frontEnd;\n    const gap = (end) => {\n      let start = covered;\n      while (start < end && !lines[start].trim()) start++;\n      if (start < end) add(start, end, "reference", [], "Defini\\xE7\\xF5es ou sintaxe n\\xE3o interpretada: compara\\xE7\\xE3o conservadora do fonte.");\n    };\n    for (let i = 0; i < ts.length; i++) {\n      const first = ts[i];\n      if (!first.map || first.level !== 0 || first.nesting === -1) continue;\n      const [start, end] = first.map;\n      gap(start);\n      let j = i + 1;\n      if (first.nesting === 1) {\n        while (j < ts.length && !(ts[j].level === 0 && ts[j].nesting === -1)) j++;\n        j++;\n      }\n      const kinds = {\n        paragraph_open: "paragraph",\n        heading_open: "heading",\n        bullet_list_open: "list",\n        ordered_list_open: "list",\n        blockquote_open: "quote",\n        table_open: "table",\n        fence: "code",\n        code_block: "code",\n        hr: "rule"\n      };\n      const type = kinds[first.type] || "unknown";\n      add(start, end, type, ts.slice(i, j), type === "unknown" ? "Constru\\xE7\\xE3o n\\xE3o interpretada: compara\\xE7\\xE3o conservadora do fonte." : void 0);\n      covered = end;\n      i = j - 1;\n    }\n    gap(lines.length);\n    const escape2 = (s) => s.replace(/\\\\/g, "\\\\\\\\").replace(/"/g, \'\\\\"\');\n    const references = Object.entries(env.references || {}).map(([label, ref]) => `[${label.replace(/\\]/g, "\\\\]")}]: <${ref.href}> "${escape2(ref.title)}"`).join("\\n");\n    return { blocks: out, references };\n  }\n  function sequenceSimilarity(a, b, timeout = 8, itemCoverage = false) {\n    if (!a.length || !b.length) return a.length === b.length ? 1 : 0;\n    const denominator = itemCoverage && Math.min(a.length, b.length) >= 4 ? Math.min(a.length, b.length) : (a.length + b.length) / 2;\n    if (Math.min(a.length, b.length) / denominator < MOD_MIN_SIMILARITY) return 0;\n    const result = boundedOpcodes(a, b, { timeout, maxEditLength: 512 });\n    if (result.simplified) return 0;\n    let common = 0;\n    for (const op of result.ops) if (op[0] === "equal") common += op[2] - op[1];\n    return common / denominator;\n  }\n  function listSimilarity(a, b, deadline) {\n    if (!a.items?.length || !b.items?.length || a.items.length > MAX_APPROX_BLOCKS || b.items.length > MAX_APPROX_BLOCKS) return 0;\n    const rows = pair(a.items, b.items, false, deadline);\n    if (rows.some((r) => r.simplified)) return 0;\n    let retained = 0;\n    for (const row of rows) if (row.a && row.b) {\n      const score = row.kind === "same" ? 1 : sequenceSimilarity(row.a.tokens, row.b.tokens, 8, true);\n      retained += score * Math.min(row.a.tokens.length, row.b.tokens.length);\n    }\n    const size = (items) => items.reduce((n, item) => n + item.tokens.length, 0);\n    return retained / Math.max(1, Math.min(size(a.items), size(b.items)));\n  }\n  function align(a, b, deadline) {\n    const fallback = () => [\n      ...a.map((x) => ({ kind: "del", a: x, b: null, simplified: true })),\n      ...b.map((x) => ({ kind: "ins", a: null, b: x, simplified: true }))\n    ];\n    if (a.length > MAX_APPROX_BLOCKS || b.length > MAX_APPROX_BLOCKS) return fallback();\n    const width = b.length + 1;\n    const scores = new Float64Array((a.length + 1) * width), distances = new Float64Array(scores.length);\n    const steps = new Uint8Array(scores.length);\n    for (let i2 = a.length - 1; i2 >= 0; i2--) for (let j2 = b.length - 1; j2 >= 0; j2--) {\n      if (Date.now() > deadline) return fallback();\n      const at = i2 * width + j2, down = at + width, right = at + 1, diag = down + 1;\n      const chooseDown = scores[down] > scores[right] || scores[down] === scores[right] && distances[down] <= distances[right];\n      const from = chooseDown ? down : right;\n      scores[at] = scores[from];\n      distances[at] = distances[from];\n      steps[at] = chooseDown ? 1 : 2;\n      const compatible = a[i2].type === b[j2].type || [a[i2].type, b[j2].type].every((t) => t === "paragraph" || t === "heading");\n      if (!compatible) continue;\n      let s = sequenceSimilarity(a[i2].tokens, b[j2].tokens, Math.max(1, Math.min(8, deadline - Date.now())), a[i2].type === "list-item");\n      if (s < MOD_MIN_SIMILARITY && a[i2].items && b[j2].items) s = listSimilarity(a[i2], b[j2], deadline);\n      if (s < MOD_MIN_SIMILARITY) continue;\n      const score = s + scores[diag], distance = Math.abs(i2 - j2) + distances[diag];\n      if (score > scores[at] + 1e-9 || Math.abs(score - scores[at]) <= 1e-9 && distance <= distances[at]) {\n        scores[at] = score;\n        distances[at] = distance;\n        steps[at] = 3;\n      }\n    }\n    const rows = [];\n    let i = 0, j = 0;\n    while (i < a.length || j < b.length) {\n      const step = i === a.length ? 2 : j === b.length ? 1 : steps[i * width + j];\n      if (step === 3) rows.push({ kind: a[i].visualKey === b[j].visualKey ? "same" : "mod", a: a[i++], b: b[j++] });\n      else if (step === 1) rows.push({ kind: "del", a: a[i++], b: null });\n      else rows.push({ kind: "ins", a: null, b: b[j++] });\n    }\n    return rows;\n  }\n  function textDetail(a, b, budget = {}) {\n    const tokenize = (text2) => {\n      const matches = [...text2.matchAll(/[\\p{L}\\p{M}\\p{N}_]+|[^\\s\\p{L}\\p{M}\\p{N}_]/gu)];\n      return { keys: matches.map((m) => m[0]), offsets: matches.map((m) => m.index), ends: matches.map((m) => m.index + m[0].length) };\n    };\n    const A = tokenize(a), B = tokenize(b);\n    const { ops, simplified } = boundedOpcodes(A.keys, B.keys, budget);\n    const ra = [], rb = [];\n    for (const op of ops) if (op[0] !== "equal") {\n      if (op[1] < op[2]) ra.push([A.offsets[op[1]], A.ends[op[2] - 1]]);\n      if (op[3] < op[4]) rb.push([B.offsets[op[3]], B.ends[op[4] - 1]]);\n    }\n    return { a: ra, b: rb, simplified };\n  }\n  function refine(row, deadline) {\n    if (row.kind !== "mod" || !row.a || !row.b) return;\n    const { a, b } = row;\n    if (a.visibleText === b.visibleText || a.type !== b.type) row.structural = "Altera\\xE7\\xE3o de formata\\xE7\\xE3o, destino de link, propriedades ou estrutura.";\n    if (a.conservative || b.conservative) row.structural = a.conservative || b.conservative;\n    if (Date.now() > deadline) {\n      row.simplified = true;\n      return;\n    }\n    if (a.items && b.items && !a.conservative && !b.conservative) {\n      row.items = pair(a.items, b.items, true, deadline);\n      row.listStructureChanged = a.listKind !== b.listKind;\n      if (row.listStructureChanged) row.structural = "Altera\\xE7\\xE3o do tipo ou da numera\\xE7\\xE3o da lista.";\n      if (row.items.some((item) => item.simplified)) row.simplified = true;\n      return;\n    }\n    const budget = { timeout: Math.max(1, Math.min(25, deadline - Date.now())), maxEditLength: 1024 };\n    const detail = textDetail(a.visibleText, b.visibleText, budget), source = textDetail(a.text, b.text, budget);\n    row.simplified = detail.simplified || source.simplified;\n    if (!row.simplified) {\n      row.detail = detail;\n      row.sourceDetail = source;\n    }\n    if (a.cells && b.cells) {\n      row.cells = [];\n      const makeRow = (cells) => ({\n        ...a,\n        type: "table",\n        text: "",\n        cells: void 0,\n        visualKey: JSON.stringify(cells.map((c) => c.visualKey)),\n        visibleText: cells.map((c) => c.text).join(" "),\n        tokens: words(cells.map((c) => c.text).join(" ")).map((t) => t.toLocaleLowerCase())\n      });\n      const ra = a.cells.map(makeRow), rb = b.cells.map(makeRow);\n      for (const cellRow of pair(ra, rb, false, deadline)) {\n        if (cellRow.simplified) row.simplified = true;\n        if (cellRow.kind === "same") continue;\n        const ia = cellRow.a ? ra.indexOf(cellRow.a) : -1, ib = cellRow.b ? rb.indexOf(cellRow.b) : -1;\n        const ac = a.cells[ia] || [], bc = b.cells[ib] || [];\n        for (let col = 0; col < Math.max(ac.length, bc.length); col++) {\n          if (ac[col]?.visualKey === bc[col]?.visualKey) continue;\n          if (Date.now() > deadline) {\n            row.simplified = true;\n            break;\n          }\n          const d = textDetail(ac[col]?.text || "", bc[col]?.text || "", budget);\n          if (d.simplified) row.simplified = true;\n          row.cells.push({ rowA: ia, rowB: ib, column: col, detail: d });\n        }\n      }\n    }\n  }\n  function pair(a, b, details = true, deadline = Date.now() + 350) {\n    const exact = boundedOpcodes(a.map((x) => x.visualKey), b.map((x) => x.visualKey), { timeout: 75, maxEditLength: 2048 });\n    const rows = [];\n    for (const [tag, i, ie, j, je] of exact.ops) {\n      if (tag === "equal") for (let k = 0; k < ie - i; k++) rows.push({ kind: "same", a: a[i + k], b: b[j + k] });\n      else if (tag === "delete") for (let k = i; k < ie; k++) rows.push({ kind: "del", a: a[k], b: null });\n      else if (tag === "insert") for (let k = j; k < je; k++) rows.push({ kind: "ins", a: null, b: b[k] });\n      else rows.push(...align(a.slice(i, ie), b.slice(j, je), deadline));\n    }\n    if (details) for (const row of rows) refine(row, deadline);\n    return rows;\n  }\n\n  // src/diff/worker.ts\n  function compareRequest(request) {\n    try {\n      const base2 = request.baseBlocks ? { blocks: request.baseBlocks, references: request.baseReferences || "" } : parseDocument(request.baseText, request.options);\n      const baseBlocks = base2.blocks;\n      const current = blocks(request.currentText, request.options);\n      return {\n        identity: request.identity,\n        rows: pair(baseBlocks, current),\n        baseReferences: base2.references,\n        ...request.baseBlocks ? {} : { baseBlocks }\n      };\n    } catch (error2) {\n      return { identity: request.identity, error: error2 instanceof Error ? error2.message : String(error2) };\n    }\n  }\n  var scope = globalThis;\n  if (typeof scope.postMessage === "function" && !scope.document) {\n    scope.onmessage = (event) => scope.postMessage(compareRequest(event.data));\n  }\n})();\n/*! Bundled license information:\n\nmarkdown-it/dist/markdown-it.mjs:\n  (*! markdown-it 15.0.3 https://github.com/markdown-it/markdown-it @license MIT *)\n*/\n';
+  }
+});
+
 // src/main.ts
 var main_exports = {};
 __export(main_exports, {
   default: () => LiveGitDiffPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
-// src/diff/mddiff.ts
-var MOD_MIN_SIMILARITY = 0.5;
-var LIST_START = /^\s*(?:[-*+]|\d+[.)])\s/;
-function blocks(text) {
-  const lines = String(text == null ? "" : text).split("\n");
-  const out = [];
-  let cur = [];
-  let curStart = -1;
-  let fence = false;
-  function push(endIdx) {
-    if (!cur.length) return;
-    out.push({ text: cur.join("\n"), lineStart: curStart, lineEnd: endIdx });
-    cur = [];
-    curStart = -1;
-  }
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.replace(/^\s+/, "").indexOf("```") === 0) {
-      fence = !fence;
-      if (curStart < 0) curStart = i;
-      cur.push(line);
-      if (!fence) push(i);
-      continue;
-    }
-    if (fence) {
-      if (curStart < 0) curStart = i;
-      cur.push(line);
-      continue;
-    }
-    if (line.trim() === "") {
-      push(i - 1);
-    } else {
-      if (cur.length && LIST_START.test(line) && !LIST_START.test(cur[cur.length - 1])) {
-        push(i - 1);
-      }
-      if (curStart < 0) curStart = i;
-      cur.push(line);
-    }
-  }
-  push(lines.length - 1);
-  return out;
-}
-function norm(b) {
-  return String(b).replace(/\s+/g, " ").trim().toLowerCase();
-}
-function similarity(na, nb) {
-  if (na === nb) return 1;
-  const ta = na ? na.split(" ") : [];
-  const tb = nb ? nb.split(" ") : [];
-  if (!ta.length && !tb.length) return 1;
-  if (!ta.length || !tb.length) return 0;
-  const counts = /* @__PURE__ */ Object.create(null);
-  for (let i = 0; i < ta.length; i++) {
-    const k = " " + ta[i];
-    counts[k] = (counts[k] || 0) + 1;
-  }
-  let inter = 0;
-  for (let j = 0; j < tb.length; j++) {
-    const k2 = " " + tb[j];
-    if (counts[k2] > 0) {
-      counts[k2]--;
-      inter++;
-    }
-  }
-  return 2 * inter / (ta.length + tb.length);
-}
-function opcodes(A, B) {
-  const n = A.length;
-  const m = B.length;
-  const dp = new Array(n + 1);
-  for (let i = 0; i <= n; i++) dp[i] = new Int32Array(m + 1);
-  for (let i2 = n - 1; i2 >= 0; i2--) {
-    for (let j2 = m - 1; j2 >= 0; j2--) {
-      dp[i2][j2] = A[i2] === B[j2] ? dp[i2 + 1][j2 + 1] + 1 : Math.max(dp[i2 + 1][j2], dp[i2][j2 + 1]);
-    }
-  }
-  const raw = [];
-  let i3 = 0;
-  let j3 = 0;
-  while (i3 < n && j3 < m) {
-    if (A[i3] === B[j3]) {
-      raw.push(["equal", i3, j3]);
-      i3++;
-      j3++;
-    } else if (dp[i3 + 1][j3] >= dp[i3][j3 + 1]) {
-      raw.push(["delete", i3, j3]);
-      i3++;
-    } else {
-      raw.push(["insert", i3, j3]);
-      j3++;
-    }
-  }
-  while (i3 < n) {
-    raw.push(["delete", i3, j3]);
-    i3++;
-  }
-  while (j3 < m) {
-    raw.push(["insert", i3, j3]);
-    j3++;
-  }
-  const runs = [];
-  for (let r = 0; r < raw.length; r++) {
-    const tag = raw[r][0];
-    const ri = raw[r][1];
-    const rj = raw[r][2];
-    const last = runs[runs.length - 1];
-    if (last && last[0] === tag) {
-      if (tag === "equal") {
-        last[2] = ri + 1;
-        last[4] = rj + 1;
-      } else if (tag === "delete") last[2] = ri + 1;
-      else last[4] = rj + 1;
-      continue;
-    }
-    if (tag === "equal") runs.push(["equal", ri, ri + 1, rj, rj + 1]);
-    else if (tag === "delete") runs.push(["delete", ri, ri + 1, rj, rj]);
-    else runs.push(["insert", ri, ri, rj, rj + 1]);
-  }
-  const merged = [];
-  for (let q = 0; q < runs.length; q++) {
-    const cur = runs[q];
-    const prev = merged[merged.length - 1];
-    if (prev && (prev[0] === "delete" && cur[0] === "insert" || prev[0] === "insert" && cur[0] === "delete")) {
-      merged[merged.length - 1] = [
-        "replace",
-        Math.min(prev[1], cur[1]),
-        Math.max(prev[2], cur[2]),
-        Math.min(prev[3], cur[3]),
-        Math.max(prev[4], cur[4])
-      ];
-      continue;
-    }
-    merged.push(cur);
-  }
-  return merged;
-}
-function pair(blocksA, blocksB) {
-  const As = blocksA || [];
-  const Bs = blocksB || [];
-  const NA = As.map((x) => norm(x.text));
-  const NB = Bs.map((x) => norm(x.text));
-  const ops = opcodes(NA, NB);
-  const rows = [];
-  for (let o = 0; o < ops.length; o++) {
-    const tag = ops[o][0];
-    const i1 = ops[o][1];
-    const i2 = ops[o][2];
-    const j1 = ops[o][3];
-    const j2 = ops[o][4];
-    if (tag === "equal") {
-      for (let k = 0; k < i2 - i1; k++) {
-        rows.push({ kind: "same", a: As[i1 + k], b: Bs[j1 + k] });
-      }
-    } else if (tag === "delete") {
-      for (let d = i1; d < i2; d++) rows.push({ kind: "del", a: As[d], b: null });
-    } else if (tag === "insert") {
-      for (let s = j1; s < j2; s++) rows.push({ kind: "ins", a: null, b: Bs[s] });
-    } else {
-      const n = Math.max(i2 - i1, j2 - j1);
-      const pending = [];
-      for (let p = 0; p < n; p++) {
-        const a = i1 + p < i2 ? As[i1 + p] : null;
-        const b = j1 + p < j2 ? Bs[j1 + p] : null;
-        if (a && b) {
-          if (similarity(NA[i1 + p], NB[j1 + p]) >= MOD_MIN_SIMILARITY) {
-            for (let q = 0; q < pending.length; q++) rows.push(pending[q]);
-            pending.length = 0;
-            rows.push({ kind: "mod", a, b });
-          } else {
-            rows.push({ kind: "del", a, b: null });
-            pending.push({ kind: "ins", a: null, b });
-          }
-        } else if (a) {
-          rows.push({ kind: "del", a, b: null });
-        } else if (b) {
-          pending.push({ kind: "ins", a: null, b });
-        }
-      }
-      for (let y = 0; y < pending.length; y++) rows.push(pending[y]);
-    }
-  }
-  return rows;
-}
+// src/baseView.ts
+var import_obsidian = require("obsidian");
 
 // src/panes.ts
 var CLS = {
@@ -262,9 +91,6 @@ var enabled = false;
 function setDebug(v) {
   enabled = !!v;
 }
-function debug(...args) {
-  if (enabled) console.log(PREFIX, ...args);
-}
 function warn(...args) {
   console.warn(PREFIX, ...args);
 }
@@ -275,84 +101,12 @@ function error(...args) {
 // src/charmarks.ts
 var CHAR_MAX_CHANGED_FRACTION = 0.8;
 var CHAR_MARK_ATTR = "data-lgd-char";
-function tokenize(text) {
-  const toks = String(text == null ? "" : text).split(/(\s+)/);
-  const offs = [];
-  let o = 0;
-  for (const t of toks) {
-    offs.push(o);
-    o += t.length;
-  }
-  return { toks, offs };
-}
-function isWsTok(t) {
-  return t === "" || /^\s+$/.test(t);
-}
-function keyTok(t) {
-  return isWsTok(t) ? " " : t;
-}
-function changedFraction(toks, mark) {
-  let total = 0;
-  let hit = 0;
-  for (let i = 0; i < toks.length; i++) {
-    if (isWsTok(toks[i])) continue;
-    total++;
-    if (mark[i]) hit++;
-  }
-  return total ? hit / total : 0;
-}
-function coalesceRanges(T, mark) {
-  const out = [];
-  let i = 0;
-  while (i < mark.length) {
-    if (!mark[i] || isWsTok(T.toks[i])) {
-      i++;
-      continue;
-    }
-    let last = i;
-    let k = i;
-    while (k < mark.length) {
-      if (mark[k] && !isWsTok(T.toks[k])) {
-        last = k;
-        k++;
-        continue;
-      }
-      if (isWsTok(T.toks[k])) {
-        k++;
-        continue;
-      }
-      break;
-    }
-    out.push([T.offs[i], T.offs[last] + T.toks[last].length]);
-    i = k;
-  }
-  return out;
-}
-function wordDiffRanges(ta, tb) {
-  const A = tokenize(ta);
-  const B = tokenize(tb);
-  const ops = opcodes(A.toks.map(keyTok), B.toks.map(keyTok));
-  const markA = new Array(A.toks.length).fill(false);
-  const markB = new Array(B.toks.length).fill(false);
-  for (const op of ops) {
-    if (op[0] === "equal") continue;
-    for (let i = op[1]; i < op[2]; i++) markA[i] = true;
-    for (let j = op[3]; j < op[4]; j++) markB[j] = true;
-  }
-  if (changedFraction(A.toks, markA) > CHAR_MAX_CHANGED_FRACTION || changedFraction(B.toks, markB) > CHAR_MAX_CHANGED_FRACTION) {
-    return null;
-  }
-  const a = coalesceRanges(A, markA);
-  const b = coalesceRanges(B, markB);
-  if (!a.length && !b.length) return null;
-  return { a, b };
-}
 function inSkippedContext(node, root) {
   for (let p = node.parentNode; p && p !== root; p = p.parentNode) {
     if (p.nodeType !== 1) continue;
     const pe = p;
     const tag = pe.tagName;
-    if (tag === "PRE" || tag === "CODE" || tag === "SVG" || tag === "MJX-CONTAINER") return true;
+    if (tag === "PRE" || tag === "SVG" || tag === "MJX-CONTAINER") return true;
     if (pe.classList && (pe.classList.contains("math") || pe.classList.contains("MathJax"))) return true;
   }
   return false;
@@ -382,8 +136,14 @@ function collectTextNodes(root) {
   }
   return out;
 }
+function presentationRoot(el) {
+  var _a;
+  return el.classList.contains("lgd-content") && ((_a = el.parentElement) == null ? void 0 : _a.classList.contains(CLS.block)) ? el.parentElement : el;
+}
 function unwrapCharMarks(el) {
   el.removeClass(CLS.rowwise);
+  presentationRoot(el).classList.remove(CLS.rowwise, "lgd-itemwise");
+  for (const item of Array.from(el.querySelectorAll(".lgd-item-changed"))) item.classList.remove("lgd-item-changed");
   for (const tr of Array.from(el.querySelectorAll("tr." + CLS.rowchanged))) {
     tr.removeClass(CLS.rowchanged);
   }
@@ -397,16 +157,56 @@ function unwrapCharMarks(el) {
   if (marks.length) el.normalize();
   return marks.length;
 }
-function markTableRows(el) {
-  const tbl = el.querySelector("table");
-  if (!tbl) return false;
-  let any = false;
-  for (const tr of Array.from(tbl.querySelectorAll("tr"))) {
-    const changed = !!tr.querySelector("[" + CHAR_MARK_ATTR + "]");
-    tr.toggleClass(CLS.rowchanged, changed);
-    if (changed) any = true;
+function renderedRanges(source, rendered, ranges) {
+  const positions = (text) => {
+    const result = [];
+    for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) result.push(i);
+    return result;
+  };
+  if (source.replace(/\s/g, "") !== rendered.replace(/\s/g, "")) return [];
+  const a = positions(source), b = positions(rendered);
+  const output = [];
+  for (const [start, end] of ranges) {
+    const lo = a.findIndex((p) => p >= start), hi = a.findIndex((p) => p >= end);
+    const last = (hi < 0 ? a.length : hi) - 1;
+    if (lo >= 0 && last >= lo) output.push([b[lo], b[last] + 1]);
   }
-  return any;
+  return output;
+}
+function applyRowMarks(row, element, side) {
+  var _a, _b;
+  const block = row[side];
+  if (row.kind !== "mod" || !block || row.simplified || block.conservative) return 0;
+  const cls = side === "a" ? CLS.charDel : CLS.charIns;
+  let count = 0;
+  if (block.items && row.items && !row.listStructureChanged) {
+    const list = element.matches("ul,ol") ? element : element.querySelector("ul,ol");
+    const items = list ? Array.from(list.children).filter((child) => child.tagName === "LI") : [];
+    if (items.length !== block.items.length) return 0;
+    presentationRoot(element).classList.add("lgd-itemwise");
+    for (const change of row.items) {
+      if (change.kind === "same" || !change[side]) continue;
+      const index = block.items.findIndex((item2) => item2.sourceStart === change[side].sourceStart);
+      const item = items[index];
+      if (!item) continue;
+      item.classList.add("lgd-item-changed");
+      count += applyRowMarks(change, item, side);
+    }
+  } else if (block.cells && row.cells) {
+    const rows = element.querySelectorAll("tr");
+    for (const change of row.cells) {
+      const index = side === "a" ? change.rowA : change.rowB;
+      const tr = rows[index], cell = tr == null ? void 0 : tr.querySelectorAll("th,td")[change.column];
+      const text = (_b = (_a = block.cells[index]) == null ? void 0 : _a[change.column]) == null ? void 0 : _b.text;
+      if (!cell || text === void 0) continue;
+      tr.classList.add(CLS.rowchanged);
+      count += Math.max(0, wrapRanges(cell, renderedRanges(text, cell.textContent || "", change.detail[side]), cls));
+    }
+    presentationRoot(element).toggleClass(CLS.rowwise, row.cells.length > 0);
+  } else if (row.detail) {
+    count = Math.max(0, wrapRanges(element, renderedRanges(block.visibleText, element.textContent || "", row.detail[side]), cls));
+  }
+  return count;
 }
 function wrapRanges(el, ranges, cls) {
   if (!ranges || !ranges.length) return 0;
@@ -489,36 +289,14 @@ var CharMarkLayer = class {
    * warm, and keying off the cache would leave the base permanently bare.
    */
   apply(row, noteEl) {
-    if (!row || row.kind !== "mod" || !noteEl) return;
-    const view = this.host.baseView();
-    const baseEl = view && view.blockEls ? view.blockEls.get(row.idx) : null;
-    if (!baseEl || !baseEl.isConnected) return;
-    let ranges = this.ranges.get(row.idx);
-    if (ranges === void 0) {
+    var _a, _b;
+    const baseEl = (_b = (_a = this.host.baseView()) == null ? void 0 : _a.blockEls.get(row.idx)) == null ? void 0 : _b.querySelector(".lgd-content");
+    if (baseEl) {
       unwrapCharMarks(baseEl);
-      unwrapCharMarks(noteEl);
-      ranges = wordDiffRanges(baseEl.textContent || "", noteEl.textContent || "");
-      this.ranges.set(row.idx, ranges);
-    }
-    if (!ranges) return;
-    if (!baseEl.querySelector("[" + CHAR_MARK_ATTR + "]")) {
-      const h0 = baseEl.getBoundingClientRect().height;
-      const made = wrapRanges(baseEl, ranges.a, CLS.charDel);
-      const h1 = baseEl.getBoundingClientRect().height;
-      const d = Math.abs(h1 - h0);
-      if (d > this.heightDeltaMax) this.heightDeltaMax = d;
-      if (d > 0.5) {
-        this.heightChangedBlocks++;
-        if (this.onHeightChange) this.onHeightChange();
-      }
-      if (made < 0) this.revertCount++;
-      else this.spanCount += made;
+      this.spanCount += applyRowMarks(row, baseEl, "a");
     }
     unwrapCharMarks(noteEl);
-    const madeB = wrapRanges(noteEl, ranges.b, CLS.charIns);
-    if (madeB < 0) this.revertCount++;
-    baseEl.toggleClass(CLS.rowwise, markTableRows(baseEl));
-    noteEl.toggleClass(CLS.rowwise, markTableRows(noteEl));
+    this.spanCount += applyRowMarks(row, noteEl, "b");
   }
   /** Diagnostic snapshot for the alignment report. */
   stats(modRows) {
@@ -537,81 +315,29 @@ var CharMarkLayer = class {
   }
 };
 
-// src/dom.ts
-function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
-}
-function offsetIn(box, el) {
-  return el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-}
-function maxScroll(box) {
-  return Math.max(0, box.scrollHeight - box.clientHeight);
-}
-function findPreviewScroller(view) {
-  const v = view;
-  const roots = [];
-  if (v.previewMode && v.previewMode.containerEl) roots.push(v.previewMode.containerEl);
-  if (v.contentEl) roots.push(v.contentEl);
-  if (v.containerEl) roots.push(v.containerEl);
-  const scrollable = (el) => {
-    if (!el) return false;
-    const win = el.ownerDocument && el.ownerDocument.defaultView || window;
-    const ov = win.getComputedStyle(el).overflowY;
-    return ov === "auto" || ov === "scroll" || el.scrollHeight > el.clientHeight + 1;
-  };
-  for (const root of roots) {
-    const cands = [];
-    if (root.classList && root.classList.contains("markdown-preview-view")) cands.push(root);
-    cands.push(...Array.from(root.querySelectorAll(".markdown-preview-view")));
-    cands.push(...Array.from(root.querySelectorAll(".markdown-reading-view")));
-    for (const c of cands) if (scrollable(c)) return c;
-  }
-  return null;
-}
-function topmostVisible(container, els) {
-  const top = container.getBoundingClientRect().top;
-  for (const el of Array.from(els)) {
-    const rect = el.getBoundingClientRect();
-    if (rect.bottom > top + 1) {
-      const frac = rect.height > 0 ? clamp((top - rect.top) / rect.height, 0, 1) : 0;
-      return { el, rect, frac };
-    }
-  }
-  return null;
-}
-
 // src/baseView.ts
-var import_obsidian = require("obsidian");
 var VIEW_TYPE = "live-git-diff-base";
-function tagElClass(el) {
-  if (el.children.length !== 1) return;
-  const only = el.firstElementChild;
-  if (!only) return;
-  el.addClass("el-" + only.tagName.toLowerCase());
-}
 var GitBaseView = class extends import_obsidian.ItemView {
   constructor(leaf, host) {
     super(leaf);
-    /** The scrolling element of this pane (`.lgd-body`). Recreated on every render. */
     this.bodyEl = null;
-    /** The trailing view zone. See its creation site in render(). */
     this.endPadEl = null;
-    /** row.idx -> its block container in this pane. */
     this.blockEls = /* @__PURE__ */ new Map();
-    /**
-     * row.idx -> the VIEW ZONE standing in for an 'ins' row (text the note has and the
-     * base does not). See `render`.
-     */
     this.spacerEls = /* @__PURE__ */ new Map();
+    this.cache = /* @__PURE__ */ new Map();
+    this.renderKey = "";
+    this.generation = 0;
+    this.component = null;
+    this.statusEl = null;
     this.syncBadgeEl = null;
+    this.sizer = null;
     this.host = host;
   }
   getViewType() {
     return VIEW_TYPE;
   }
   getDisplayText() {
-    const s = this.host.session;
-    return s ? `Base: ${s.fileName}` : "Git base";
+    return this.host.session ? `Base: ${this.host.session.fileName}` : "Git base";
   }
   getIcon() {
     return "git-compare";
@@ -619,94 +345,109 @@ var GitBaseView = class extends import_obsidian.ItemView {
   async onOpen() {
     await this.render();
   }
-  /** Full re-render from the plugin's current in-memory session. */
-  async render() {
-    const root = this.containerEl.children[1];
-    root.empty();
-    root.addClass("lgd-view");
-    this.bodyEl = null;
-    this.endPadEl = null;
-    this.blockEls = /* @__PURE__ */ new Map();
-    this.spacerEls = /* @__PURE__ */ new Map();
-    const session = this.host.session;
-    if (!session) {
-      root.createDiv({
-        cls: "lgd-empty",
-        text: 'No review session. Run "Live Git Diff: open review for this file".'
-      });
-      return;
-    }
-    const header = root.createDiv({ cls: "lgd-header" });
-    header.createDiv({ cls: "lgd-title", text: session.fileName });
-    if (session.error) {
-      header.createDiv({ cls: "lgd-sub", text: "base unavailable" });
-      const errBody = root.createDiv({ cls: "lgd-body markdown-preview-view markdown-rendered" });
-      errBody.createDiv({ cls: "lgd-error", text: session.error });
-      return;
-    }
-    const sub = header.createDiv({ cls: "lgd-sub" });
-    sub.createSpan({ cls: "lgd-sha", text: `base ${session.shortSha}` });
-    const c = session.baseCommit;
-    if (c) {
-      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
-      sub.createSpan({ cls: "lgd-subject", text: `"${c.subject}"` });
-      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
-      const rel = sub.createSpan({ cls: "lgd-age", text: c.relative });
-      rel.setAttr("title", c.date);
-    } else if (session.baseRefLabel) {
-      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
-      sub.createSpan({ text: session.baseRefLabel });
-    }
-    if (session.baseReadAs) {
-      sub.createSpan({ cls: "lgd-sep", text: " \xB7 " });
-      sub.createSpan({ cls: "lgd-renamed", text: `was ${session.baseReadAs}` });
-    }
-    const counts = header.createDiv({ cls: "lgd-sub" });
-    counts.createSpan({
-      text: `${session.counts.blocks} blocks \xB7 ${session.counts.changed} changed`
-    });
-    this.syncBadgeEl = counts.createSpan({ cls: "lgd-sync" });
-    this.updateSyncBadge();
-    const body = root.createDiv({ cls: "lgd-body markdown-preview-view markdown-rendered" });
-    this.bodyEl = body;
-    const sizer = body.createDiv({ cls: "markdown-preview-sizer markdown-preview-section" });
-    try {
-      for (const row of session.rows) {
-        if (!row.a) {
-          const sp = sizer.createDiv({ cls: CLS.spacer });
-          sp.setAttr(ATTR_ROW, String(row.idx));
-          sp.style.height = this.host.zones.insHeight(row.idx) + "px";
-          this.spacerEls.set(row.idx, sp);
-          continue;
-        }
-        const el = sizer.createDiv({ cls: CLS.block });
-        el.setAttr("data-line-start", String(row.a.lineStart));
-        el.setAttr("data-line-end", String(row.a.lineEnd));
-        el.setAttr(ATTR_ROW, String(row.idx));
-        this.blockEls.set(row.idx, el);
-        if (row.kind === "del") el.addClass(CLS.del);
-        else if (row.kind === "mod") el.addClass(CLS.mod);
-        else el.addClass(CLS.same);
-        await import_obsidian.MarkdownRenderer.render(this.app, row.a.text, el, "", this);
-        tagElClass(el);
-      }
-    } finally {
-      this.endPadEl = sizer.createDiv({ cls: CLS.endpad });
-    }
-    this.host.sync.attach();
-    window.requestAnimationFrame(() => {
-      if (!this.bodyEl || !this.bodyEl.isConnected) return;
-      this.host.zones.refresh(true);
-    });
-  }
   updateSyncBadge() {
-    if (!this.syncBadgeEl) return;
-    this.syncBadgeEl.setText(this.host.sync.enabled ? " \xB7 sync on" : " \xB7 sync off");
+    var _a;
+    (_a = this.syncBadgeEl) == null ? void 0 : _a.setText(this.host.sync.enabled ? " \xB7 rolagem sincronizada" : " \xB7 rolagem livre");
+  }
+  updateStatus() {
+    var _a;
+    const s = this.host.session;
+    if (!s || !this.statusEl) return;
+    const simplified = s.rows.some((row) => row.simplified);
+    this.statusEl.setText(s.error || (s.status === "updating" ? "Atualizando compara\xE7\xE3o\u2026" : `${s.counts.changed} blocos alterados${simplified ? " \xB7 detalhamento simplificado em alguns trechos" : ""}`));
+    this.statusEl.toggleClass("lgd-error", !!s.error);
+    (_a = this.bodyEl) == null ? void 0 : _a.setAttr("aria-busy", String(s.status === "updating"));
+    if (s.status !== "ready") for (const entry of this.cache.values()) {
+      entry.element.removeClass(CLS.mod, CLS.del);
+      unwrapCharMarks(entry.content);
+      entry.note.setText("");
+    }
+  }
+  async render() {
+    var _a, _b, _c;
+    const s = this.host.session, generation = ++this.generation;
+    if (!s) {
+      this.contentEl.empty();
+      this.contentEl.createDiv({ cls: "lgd-empty", text: "Abra uma revis\xE3o para comparar a nota." });
+      return;
+    }
+    const key = JSON.stringify([s.filePath, s.sha, s.breaks]);
+    if (this.renderKey !== key || !this.bodyEl) {
+      this.renderKey = key;
+      (_a = this.component) == null ? void 0 : _a.unload();
+      this.component = new import_obsidian.Component();
+      this.component.load();
+      const root = this.contentEl;
+      root.empty();
+      root.addClass("lgd-view");
+      this.cache.clear();
+      this.blockEls.clear();
+      const header = root.createDiv({ cls: "lgd-header" });
+      header.createDiv({ cls: "lgd-title", text: s.fileName });
+      const sub = header.createDiv({ cls: "lgd-sub" });
+      sub.createSpan({ cls: "lgd-sha", text: `Base ${s.shortSha} \xB7 ${s.baseRefLabel}` });
+      if (s.baseCommit) {
+        sub.createSpan({ cls: "lgd-subject", text: " \xB7 " + s.baseCommit.subject });
+        sub.createSpan({ cls: "lgd-age", text: " \xB7 " + s.baseCommit.relative, attr: { title: s.baseCommit.date } });
+      }
+      if (s.baseReadAs) sub.createSpan({ cls: "lgd-renamed", text: " \xB7 caminho anterior: " + s.baseReadAs });
+      this.statusEl = header.createDiv({ cls: "lgd-sub", attr: { role: "status", "aria-live": "polite" } });
+      this.syncBadgeEl = header.createDiv({ cls: "lgd-sync" });
+      this.updateSyncBadge();
+      this.bodyEl = root.createDiv({ cls: "lgd-body markdown-preview-view markdown-rendered" });
+      this.sizer = this.bodyEl.createDiv({ cls: "markdown-preview-sizer markdown-preview-section" });
+    }
+    this.updateStatus();
+    if (s.status !== "ready" || !this.sizer || !this.component) return;
+    const references = s.baseReferences;
+    const sourcePath = s.filePath.replace(/[^/]+$/, "__live_git_diff_history__.md");
+    this.blockEls.clear();
+    let batchStart = performance.now();
+    for (const row of s.baseRows) {
+      if (generation !== this.generation || this.host.session !== s || s.status !== "ready") return;
+      const block = row.a;
+      let entry = this.cache.get(block.sourceStart);
+      if (!entry) {
+        const element = this.sizer.createDiv({ cls: CLS.block });
+        const content = element.createDiv({ cls: "lgd-content" });
+        const note = element.createDiv({ cls: "lgd-explanation" });
+        entry = { element, content, note, rendered: Promise.resolve() };
+        this.cache.set(block.sourceStart, entry);
+        if (block.type === "properties" || block.type === "reference" || ((_b = block.conservative) == null ? void 0 : _b.startsWith("Conte\xFAdo gerado"))) {
+          content.createEl("pre").createEl("code", { text: block.text });
+        } else {
+          entry.rendered = import_obsidian.MarkdownRenderer.render(this.app, block.text + (references ? "\n\n" + references : ""), content, sourcePath, this.component);
+        }
+      }
+      await entry.rendered;
+      if (entry.content.firstElementChild) entry.element.addClass("el-" + entry.content.firstElementChild.tagName.toLowerCase());
+      if (generation !== this.generation || this.host.session !== s || s.status !== "ready") return;
+      entry.element.setAttr(ATTR_ROW, String(row.idx));
+      entry.element.setAttr("data-line-start", String(block.lineStart));
+      entry.element.setAttr("data-line-end", String(block.lineEnd));
+      entry.element.removeClass(CLS.mod, CLS.del, CLS.same);
+      entry.element.addClass(row.kind === "del" ? CLS.del : row.kind === "mod" ? CLS.mod : CLS.same);
+      entry.note.setText([row.structural || block.conservative, row.simplified ? "Detalhamento simplificado; o bloco continua marcado como alterado." : ""].filter(Boolean).join(" "));
+      unwrapCharMarks(entry.content);
+      applyRowMarks(row, entry.content, "a");
+      this.blockEls.set(row.idx, entry.element);
+      if (performance.now() - batchStart >= 8) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        batchStart = performance.now();
+      }
+    }
+    if (!((_c = this.endPadEl) == null ? void 0 : _c.isConnected)) this.endPadEl = this.sizer.createDiv({ cls: CLS.endpad });
+    this.endPadEl.style.height = "60vh";
+    this.host.sync.attach();
   }
   async onClose() {
+    var _a;
+    this.generation++;
+    (_a = this.component) == null ? void 0 : _a.unload();
+    this.component = null;
     this.bodyEl = null;
-    this.blockEls = /* @__PURE__ */ new Map();
-    this.spacerEls = /* @__PURE__ */ new Map();
+    this.cache.clear();
+    this.blockEls.clear();
   }
 };
 
@@ -968,10 +709,10 @@ function indexSide(list, K) {
     i = j;
   }
 }
-function buildSession(file, baseText, ctx, pin, currentText) {
-  const headBlocks = blocks(baseText);
-  const curBlocks = blocks(currentText);
-  const rows = pair(headBlocks, curBlocks);
+function sessionFromRows(file, baseText, ctx, pin, currentText, input, revision = 0, breaks = false) {
+  const rows = input;
+  const headBlocks = rows.flatMap((r) => r.a ? [r.a] : []);
+  const curBlocks = rows.flatMap((r) => r.b ? [r.b] : []);
   const curMap = [];
   for (const row of rows) {
     if (!row.b) continue;
@@ -990,6 +731,12 @@ function buildSession(file, baseText, ctx, pin, currentText) {
   indexSide(noteRows, "pn");
   indexSide(baseRows, "pb");
   return {
+    revision,
+    status: "ready",
+    currentText,
+    baseText,
+    baseReferences: "",
+    breaks,
     filePath: file.path,
     fileName: file.name,
     sha: pin.sha,
@@ -1010,6 +757,12 @@ function buildSession(file, baseText, ctx, pin, currentText) {
 }
 function errorSession(file, msg) {
   return {
+    revision: 0,
+    status: "error",
+    currentText: "",
+    baseText: "",
+    baseReferences: "",
+    breaks: false,
     filePath: file.path,
     fileName: file.name,
     sha: "",
@@ -1027,6 +780,280 @@ function errorSession(file, msg) {
     counts: { blocks: 0, curBlocks: 0, changed: 0 },
     error: msg
   };
+}
+var RevisionGate = class {
+  constructor() {
+    this.epoch = 0;
+    this.active = null;
+  }
+  begin(filePath, sha) {
+    this.active = { epoch: ++this.epoch, filePath, sha, revision: 0 };
+    return this.active;
+  }
+  next() {
+    if (this.active) this.active = { ...this.active, revision: this.active.revision + 1 };
+    return this.active;
+  }
+  accepts(value) {
+    const a = this.active;
+    return !!a && a.epoch === value.epoch && a.filePath === value.filePath && a.sha === value.sha && a.revision === value.revision;
+  }
+  close() {
+    this.active = null;
+    this.epoch++;
+  }
+};
+
+// src/workerClient.ts
+var ComparisonWorker = class {
+  constructor(factory) {
+    this.worker = null;
+    this.pending = null;
+    this.cache = null;
+    this.factory = factory || (() => {
+      const url = URL.createObjectURL(new Blob([require_worker()], { type: "text/javascript" }));
+      try {
+        return new Worker(url);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    });
+  }
+  cancel() {
+    var _a;
+    (_a = this.worker) == null ? void 0 : _a.terminate();
+    this.worker = null;
+    if (this.pending) {
+      clearTimeout(this.pending.timer);
+      const error2 = new Error("Compara\xE7\xE3o substitu\xEDda.");
+      error2.name = "AbortError";
+      this.pending.reject(error2);
+      this.pending = null;
+    }
+  }
+  compare(request) {
+    var _a;
+    this.cancel();
+    const key = JSON.stringify([request.identity.filePath, request.identity.sha, request.options]);
+    if (((_a = this.cache) == null ? void 0 : _a.key) === key) request = { ...request, baseBlocks: this.cache.blocks, baseReferences: this.cache.references, baseText: "" };
+    return new Promise((resolve, reject) => {
+      try {
+        const worker = this.factory();
+        this.worker = worker;
+        const fail = (error2) => {
+          if (this.worker !== worker) return;
+          if (this.pending) clearTimeout(this.pending.timer);
+          this.pending = null;
+          worker.terminate();
+          this.worker = null;
+          reject(error2);
+        };
+        this.pending = { reject, timer: setTimeout(() => fail(new Error("A compara\xE7\xE3o excedeu o tempo limite.")), 15e3) };
+        worker.onmessage = (event) => {
+          if (this.worker !== worker) return;
+          const result = event.data;
+          if (JSON.stringify(result.identity) !== JSON.stringify(request.identity)) return;
+          if (result.error) {
+            fail(new Error(result.error));
+            return;
+          }
+          if (!Array.isArray(result.rows)) {
+            fail(new Error("Resposta incompleta do worker; compara\xE7\xE3o indispon\xEDvel."));
+            return;
+          }
+          if (this.pending) clearTimeout(this.pending.timer);
+          this.pending = null;
+          if (result.baseBlocks) this.cache = { key, blocks: result.baseBlocks, references: result.baseReferences || "" };
+          resolve(result);
+        };
+        worker.onerror = (event) => fail(new Error(event.message || "Falha no worker da compara\xE7\xE3o."));
+        worker.postMessage(request);
+      } catch (error2) {
+        reject(error2);
+      }
+    });
+  }
+  dispose() {
+    this.cancel();
+    this.cache = null;
+  }
+};
+
+// src/editor.ts
+var import_state = require("@codemirror/state");
+var import_view = require("@codemirror/view");
+var import_obsidian3 = require("obsidian");
+
+// src/editorPresentation.ts
+function reviewRegions(rows) {
+  return rows.flatMap((row) => {
+    if (!row.b || row.kind === "same") return [];
+    if (row.items && !row.simplified && !row.listStructureChanged) return reviewRegions(row.items);
+    const block = row.b;
+    return [{ block, row, gutterOnly: block.type === "table" || !!block.conservative || /!\[\[|!\[/.test(block.text) }];
+  });
+}
+
+// src/editor.ts
+var presentReview = import_state.StateEffect.define();
+var ChangeMarker = class extends import_view.GutterMarker {
+  constructor(kind, message) {
+    super();
+    this.kind = kind;
+    this.message = message;
+    this.elementClass = kind === "ins" ? "lgd-gutter-ins" : "lgd-gutter-mod";
+  }
+  eq(other) {
+    return this.kind === other.kind && this.message === other.message;
+  }
+  toDOM(view) {
+    const element = view.dom.ownerDocument.createElement("span");
+    element.textContent = this.kind === "ins" ? "+" : "\u2502";
+    element.title = this.message;
+    return element;
+  }
+};
+var empty = () => ({ decorations: import_view.Decoration.none, markers: import_state.RangeSet.empty, revision: -1 });
+var reviewMarks = import_state.StateField.define({
+  create: empty,
+  update(value, transaction) {
+    var _a, _b;
+    if (transaction.docChanged) return empty();
+    const info = transaction.state.field(import_obsidian3.editorInfoField, false);
+    for (const effect of transaction.effects) if (effect.is(presentReview)) {
+      const data = effect.value;
+      if (!data || data.filePath !== ((_a = info == null ? void 0 : info.file) == null ? void 0 : _a.path) || data.text !== transaction.state.doc.toString()) return empty();
+      const decorations = [], markers = [];
+      for (const { block, row, gutterOnly } of reviewRegions(data.rows)) {
+        const message = row.structural || (row.simplified ? "Altera\xE7\xE3o; detalhamento simplificado." : row.kind === "ins" ? "Bloco inclu\xEDdo." : "Bloco alterado.");
+        for (let number = block.lineStart + 1; number <= Math.min(block.lineEnd + 1, transaction.state.doc.lines); number++) {
+          const line = transaction.state.doc.line(number);
+          markers.push(new ChangeMarker(row.kind, message).range(line.from));
+          if (!gutterOnly) decorations.push(import_view.Decoration.line({ class: row.kind === "ins" ? "lgd-editor-ins" : "lgd-editor-mod" }).range(line.from));
+        }
+        if (gutterOnly) continue;
+        for (const [start, end] of ((_b = row.sourceDetail) == null ? void 0 : _b.b) || []) {
+          const from = block.sourceStart + start, to = block.sourceStart + end;
+          if (to > from && to <= transaction.state.doc.length) decorations.push(import_view.Decoration.mark({ class: "lgd-char-ins" }).range(from, to));
+        }
+      }
+      value = { decorations: import_view.Decoration.set(decorations, true), markers: import_state.RangeSet.of(markers, true), revision: data.revision };
+    }
+    return value;
+  },
+  provide: (field) => import_view.EditorView.decorations.from(field, (value) => value.decorations)
+});
+var reviewGutter = new import_state.Compartment();
+var changeGutter = (0, import_view.gutter)({ class: "lgd-gutter", markers: (view) => view.state.field(reviewMarks).markers });
+function reviewExtension(host) {
+  return [
+    reviewMarks,
+    reviewGutter.of([]),
+    import_view.ViewPlugin.fromClass(class {
+      constructor(view) {
+        this.view = view;
+        host.editorAttached(view);
+      }
+      update(update) {
+        var _a, _b;
+        const path2 = (_b = (_a = update.state.field(import_obsidian3.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+        if (update.docChanged && path2) host.editorChanged(update.view, path2);
+        if (update.geometryChanged || update.viewportChanged) host.editorGeometryChanged();
+      }
+      destroy() {
+        host.editorDetached(this.view);
+      }
+    })
+  ];
+}
+function editorPath(view) {
+  var _a, _b;
+  return (_b = (_a = view.state.field(import_obsidian3.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+}
+function publish(view, value, reviewing = !!value) {
+  const effects = [presentReview.of(value)];
+  if (reviewGutter.get(view.state) === changeGutter !== reviewing) {
+    effects.push(reviewGutter.reconfigure(reviewing ? changeGutter : []));
+  }
+  view.dispatch({ effects });
+}
+function editorTopLine(view) {
+  const top = view.scrollDOM.getBoundingClientRect().top;
+  const position = view.posAtCoords({ x: view.contentDOM.getBoundingClientRect().left + 5, y: top + 4 }, false);
+  if (position !== null) {
+    const line = view.state.doc.lineAt(position), block2 = view.lineBlockAt(position);
+    const fraction = Math.max(0, Math.min(1, (top - view.documentTop - block2.top) / Math.max(1, block2.height)));
+    return line.number - 1 + fraction;
+  }
+  const block = view.lineBlockAtHeight(Math.max(0, top - view.documentTop));
+  return view.state.doc.lineAt(block.from).number - 1;
+}
+function scrollEditorToLine(view, value) {
+  const line = view.state.doc.line(Math.max(1, Math.min(view.state.doc.lines, Math.floor(value) + 1)));
+  view.dispatch({ effects: import_view.EditorView.scrollIntoView(line.from, { y: "start", yMargin: 0 }) });
+}
+
+// src/dom.ts
+function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+function offsetIn(box, el) {
+  return el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+}
+function maxScroll(box) {
+  return Math.max(0, box.scrollHeight - box.clientHeight);
+}
+function findPreviewScroller(view) {
+  const v = view;
+  const roots = [];
+  if (v.previewMode && v.previewMode.containerEl) roots.push(v.previewMode.containerEl);
+  if (v.contentEl) roots.push(v.contentEl);
+  if (v.containerEl) roots.push(v.containerEl);
+  const scrollable = (el) => {
+    if (!el) return false;
+    const win = el.ownerDocument && el.ownerDocument.defaultView || window;
+    const ov = win.getComputedStyle(el).overflowY;
+    return ov === "auto" || ov === "scroll" || el.scrollHeight > el.clientHeight + 1;
+  };
+  for (const root of roots) {
+    const cands = [];
+    if (root.classList && root.classList.contains("markdown-preview-view")) cands.push(root);
+    cands.push(...Array.from(root.querySelectorAll(".markdown-preview-view")));
+    cands.push(...Array.from(root.querySelectorAll(".markdown-reading-view")));
+    for (const c of cands) if (scrollable(c)) return c;
+  }
+  return null;
+}
+function topmostVisible(container, els) {
+  const top = container.getBoundingClientRect().top;
+  for (const el of Array.from(els)) {
+    const rect = el.getBoundingClientRect();
+    if (rect.bottom > top + 1) {
+      const frac = rect.height > 0 ? clamp((top - rect.top) / rect.height, 0, 1) : 0;
+      return { el, rect, frac };
+    }
+  }
+  return null;
+}
+
+// src/scrollModel.ts
+function noteScrollTarget(rows, line, resolve) {
+  if (!Number.isFinite(line)) return null;
+  let previous = null;
+  for (const row of rows) {
+    const block = row.b;
+    if (!block) continue;
+    if (line < block.lineStart) {
+      const lo = previous ? resolve(previous, 1) : 0, hi = resolve(row, 0);
+      if (lo === null || hi === null) return null;
+      const start = (previous == null ? void 0 : previous.b) ? previous.b.lineEnd + 1 : 0;
+      const fraction = Math.max(0, Math.min(1, (line - start) / Math.max(1, block.lineStart - start)));
+      return lo + (hi - lo) * fraction;
+    }
+    if (line <= block.lineEnd + 1) return resolve(row, (line - block.lineStart) / (block.lineEnd - block.lineStart + 1));
+    previous = row;
+  }
+  return previous ? resolve(previous, 1) : null;
 }
 
 // src/sync.ts
@@ -1073,7 +1100,7 @@ var ScrollSync = class {
   attach() {
     this.detach();
     const session = this.host.session;
-    if (!session || session.error) return;
+    if (!session || session.error || session.status !== "ready") return;
     const note = this.host.notePane();
     if (note) this.addListener(note.scroller, "scroll", () => this.onScroll("note"));
     const base = this.host.basePane();
@@ -1223,10 +1250,18 @@ var ScrollSync = class {
    * ---------------------------------------------------------------- */
   /** NOTE pane (A) drives the BASE pane (B). Pure pixel math on DOM we own. */
   syncNoteToBase() {
+    var _a;
     const note = this.host.notePane();
     const base = this.host.basePane();
     if (!note || !base) return;
-    this.host.zones.refresh();
+    if (note.editorView) {
+      const line = editorTopLine(note.editorView);
+      const target2 = noteScrollTarget(((_a = this.host.session) == null ? void 0 : _a.noteRows) || [], line, (row2, fraction) => this.baseScrollTopFor(row2, fraction));
+      if (target2 !== null && Math.abs(base.scrollTop - target2) >= 1) this.scrollLock("base", () => {
+        base.scrollTop = target2;
+      });
+      return;
+    }
     const hit = topmostVisible(
       note.scroller,
       note.scroller.querySelectorAll(`.${CLS.nblock}`)
@@ -1278,7 +1313,10 @@ var ScrollSync = class {
     const line = this.noteLineFor(row, hit.frac);
     if (line == null || !isFinite(line)) return;
     this.scrollLock("note", () => {
-      this.applyNoteScroll(note.view, line);
+      if (note.editorView) {
+        scrollEditorToLine(note.editorView, line);
+        this.lastScrollApi = "EditorView.scrollIntoView";
+      } else this.applyNoteScroll(note.view, line);
     });
   }
   /**
@@ -1660,7 +1698,7 @@ var ViewZones = class {
 };
 
 // src/settings.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 var DEFAULT_SETTINGS = {
   colors: { insBg: "", delBg: "", insRail: "", delRail: "" },
   baseRefMode: "head",
@@ -1725,7 +1763,7 @@ function mergeSettings(loaded) {
     colors: { ...DEFAULT_SETTINGS.colors, ...l.colors || {} }
   };
 }
-var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
+var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -1733,12 +1771,12 @@ var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian3.Setting(containerEl).setName("Base version").setHeading();
+    new import_obsidian4.Setting(containerEl).setName("Base version").setHeading();
     const pickerNote = containerEl.createEl("p", { cls: "lgd-settings-note" });
     pickerNote.setText(
       `To choose a version per review, use the command "Open review against a version\u2026" \u2014 it lists this file's recent commits by subject and age. These settings only decide what the plain "Open git diff review" command compares against.`
     );
-    new import_obsidian3.Setting(containerEl).setName("Compare against by default").setDesc(
+    new import_obsidian4.Setting(containerEl).setName("Compare against by default").setDesc(
       "Whichever you pick is resolved to a commit when the review opens, and that commit is then pinned for the session \u2014 so the diff cannot shrink while something else commits to the repo mid-review."
     ).addDropdown(
       (d) => d.addOption("head", "The latest commit (HEAD)").addOption("head~1", "One commit before HEAD (HEAD~1)").addOption("file-prev", "This file's previous version").addOption("custom", "A specific ref\u2026").setValue(this.plugin.settings.baseRefMode).onChange(async (v) => {
@@ -1760,7 +1798,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
       );
     }
     if (this.plugin.settings.baseRefMode === "custom") {
-      new import_obsidian3.Setting(containerEl).setName("Ref").setDesc(
+      new import_obsidian4.Setting(containerEl).setName("Ref").setDesc(
         "Anything git resolves: main, origin/main, v1.2, HEAD~5, a sha, main@{yesterday}."
       ).addText(
         (t) => t.setPlaceholder("main").setValue(this.plugin.settings.baseRef).onChange(async (v) => {
@@ -1769,13 +1807,13 @@ var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
         })
       );
     }
-    new import_obsidian3.Setting(containerEl).setName("Versions to list").setDesc("How many commits the version picker shows.").addSlider(
+    new import_obsidian4.Setting(containerEl).setName("Versions to list").setDesc("How many commits the version picker shows.").addSlider(
       (s) => s.setLimits(10, 200, 10).setValue(this.plugin.settings.logLimit).setDynamicTooltip().onChange(async (v) => {
         this.plugin.settings.logLimit = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Colors").setHeading();
+    new import_obsidian4.Setting(containerEl).setName("Colors").setHeading();
     const note = containerEl.createEl("p", { cls: "lgd-settings-note" });
     note.setText(
       "Defaults are GitHub's diff palette and follow your light/dark theme. Any CSS color works \u2014 including alpha, which matters: these are washes that sit behind text, and the defaults are translucent on purpose. Leave a field empty to use the default. An override applies to both themes."
@@ -1783,7 +1821,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
     Object.keys(CSS_VAR).forEach((key) => {
       const label = FIELD_LABEL[key];
       let swatch = null;
-      const setting = new import_obsidian3.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
+      const setting = new import_obsidian4.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
         t.setPlaceholder(LIGHT_DEFAULT[key]).setValue(this.plugin.settings.colors[key]).onChange(async (v) => {
           const val = v.trim();
           const ok = isValidColor(val);
@@ -1799,15 +1837,15 @@ var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
       swatch = setting.controlEl.createDiv({ cls: "lgd-swatch", text: "abc" });
       swatch.style.background = this.plugin.settings.colors[key] || LIGHT_DEFAULT[key];
     });
-    new import_obsidian3.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
+    new import_obsidian4.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
       (b) => b.setButtonText("Reset").onClick(async () => {
         this.plugin.settings.colors = { ...DEFAULT_SETTINGS.colors };
         await this.plugin.saveSettings();
         this.display();
       })
     );
-    new import_obsidian3.Setting(containerEl).setName("Advanced").setHeading();
-    new import_obsidian3.Setting(containerEl).setName("Debug logging").setDesc(
+    new import_obsidian4.Setting(containerEl).setName("Advanced").setHeading();
+    new import_obsidian4.Setting(containerEl).setName("Debug logging").setDesc(
       "Verbose console output, and extra detail in the alignment report. Warnings and errors are logged regardless of this setting."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.debug).onChange(async (v) => {
@@ -1819,136 +1857,103 @@ var LiveGitDiffSettingTab = class extends import_obsidian3.PluginSettingTab {
 };
 
 // src/main.ts
-function previewRenderer(view) {
-  var _a;
-  const r = (_a = view.previewMode) == null ? void 0 : _a.renderer;
-  return r && Array.isArray(r.sections) && typeof r.getSectionInfo === "function" ? r : null;
-}
-var LiveGitDiffPlugin = class extends import_obsidian4.Plugin {
+var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
-    /** In-memory only; deliberately never persisted. Close Obsidian and it is gone. */
     this.session = null;
-    /**
-     * Note-pane section element -> its source line range.
-     * WeakMap because the reading view DISCARDS and recreates section elements as you
-     * scroll; a strong Map would pin dead DOM for the life of the session.
-     */
+    this.worker = new ComparisonWorker();
+    this.revisions = new RevisionGate();
+    this.editors = /* @__PURE__ */ new Set();
+    this.preferredEditor = null;
+    this.reviewLeaf = null;
     this.noteLines = /* @__PURE__ */ new WeakMap();
-    /** Warn about a missing scroller once per session, not once per frame. */
-    this.warnedNoScroller = false;
-    /** Warn once if Obsidian's preview-renderer internals aren't the shape we decorate against. */
-    this.warnedNoRenderer = false;
+    this.timer = null;
+    this.opening = 0;
+    this.disposed = false;
   }
   async onload() {
     await this.loadSettings();
     this.zones = new ViewZones(this);
     this.sync = new ScrollSync(this);
-    this.charMarks = new CharMarkLayer(this);
-    this.zones.onAfterDebouncedRefresh = () => {
-      if (this.sync.enabled && !this.sync.busy) this.sync.syncNoteToBase();
-    };
-    this.charMarks.onHeightChange = () => this.zones.scheduleRefresh();
+    this.marks = new CharMarkLayer(this);
+    this.registerEditorExtension(reviewExtension(this));
     this.registerView(VIEW_TYPE, (leaf) => new GitBaseView(leaf, this));
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
-    this.addCommand({
-      id: "open-review",
-      name: "Open git diff review for this file",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) void this.openReview();
-        return true;
-      }
+    const command = (id, name, run, review = false) => {
+      this.addCommand({ id, name, checkCallback: (checking) => {
+        var _a;
+        const allowed = review ? !!this.session : ((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.extension) === "md";
+        if (allowed && !checking) run();
+        return allowed;
+      } });
+    };
+    command("open-review", "Open git diff review for this file", () => {
+      void this.openReview();
     });
-    this.addCommand({
-      id: "open-review-against-ref",
-      name: "Open review against a version\u2026",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) void this.pickBaseAndOpen();
-        return true;
-      }
+    command("open-review-against-ref", "Open review against a version\u2026", () => this.pickBaseAndOpen());
+    command("refresh-review", "Refresh review (re-pin the base version)", () => {
+      void this.openReview({ repin: true });
     });
-    this.addCommand({
-      id: "close-review",
-      name: "Close review",
-      checkCallback: (checking) => {
-        if (!this.session) return false;
-        if (!checking) this.closeReview();
-        return true;
-      }
+    command("close-review", "Close review", () => this.closeReview(), true);
+    command("toggle-scroll-sync", "Toggle scroll sync", () => this.toggleSync(), true);
+    command("copy-alignment-report", "Copy alignment report to clipboard", () => {
+      void this.reportAlignment();
+    }, true);
+    command("refresh-annotations", "Refresh annotations in the note pane", () => this.rerenderPreviews(), true);
+    this.registerMarkdownPostProcessor((element, context) => {
+      var _a;
+      if (element.closest(".lgd-view") || context.sourcePath !== ((_a = this.session) == null ? void 0 : _a.filePath)) return;
+      const info = context.getSectionInfo(element);
+      if (info) this.decorateNoteSection(element, info);
     });
-    this.addCommand({
-      id: "refresh-review",
-      name: "Refresh review (re-pin the base version)",
-      checkCallback: (checking) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file || file.extension !== "md") return false;
-        if (!checking) void this.openReview({ repin: true });
-        return true;
+    const layout = () => {
+      this.sync.attach();
+      queueMicrotask(() => {
+        if (!this.disposed) {
+          this.publishEditorMarks();
+          this.decorateNotePaneInPlace();
+        }
+      });
+      if (this.session) void this.checkBreaks();
+    };
+    this.registerEvent(this.app.workspace.on("layout-change", layout));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", layout));
+    this.registerEvent(this.app.workspace.on("resize", () => this.sync.attach()));
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      var _a;
+      if (file instanceof import_obsidian5.TFile && file.path === ((_a = this.session) == null ? void 0 : _a.filePath)) void this.externalChange(file);
+    }));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      var _a, _b;
+      if (oldPath !== ((_a = this.session) == null ? void 0 : _a.filePath)) return;
+      this.invalidate();
+      if (this.session) {
+        this.session.error = `Nota renomeada para ${file.path}. Reabra a revis\xE3o.`;
+        this.session.status = "error";
       }
-    });
-    this.addCommand({
-      id: "toggle-scroll-sync",
-      name: "Toggle scroll sync",
-      checkCallback: (checking) => {
-        if (!this.session || this.session.error) return false;
-        if (!checking) this.toggleSync();
-        return true;
-      }
-    });
-    this.addCommand({
-      id: "copy-alignment-report",
-      name: "Copy alignment report to clipboard",
-      checkCallback: (checking) => {
-        if (!this.session || this.session.error) return false;
-        if (!checking) void this.reportAlignment();
-        return true;
-      }
-    });
-    this.addCommand({
-      id: "refresh-annotations",
-      name: "Refresh annotations in the note pane",
-      checkCallback: (checking) => {
-        if (!this.session || this.session.error) return false;
-        if (!checking) this.rerenderPreviews();
-        return true;
-      }
-    });
-    this.registerMarkdownPostProcessor((el, ctx) => {
-      try {
-        const session = this.session;
-        if (!session || session.error) return;
-        if (!ctx.sourcePath || ctx.sourcePath !== session.filePath) return;
-        const info = ctx.getSectionInfo(el);
-        if (!info) return;
-        this.decorateNoteSection(el, info);
-      } catch (e) {
-        error("post-processor error", e);
-      }
-    });
-    this.registerEvent(this.app.workspace.on("layout-change", () => this.sync.attach()));
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.sync.attach()));
-    this.registerEvent(this.app.workspace.on("resize", () => this.zones.scheduleRefresh()));
+      (_b = this.baseView()) == null ? void 0 : _b.updateStatus();
+    }));
+    this.registerEvent(this.app.vault.on("delete", (file) => {
+      var _a;
+      if (file.path === ((_a = this.session) == null ? void 0 : _a.filePath)) this.closeReview();
+    }));
+    this.register(() => this.worker.dispose());
     this.register(() => this.sync.dispose());
-    this.register(() => this.zones.dispose());
   }
   onunload() {
+    this.disposed = true;
+    this.opening++;
+    this.revisions.close();
+    if (this.timer) clearTimeout(this.timer);
+    this.worker.dispose();
     this.sync.dispose();
-    this.zones.dispose();
-    try {
-      this.clearNoteDecorations();
-    } catch (e) {
-    }
-    clearColors();
+    this.clearNoteDecorations();
     this.session = null;
+    this.publishEditorMarks();
+    this.zones.dispose();
+    clearColors();
   }
-  /* ---------------------------------------------------------------- *
-   * settings                                                          *
-   * ---------------------------------------------------------------- */
   async loadSettings() {
     this.settings = mergeSettings(await this.loadData());
     setDebug(this.settings.debug);
@@ -1959,578 +1964,364 @@ var LiveGitDiffPlugin = class extends import_obsidian4.Plugin {
     setDebug(this.settings.debug);
     applyColors(this.settings);
   }
-  /* ---------------------------------------------------------------- *
-   * pane handles (PaneHost)                                           *
-   * ---------------------------------------------------------------- */
-  /**
-   * The NOTE pane (pane A): the real markdown leaf showing this session's file in
-   * READING view, plus the element that actually scrolls it.
-   */
-  notePane() {
-    const session = this.session;
-    if (!session || session.error) return null;
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const view = leaf.view;
-      if (!(view instanceof import_obsidian4.MarkdownView)) continue;
-      if (!view.file || view.file.path !== session.filePath) continue;
-      if (typeof view.getMode === "function" && view.getMode() !== "preview") continue;
-      const scroller = findPreviewScroller(view);
-      if (!scroller) {
-        if (!this.warnedNoScroller) {
-          this.warnedNoScroller = true;
-          warn(
-            `could not identify the reading-view scroll container for ${session.filePath} \u2014 scroll sync from the note pane is disabled. Expected a scrollable \`.markdown-preview-view\`.`
-          );
-        }
-        return null;
-      }
-      return { view, scroller };
-    }
-    return null;
-  }
-  /** The BASE pane (pane B) view instance, if open. */
-  baseView() {
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
-      if (leaf.view instanceof GitBaseView) return leaf.view;
-    }
-    return null;
-  }
-  /** The BASE pane's scrolling element. */
-  basePane() {
-    const v = this.baseView();
-    const body = v && v.bodyEl;
-    return body && body.isConnected ? body : null;
-  }
-  /**
-   * The base-pane element standing in for `rowIdx` — a real block, or the VIEW ZONE
-   * that occupies the place a real block would have.
-   *
-   * THE SINGLE RESOLVER, and the reason the anchor is exact.
-   *
-   * Before view zones existed, only paired rows had a base element; a topmost-visible
-   * 'ins' row resolved to nothing and sync fell through to the interpolating estimate,
-   * which was measured up to 340px off. It wasn't the interpolation misbehaving; it was
-   * the interpolation being asked a question it can only estimate.
-   *
-   * A spacer sits at exactly the position its row's content occupies in the note's
-   * reading order, so aligning an inserted note block to its spacer is not an
-   * approximation — it is the same answer a real block would give. Every note row now
-   * has a counterpart here, which makes interpolation a guard rather than a path.
-   *
-   * NOTE the zero-height case is still CORRECT, not merely tolerable: a spacer whose
-   * height hasn't been harvested yet is 0px tall but is still in the right PLACE, so the
-   * anchor lands exactly; only the blocks below it stay off until the height is known.
-   * Strictly better than interpolating, at every stage of the harvest.
-   */
-  baseElFor(rowIdx) {
-    const view = this.baseView();
-    if (!view) return null;
-    const el = view.blockEls && view.blockEls.get(rowIdx) || view.spacerEls && view.spacerEls.get(rowIdx);
-    return el && el.isConnected ? el : null;
-  }
-  /* ---------------------------------------------------------------- *
-   * row lookup (SyncHost)                                             *
-   * ---------------------------------------------------------------- */
-  noteLineInfo(el) {
-    return this.noteLines.get(el);
-  }
-  /** Note-pane section line range -> the row it belongs to (best line overlap). */
-  rowForNoteRange(lineStart, lineEnd) {
-    const session = this.session;
-    if (!session) return null;
-    let best = null;
-    let bestOverlap = 0;
-    for (const row of session.noteRows) {
-      if (!row.b) continue;
-      const overlap = Math.min(lineEnd, row.b.lineEnd) - Math.max(lineStart, row.b.lineStart) + 1;
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap;
-        best = row;
-      }
-    }
-    return bestOverlap > 0 ? best : null;
-  }
-  /**
-   * Best-overlap lookup from an Obsidian section's line range to a pair kind.
-   * Obsidian's sectioning and our block splitting agree in the common case but are not
-   * guaranteed identical (lists, callouts), so we match by maximum line overlap rather
-   * than requiring exact range equality. test/grain-oracle.test.ts is what keeps that
-   * "common case" honest.
-   */
-  kindForRange(session, lineStart, lineEnd) {
-    let best = null;
-    let bestOverlap = 0;
-    for (const b of session.curMap) {
-      const overlap = Math.min(lineEnd, b.lineEnd) - Math.max(lineStart, b.lineStart) + 1;
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap;
-        best = b;
-      }
-    }
-    return bestOverlap > 0 && best ? best.kind : null;
-  }
-  /* ---------------------------------------------------------------- *
-   * review lifecycle                                                  *
-   * ---------------------------------------------------------------- */
-  toggleSync() {
-    this.sync.enabled = !this.sync.enabled;
-    const v = this.baseView();
-    if (v instanceof GitBaseView) v.updateSyncBadge();
-    new import_obsidian4.Notice(`Scroll sync ${this.sync.enabled ? "on" : "off"}`);
-    if (this.sync.enabled) this.sync.syncNoteToBase();
-  }
-  /**
-   * Resolve which commit to use as the base, honouring the settings.
-   *
-   * Returns the sha plus a human LABEL, because "HEAD" and "main" are different answers
-   * to "what am I looking at?" and a sha alone cannot tell them apart in the header.
-   */
-  resolveBase(ctx) {
-    const mode = this.settings.baseRefMode;
-    if (mode === "custom") {
-      const ref = this.settings.baseRef;
-      return { sha: resolveRef(ctx.root, ref), label: ref };
-    }
-    if (mode === "file-prev") {
-      const log = fileLog(ctx.root, ctx.rel, 2);
-      if (!log.length) {
-        throw new GitError(
-          `Not tracked in git:
-  ${ctx.rel}
-
-This file has no commits, so it has no previous version.`
-        );
-      }
-      if (log.length < 2) {
-        throw new GitError(
-          `This file has only one commit (${log[0].shortSha} \u2014 ${log[0].subject}),
-so there is no previous version of it to compare against.`
-        );
-      }
-      return { sha: log[1].sha, label: "previous version" };
-    }
-    if (mode === "head~1") return { sha: resolveRef(ctx.root, "HEAD~1"), label: "HEAD~1" };
-    return { sha: resolveRef(ctx.root, "HEAD"), label: "HEAD" };
-  }
-  /**
-   * Ask which version to review against, then open it.
-   *
-   * THE COMMAND THIS PLUGIN NEEDED. Pinning to HEAD assumes the changes under review are
-   * sitting uncommitted in the working tree. When commits are frequent and deliberate —
-   * an agent checkpointing so that reverting stays cheap — the changes are already
-   * committed by the time anyone reads them, often spread over several commits, and
-   * HEAD-vs-working-tree shows nothing at all.
-   *
-   * Note what does NOT change: the base ref moves, the NOTE PANE DOES NOT. It stays the
-   * real file in a real markdown leaf. Diffing two arbitrary commits against each other
-   * would make both panes synthetic, and a synthetic right-hand pane detaches every
-   * annotation and TTS plugin — which is the one property this whole design exists to
-   * protect. One version is chosen; the other is always what is on disk.
-   */
-  async pickBaseAndOpen() {
-    const file = this.app.workspace.getActiveFile();
-    if (!file || !(file instanceof import_obsidian4.TFile)) return;
-    try {
-      const ctx = resolveGit(this.app, file);
-      const commits = fileLog(ctx.root, ctx.rel, this.settings.logLimit);
-      if (!commits.length) {
-        new import_obsidian4.Notice(`${file.name} has no commits yet \u2014 there is no earlier version to compare against.`, 8e3);
-        return;
-      }
-      const modal = new CommitPickerModal(this.app, file.name, commits, (c) => {
-        void this.openReview({ ref: c.sha, label: c.shortSha });
-      });
-      modal.currentPath = ctx.rel;
-      modal.open();
-    } catch (e) {
-      const msg = e instanceof GitError ? e.message : `Unexpected error:
-${e.message}`;
-      new import_obsidian4.Notice(String(msg).split("\n")[0], 8e3);
-      error("could not list versions", e);
-    }
-  }
-  /**
-   * Open (or re-pin) a review for the active markdown file.
-   * @param opts.repin drop the pinned base and re-resolve from settings
-   * @param opts.ref   pin this exact ref (from the picker), overriding settings
-   */
-  async openReview(opts = {}) {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) {
-      new import_obsidian4.Notice("No active file.");
-      return;
-    }
-    if (!(file instanceof import_obsidian4.TFile) || file.extension !== "md") {
-      new import_obsidian4.Notice("Not a markdown file.");
-      return;
-    }
-    try {
-      const ctx = resolveGit(this.app, file);
-      const keep = !opts.repin && !opts.ref && this.session && this.session.filePath === file.path && !this.session.error ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
-      const base = keep || (opts.ref ? { sha: resolveRef(ctx.root, opts.ref), label: opts.label || opts.ref } : this.resolveBase(ctx));
-      const read = readBaseAt(ctx.root, ctx.rel, base.sha);
-      const commit = commitInfoFor(ctx.root, base.sha);
-      const currentText = await this.app.vault.cachedRead(file);
-      const pin = {
-        sha: base.sha,
-        label: base.label,
-        commit,
-        readAs: read.renamedFrom
-      };
-      this.session = buildSession(file, read.text, ctx, pin, currentText);
-      this.zones.reset();
-      this.charMarks.reset();
-      this.warnedNoScroller = false;
-      this.clearNoteDecorations();
-      if (this.session.counts.changed === 0) {
-        new import_obsidian4.Notice(
-          `No changes against ${base.label} (${this.session.shortSha}).` + (base.label === "HEAD" ? ' Your work is committed \u2014 use "Open review against a version\u2026" to pick an earlier one.' : ""),
-          8e3
-        );
-      } else {
-        new import_obsidian4.Notice(
-          `Base ${this.session.shortSha} \xB7 "${commit.subject}" \xB7 ${commit.relative} \u2014 ${this.session.counts.changed} changed block(s)`
-        );
-      }
-    } catch (e) {
-      const msg = e instanceof GitError ? e.message : `Unexpected error:
-${e.message}`;
-      this.session = errorSession(file, msg);
-      this.zones.reset();
-      this.charMarks.reset();
-      this.clearNoteDecorations();
-      new import_obsidian4.Notice(String(msg).split("\n")[0], 8e3);
-      error("open review failed", e);
-    }
-    await this.revealView();
-    this.decorateNotePaneInPlace();
-    this.sync.attach();
-  }
-  closeReview() {
-    this.sync.detach();
-    this.clearNoteDecorations();
-    this.session = null;
-    this.zones.reset();
-    this.charMarks.reset();
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
-    new import_obsidian4.Notice("Review closed.");
-  }
-  /**
-   * Decorate ONE already-rendered note section: tag it as an anchor, resolve its row, apply
-   * the deletion zone, set its kind, and (for changed rows) word-marks. This is the note
-   * post-processor's body, extracted so it can be driven two ways with identical behaviour —
-   * by Obsidian as sections render naturally, AND by decorateNotePaneInPlace() over sections
-   * already on screen when a review opened. Idempotent by construction: every primitive it
-   * calls is recycle-safe (setNoteKind SETS, charMarks/unwrapCharMarks self-revert, styleDelPad
-   * compares before writing).
-   */
-  decorateNoteSection(el, info) {
-    const session = this.session;
-    if (!session || session.error) return;
-    el.addClass(CLS.nblock);
-    this.noteLines.set(el, { lineStart: info.lineStart, lineEnd: info.lineEnd });
-    const row = this.rowForNoteRange(info.lineStart, info.lineEnd);
-    if (row) el.setAttr(ATTR_ROW, String(row.idx));
-    if (row) this.zones.styleDelPad(el);
-    const kind = row ? row.kind : this.kindForRange(session, info.lineStart, info.lineEnd);
-    setNoteKind(el, kind);
-    if (kind === "ins") {
-      if (row) this.zones.harvestInsHeight(row, el);
-    } else if (kind === "mod") {
-      if (row) this.charMarks.apply(row, el);
-    } else {
-      unwrapCharMarks(el);
-    }
-  }
-  /**
-   * Decorate the note pane's ALREADY-RENDERED sections in place — the alternative to forcing
-   * a rerender when a review opens.
-   *
-   * WHY NOT rerender(true): Obsidian implements it as `el.empty()` on every section, which
-   * SYNCHRONOUSLY destroys every OTHER plugin's note-pane decorations (annotation-plugin
-   * highlights, etc.) and bets they can all rebuild during the async re-render — a bet that
-   * fails at the hostile moment openReview creates (mid-split-resize, an ~84-render base-pane
-   * storm, inside Obsidian's `lastText = null` window). The sections that existed before the
-   * review opened have simply never passed through our post-processor; this runs it on them
-   * directly, touching nothing else. Later renders are covered by the registered processor as
-   * before. Root cause + probes: docs/designs/annotation-mark-wipe-fix.md.
-   *
-   * Feature-detected against Obsidian internals (previewMode.renderer.sections /
-   * getSectionInfo). If the shape ever changes, this falls back to the old rerender for that
-   * one leaf, warned once — the same degrade-loudly pattern the scroll APIs use (sync.ts).
-   *
-   * FOOTGUN, pre-neutralised: an UNRENDERED (empty) section must be skipped — decorating one
-   * would make charMarks diff "" against the base text and cache wrong ranges under row.idx
-   * for the whole session. An empty section has nothing to wash; the registered processor
-   * decorates it when it actually renders.
-   */
-  decorateNotePaneInPlace() {
-    const session = this.session;
-    if (!session || session.error) return;
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const view = leaf.view;
-      if (!(view instanceof import_obsidian4.MarkdownView)) continue;
-      if (!view.file || view.file.path !== session.filePath) continue;
-      if (typeof view.getMode === "function" && view.getMode() !== "preview") continue;
-      const renderer = previewRenderer(view);
-      if (!renderer) {
-        if (!this.warnedNoRenderer) {
-          this.warnedNoRenderer = true;
-          warn(
-            "previewMode.renderer.sections/getSectionInfo not found \u2014 falling back to a full rerender to decorate the note pane. Third-party annotation marks may flicker on open."
-          );
-        }
-        try {
-          if (view.previewMode && typeof view.previewMode.rerender === "function") {
-            view.previewMode.rerender(true);
-          }
-        } catch (e) {
-          error("rerender fallback failed", e);
-        }
-        continue;
-      }
-      for (const section of renderer.sections) {
-        const el = section.el;
-        if (!el || section.rendered === false || el.childElementCount === 0) continue;
-        const info = renderer.getSectionInfo(el);
-        if (info) this.decorateNoteSection(el, info);
-      }
-    }
-  }
-  /**
-   * Hand the note pane's blocks back exactly as we found them — zone padding removed AND
-   * our word-mark spans unwrapped.
-   *
-   * Reading-view sections are recycled rather than rebuilt on command, so closing a
-   * review must actively undo both: otherwise the note keeps phantom gaps where
-   * deletions used to be and highlighted words with no review open to explain them. The
-   * unwrap matters more than the padding — spans left behind are spans the next session
-   * would treat as pre-existing content.
-   */
-  clearNoteDecorations() {
-    this.zones.reset();
-    this.charMarks.reset();
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const view = leaf.view;
-      if (!view) continue;
-      for (const el of this.decoratedNoteEls(view)) {
-        el.style.paddingBottom = "";
-        el.style.paddingTop = "";
-        unwrapCharMarks(el);
-        setNoteKind(el, null);
-        el.removeClass(CLS.haspad);
-        el.removeAttribute(ATTR_ROW);
-        el.removeClass(CLS.nblock);
-      }
-    }
-  }
-  /**
-   * The note-pane elements we may have decorated in `view`.
-   *
-   * Prefer the renderer's section list — it reaches sections Obsidian has DETACHED (scrolled
-   * off), which `scroller.querySelectorAll` cannot, and which we now decorate in place so
-   * must also be able to clean. Falls back to the scroller walk when the internals aren't the
-   * expected shape (same feature-detect as decorateNotePaneInPlace).
-   */
-  decoratedNoteEls(view) {
-    const v = view;
-    const renderer = v instanceof import_obsidian4.MarkdownView ? previewRenderer(v) : null;
-    if (renderer) {
-      const out = [];
-      for (const s of renderer.sections) {
-        if (s.el && s.el.classList.contains(CLS.nblock)) out.push(s.el);
-      }
-      if (out.length) return out;
-    }
-    const scroller = findPreviewScroller(view);
-    return scroller ? Array.from(scroller.querySelectorAll(`.${CLS.nblock}`)) : [];
-  }
-  /**
-   * Show the base pane beside the active note — on the LEFT.
-   *
-   * Old on the left, new on the right, is the convention every diff tool shares (git, VS
-   * Code, GitHub), and reading a change right-to-left inverts a habit nobody should have
-   * to suspend to review a document.
-   *
-   * `createLeafBySplit(active, 'vertical', true)` — the third argument is `before`, and it
-   * is the whole reason this is one call rather than a caveat. `getLeaf('split')` always
-   * inserts AFTER the active leaf, so the base landed on the right and the README carried
-   * an apology telling readers to drag the tab across once.
-   *
-   * CHOICE: a real editor-area split, not the left SIDEBAR (getLeftLeaf). The sidebar is
-   * genuinely on the left but is a narrow utility rail; rendered prose is unreadable in it,
-   * and side-by-side reading is the entire point.
-   */
-  async revealView() {
-    var _a, _b;
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-    let leaf = existing[0];
-    if (!leaf) {
-      const host = (_b = (_a = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView)) == null ? void 0 : _a.leaf) != null ? _b : this.app.workspace.getLeaf(false);
-      leaf = this.app.workspace.createLeafBySplit(host, "vertical", true);
-      await leaf.setViewState({ type: VIEW_TYPE, active: false });
-    }
-    this.app.workspace.revealLeaf(leaf);
-    for (const l of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
-      if (l.view instanceof GitBaseView) await l.view.render();
-    }
-  }
-  /**
-   * Force preview panes to re-run their post-processors by emptying and rebuilding sections.
-   *
-   * The sledgehammer: it wipes EVERY plugin's note-pane decorations for the async-rebuild
-   * window, which is why openReview/closeReview no longer use it (they decorate/clear in
-   * place). Two callers remain: the "Refresh annotations" escape-hatch command, where the
-   * wipe-and-rebuild is exactly the intent, and decorateNotePaneInPlace's fallback when
-   * Obsidian's renderer internals aren't the shape we can walk.
-   */
-  rerenderPreviews() {
-    this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      try {
-        const view = leaf.view;
-        if (view instanceof import_obsidian4.MarkdownView && view.previewMode && typeof view.previewMode.rerender === "function") {
-          view.previewMode.rerender(true);
-        }
-      } catch (e) {
-        error("rerender failed", e);
+  editorAttached(view) {
+    this.editors.add(view);
+    queueMicrotask(() => {
+      var _a;
+      if (!this.disposed && this.editors.has(view)) {
+        this.publishEditorMarks();
+        (_a = this.sync) == null ? void 0 : _a.attach();
       }
     });
   }
-  /* ---------------------------------------------------------------- *
-   * alignment diagnostic                                              *
-   * ---------------------------------------------------------------- */
-  /**
-   * Put the CURRENT alignment of the two panes on the clipboard as JSON, so alignment
-   * can be checked with a number instead of an opinion.
-   *
-   * THE CLIPBOARD, NOT A FILE. The spike wrote this to a hardcoded scratch path with a
-   * synchronous filesystem write — fine for a spike, wrong for a shipped plugin twice
-   * over: it hardcoded one machine's directory, and it meant the bundle contained a real
-   * file write, so the read-only gate needed a carve-out for it. Deleting the write
-   * deleted the carve-out: the plugin now imports no filesystem module at all, which is
-   * a capability the gate can check rather than a promise it has to trust. The feature
-   * lost nothing — paste the report wherever you want it.
-   *
-   * `deltaPx` is the money field: for the note pane's topmost visible block, how far its
-   * counterpart in the base pane sits from where it "should" be. 0 = the two blocks' tops
-   * are the same distance below their viewport tops.
-   */
-  async reportAlignment() {
+  editorDetached(view) {
+    this.editors.delete(view);
+    if (this.preferredEditor === view) this.preferredEditor = null;
+    queueMicrotask(() => {
+      var _a;
+      if (!this.disposed) (_a = this.sync) == null ? void 0 : _a.attach();
+    });
+  }
+  editorChanged(view, path2) {
+    var _a;
+    if (path2 === ((_a = this.session) == null ? void 0 : _a.filePath)) {
+      this.preferredEditor = view;
+      this.requestUpdate();
+    }
+  }
+  editorGeometryChanged() {
+  }
+  currentEditor(path2 = ((_a) => (_a = this.session) == null ? void 0 : _a.filePath)()) {
+    if (this.preferredEditor && this.editors.has(this.preferredEditor) && editorPath(this.preferredEditor) === path2) return this.preferredEditor;
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const candidates = [...this.editors].filter((view) => editorPath(view) === path2);
+    return candidates.find((v) => {
+      var _a2;
+      return ((_a2 = v.state.field(import_obsidian5.editorInfoField, false)) == null ? void 0 : _a2.editor) === (active == null ? void 0 : active.editor);
+    }) || candidates.find((v) => {
+      var _a2;
+      return (_a2 = this.reviewLeaf) == null ? void 0 : _a2.view.containerEl.contains(v.dom);
+    }) || candidates[0] || null;
+  }
+  publishEditorMarks() {
+    const s = this.session;
+    for (const view of this.editors) {
+      const reviewing = !!s && editorPath(view) === s.filePath;
+      publish(view, (s == null ? void 0 : s.status) === "ready" && !s.error && reviewing ? { filePath: s.filePath, revision: s.revision, text: s.currentText, rows: s.rows } : null, reviewing);
+    }
+  }
+  invalidate() {
+    var _a;
+    this.worker.cancel();
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const identity = this.revisions.next();
+    if (this.session && identity) {
+      this.session.revision = identity.revision;
+      this.session.status = "updating";
+      this.session.error = null;
+    }
+    this.sync.detach();
+    this.clearNoteDecorations();
+    (_a = this.baseView()) == null ? void 0 : _a.updateStatus();
+    queueMicrotask(() => {
+      if (!this.disposed) this.publishEditorMarks();
+    });
+    return identity;
+  }
+  requestUpdate() {
+    var _a;
+    if (!((_a = this.session) == null ? void 0 : _a.sha)) return;
+    const identity = this.invalidate();
+    if (identity) this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.updateComparison(identity);
+    }, 300);
+  }
+  async externalChange(file) {
+    var _a;
     const session = this.session;
-    if (!session || session.error) {
-      new import_obsidian4.Notice("No active review session to report on.");
-      return;
-    }
-    const note = this.notePane();
-    const base = this.basePane();
-    const view = this.baseView();
-    const snip = (t) => String(t == null ? "" : t).replace(/\s+/g, " ").trim().slice(0, 60);
-    let notePart = { found: false };
-    let noteRow = null;
-    let noteOffsetPx = null;
-    let noteHitTopPx = null;
-    if (note) {
-      const hit = topmostVisible(
-        note.scroller,
-        note.scroller.querySelectorAll(`.${CLS.nblock}`)
-      );
-      const info = hit ? this.noteLines.get(hit.el) : null;
-      noteRow = info ? this.rowForNoteRange(info.lineStart, info.lineEnd) : null;
-      if (hit) noteOffsetPx = hit.rect.top - note.scroller.getBoundingClientRect().top;
-      if (hit) noteHitTopPx = hit.rect.top;
-      notePart = {
-        found: !!hit,
-        renderedBlocksInDom: note.scroller.querySelectorAll(`.${CLS.nblock}`).length,
-        scrollTop: note.scroller.scrollTop,
-        topBlock: hit && info ? {
-          lineStart: info.lineStart,
-          lineEnd: info.lineEnd,
-          text60: snip(noteRow && noteRow.b ? noteRow.b.text : ""),
-          fractionScrolledThroughBlock: Number(hit.frac.toFixed(3)),
-          offsetFromViewportTopPx: Number(noteOffsetPx.toFixed(1)),
-          rowIndex: noteRow ? noteRow.idx : null,
-          kind: noteRow ? noteRow.kind : null
-        } : null
-      };
-    }
-    let basePart = { found: false };
-    let baseRow = null;
-    if (base && view) {
-      const hit = topmostVisible(base, base.querySelectorAll(`.${CLS.block}`));
-      baseRow = hit ? session.rows[Number(hit.el.getAttribute(ATTR_ROW))] : null;
-      basePart = {
-        found: !!hit,
-        blocks: view.blockEls.size,
-        scrollTop: base.scrollTop,
-        topBlock: hit && baseRow && baseRow.a ? {
-          lineStart: baseRow.a.lineStart,
-          lineEnd: baseRow.a.lineEnd,
-          text60: snip(baseRow.a.text),
-          fractionScrolledThroughBlock: Number(hit.frac.toFixed(3)),
-          offsetFromViewportTopPx: Number(
-            (hit.rect.top - base.getBoundingClientRect().top).toFixed(1)
-          ),
-          rowIndex: baseRow.idx,
-          kind: baseRow.kind
-        } : null
-      };
-    }
-    let deltaPx = null;
-    let deltaNote = "no base-side counterpart at all \u2014 interpolated region";
-    if (noteRow && base && view && noteHitTopPx != null) {
-      const el = this.baseElFor(noteRow.idx);
-      if (el) {
-        deltaPx = Number((el.getBoundingClientRect().top - noteHitTopPx).toFixed(1));
-        deltaNote = "0 = counterpart blocks sit at the same height ON SCREEN (what the reader sees); + = base pane block sits lower than the note pane block" + (noteRow.paired ? "" : " (counterpart is a view zone, not a block)");
+    try {
+      const saved = await this.app.vault.read(file);
+      if (session === this.session && saved !== (session == null ? void 0 : session.currentText)) this.requestUpdate();
+    } catch (error2) {
+      if (session === this.session) {
+        this.invalidate();
+        if (this.session) {
+          this.session.status = "error";
+          this.session.error = error2.message;
+        }
+        (_a = this.baseView()) == null ? void 0 : _a.updateStatus();
       }
     }
-    const paneOriginOffsetPx = base && note ? Number((base.getBoundingClientRect().top - note.scroller.getBoundingClientRect().top).toFixed(1)) : null;
-    const zoneStats = this.zones.stats();
-    const report = {
-      generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      plugin: this.manifest.version,
-      file: session.filePath,
-      baseSha: session.shortSha,
-      baseRef: session.baseRefLabel,
-      counts: session.counts,
-      syncEnabled: this.sync.enabled,
-      lastNoteScrollApi: this.sync.lastScrollApi,
-      // View-zone coverage. `knownHeights` climbs toward `total` as the reader scrolls
-      // the note pane past each insertion — so a low ratio here EXPLAINS a residual
-      // drift rather than leaving it a mystery.
-      viewZones: zoneStats.ins,
-      // The other direction: space reserved in the NOTE pane for deleted base blocks.
-      // Exact by construction (the base pane is fully rendered), so these should be
-      // stable from the first render — if reservedPx is 0 while the diff reports
-      // deletions, the padding never landed and that is the bug.
-      delZones: zoneStats.del,
-      // Word-level marks. `maxBaseHeightDeltaPx` and `reverts` must both be 0 — see
-      // CharMarkLayer.
-      charMarks: this.charMarks.stats(session.rows.filter((r) => r.kind === "mod").length),
-      panes: {
-        // Design-doc naming: pane A = the real note, pane B = our git-base ItemView.
-        A_note: notePart,
-        B_base: basePart
-      },
-      pairing: {
-        noteTopRowKind: noteRow ? noteRow.kind : null,
-        baseTopRowKind: baseRow ? baseRow.kind : null,
-        sameRow: !!(noteRow && baseRow && noteRow.idx === baseRow.idx),
-        notePaired: noteRow ? noteRow.paired : null
-      },
-      deltaPx,
-      paneOriginOffsetPx,
-      deltaNote
-    };
-    const json = JSON.stringify(report, null, 2);
+  }
+  async readBreaks() {
+    const path2 = `${this.app.vault.configDir}/app.json`;
+    if (!await this.app.vault.adapter.exists(path2)) return true;
+    const config = JSON.parse(await this.app.vault.adapter.read(path2));
+    return !config.strictLineBreaks;
+  }
+  async checkBreaks() {
+    const session = this.session;
+    if (!(session == null ? void 0 : session.sha)) return;
     try {
-      await navigator.clipboard.writeText(json);
-      new import_obsidian4.Notice(`Alignment report copied (deltaPx=${deltaPx == null ? "n/a" : deltaPx})`, 6e3);
-    } catch (e) {
-      warn("clipboard unavailable \u2014 report follows", e);
-      console.log(json);
-      new import_obsidian4.Notice("Clipboard unavailable \u2014 alignment report logged to the console.", 8e3);
+      const breaks = await this.readBreaks();
+      if (session === this.session && breaks !== session.breaks) {
+        session.breaks = breaks;
+        this.requestUpdate();
+      }
+    } catch (error2) {
+      warn("Could not read line-break settings", error2);
     }
-    debug("alignment report", report);
+  }
+  async updateComparison(identity) {
+    var _a, _b, _c, _d;
+    const previous = this.session;
+    if (!previous || !this.revisions.accepts(identity)) return;
+    try {
+      const file = this.app.vault.getAbstractFileByPath(identity.filePath);
+      if (!(file instanceof import_obsidian5.TFile)) throw new Error("A nota n\xE3o est\xE1 mais dispon\xEDvel.");
+      const currentText = (_b = (_a = this.currentEditor(identity.filePath)) == null ? void 0 : _a.state.doc.toString()) != null ? _b : await this.app.vault.read(file);
+      if (!this.revisions.accepts(identity)) return;
+      const result = await this.worker.compare({ identity, baseText: previous.baseText, currentText, options: { breaks: previous.breaks } });
+      if (!this.revisions.accepts(identity)) return;
+      this.session = sessionFromRows(
+        file,
+        previous.baseText,
+        { root: previous.root, rel: previous.rel },
+        { sha: previous.sha, label: previous.baseRefLabel, commit: previous.baseCommit, readAs: previous.baseReadAs },
+        currentText,
+        result.rows || [],
+        identity.revision,
+        previous.breaks
+      );
+      this.session.baseReferences = result.baseReferences || "";
+      await ((_c = this.baseView()) == null ? void 0 : _c.render());
+      if (!this.revisions.accepts(identity)) return;
+      this.publishEditorMarks();
+      this.decorateNotePaneInPlace();
+      this.sync.attach();
+      this.sync.syncNoteToBase();
+    } catch (error2) {
+      if (!this.revisions.accepts(identity) || error2.name === "AbortError") return;
+      if (this.session) {
+        this.session.error = `Falha na compara\xE7\xE3o: ${error2.message}`;
+        this.session.status = "error";
+      }
+      (_d = this.baseView()) == null ? void 0 : _d.updateStatus();
+    }
+  }
+  resolveBase(ctx) {
+    const mode = this.settings.baseRefMode;
+    if (mode === "file-prev") {
+      const commits = fileLog(ctx.root, ctx.rel, 2);
+      if (commits.length < 2) throw new GitError("A nota precisa de dois commits para comparar com a vers\xE3o anterior.");
+      return { sha: commits[1].sha, label: "previous version" };
+    }
+    const ref = mode === "custom" ? this.settings.baseRef : mode === "head~1" ? "HEAD~1" : "HEAD";
+    return { sha: resolveRef(ctx.root, ref), label: ref };
+  }
+  pickBaseAndOpen() {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) return;
+    try {
+      const ctx = resolveGit(this.app, file), commits = fileLog(ctx.root, ctx.rel, this.settings.logLimit);
+      if (!commits.length) {
+        new import_obsidian5.Notice("A nota n\xE3o possui commits.");
+        return;
+      }
+      const modal = new CommitPickerModal(this.app, file.name, commits, (c) => {
+        void this.openReview({ ref: c.sha, label: c.shortSha, file });
+      });
+      modal.currentPath = ctx.rel;
+      modal.open();
+    } catch (error2) {
+      new import_obsidian5.Notice(error2.message);
+    }
+  }
+  async openReview(opts = {}) {
+    var _a, _b, _c, _d;
+    const file = opts.file || this.app.workspace.getActiveFile();
+    if (!file || file.extension !== "md") {
+      new import_obsidian5.Notice("Abra uma nota Markdown.");
+      return;
+    }
+    const opening = ++this.opening;
+    const keep = !opts.repin && !opts.ref && ((_a = this.session) == null ? void 0 : _a.filePath) === file.path && this.session.sha ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
+    this.worker.cancel();
+    this.revisions.close();
+    if (this.timer) clearTimeout(this.timer);
+    this.clearNoteDecorations();
+    this.sync.detach();
+    this.reviewLeaf = ((_b = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _b.leaf) || null;
+    this.preferredEditor = null;
+    try {
+      const noteView = (_c = this.reviewLeaf) == null ? void 0 : _c.view;
+      if (noteView instanceof import_obsidian5.MarkdownView && ((_d = noteView.file) == null ? void 0 : _d.path) === file.path) {
+        const state = noteView.getState();
+        if (noteView.getMode() !== "source" || state.source !== false) {
+          await this.reviewLeaf.setViewState({ type: "markdown", state: { ...state, mode: "source", source: false }, active: true });
+        }
+      }
+      if (opening !== this.opening) return;
+      const ctx = resolveGit(this.app, file);
+      const base = keep || (opts.ref ? { sha: resolveRef(ctx.root, opts.ref), label: opts.label || opts.ref } : this.resolveBase(ctx));
+      const read = readBaseAt(ctx.root, ctx.rel, base.sha), commit = commitInfoFor(ctx.root, base.sha);
+      const breaks = await this.readBreaks();
+      if (opening !== this.opening) return;
+      this.session = sessionFromRows(file, read.text, ctx, { ...base, commit, readAs: read.renamedFrom }, "", [], 0, breaks);
+      this.session.status = "updating";
+      const identity = this.revisions.begin(file.path, base.sha);
+      this.publishEditorMarks();
+      await this.revealView();
+      if (opening === this.opening) await this.updateComparison(identity);
+    } catch (error2) {
+      if (opening !== this.opening) return;
+      this.session = errorSession(file, error2.message);
+      this.publishEditorMarks();
+      await this.revealView();
+      new import_obsidian5.Notice(error2.message);
+    }
+  }
+  closeReview() {
+    this.opening++;
+    this.revisions.close();
+    this.worker.dispose();
+    if (this.timer) clearTimeout(this.timer);
+    this.sync.detach();
+    this.clearNoteDecorations();
+    this.session = null;
+    this.publishEditorMarks();
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+  }
+  async revealView() {
+    var _a;
+    let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = this.app.workspace.createLeafBySplit(this.reviewLeaf || this.app.workspace.getLeaf(false), "vertical", true);
+      await leaf.setViewState({ type: VIEW_TYPE, active: false });
+    }
+    await ((_a = this.baseView()) == null ? void 0 : _a.render());
+  }
+  notePane() {
+    var _a;
+    const session = this.session;
+    if (!session || session.error || session.status !== "ready") return null;
+    const cm = this.currentEditor(), owner = cm == null ? void 0 : cm.state.field(import_obsidian5.editorInfoField, false);
+    if (cm && owner instanceof import_obsidian5.MarkdownView && owner.getMode() === "source" && cm.dom.isConnected) return { view: owner, scroller: cm.scrollDOM, editorView: cm };
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (!(view instanceof import_obsidian5.MarkdownView) || ((_a = view.file) == null ? void 0 : _a.path) !== session.filePath || view.getMode() !== "preview") continue;
+      const scroller = findPreviewScroller(view);
+      if (scroller) return { view, scroller };
+    }
+    return null;
+  }
+  baseView() {
+    var _a;
+    const view = (_a = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]) == null ? void 0 : _a.view;
+    return view instanceof GitBaseView ? view : null;
+  }
+  basePane() {
+    var _a;
+    return ((_a = this.baseView()) == null ? void 0 : _a.bodyEl) || null;
+  }
+  baseElFor(index) {
+    var _a;
+    return ((_a = this.baseView()) == null ? void 0 : _a.blockEls.get(index)) || null;
+  }
+  noteLineInfo(element) {
+    return this.noteLines.get(element);
+  }
+  rowForNoteRange(start, end) {
+    var _a;
+    let best = null, overlap = 0;
+    for (const row of ((_a = this.session) == null ? void 0 : _a.noteRows) || []) {
+      const block = row.b, n = Math.min(end, block.lineEnd) - Math.max(start, block.lineStart) + 1;
+      if (n > overlap) {
+        overlap = n;
+        best = row;
+      }
+    }
+    return best;
+  }
+  decorateNoteSection(element, info) {
+    var _a;
+    if (((_a = this.session) == null ? void 0 : _a.status) !== "ready" || this.session.error) return;
+    const row = this.rowForNoteRange(info.lineStart, info.lineEnd);
+    element.addClass(CLS.nblock);
+    this.noteLines.set(element, info);
+    if (row) element.setAttr(ATTR_ROW, String(row.idx));
+    setNoteKind(element, (row == null ? void 0 : row.kind) || null);
+    if ((row == null ? void 0 : row.kind) === "mod") this.marks.apply(row, element);
+  }
+  /** Reading mode only. Editing uses exclusively the public CodeMirror extension. */
+  readingSections(view) {
+    const renderer = view.previewMode.renderer;
+    if (!(renderer == null ? void 0 : renderer.sections) || !renderer.getSectionInfo) return [];
+    return renderer.sections.flatMap((s) => {
+      const info = s.el && s.rendered !== false ? renderer.getSectionInfo(s.el) : null;
+      return info ? [{ el: s.el, info }] : [];
+    });
+  }
+  decorateNotePaneInPlace() {
+    var _a, _b;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian5.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath) && view.getMode() === "preview") {
+        for (const section of this.readingSections(view)) this.decorateNoteSection(section.el, section.info);
+      }
+    }
+  }
+  clearNoteDecorations() {
+    var _a, _b;
+    (_a = this.marks) == null ? void 0 : _a.reset();
+    (_b = this.zones) == null ? void 0 : _b.reset();
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (!(view instanceof import_obsidian5.MarkdownView)) continue;
+      const elements = /* @__PURE__ */ new Set([...this.readingSections(view).map((s) => s.el), ...Array.from(view.containerEl.querySelectorAll(`.${CLS.nblock}`))]);
+      for (const el of elements) if (el.hasClass(CLS.nblock)) {
+        unwrapCharMarks(el);
+        setNoteKind(el, null);
+        el.removeClass(CLS.nblock);
+        el.removeAttribute(ATTR_ROW);
+      }
+    }
+  }
+  toggleSync() {
+    var _a;
+    this.sync.enabled = !this.sync.enabled;
+    (_a = this.baseView()) == null ? void 0 : _a.updateSyncBadge();
+  }
+  rerenderPreviews() {
+    var _a, _b;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian5.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath)) view.previewMode.rerender(true);
+    }
+  }
+  async reportAlignment() {
+    var _a;
+    const s = this.session;
+    if (!s) return;
+    const report = {
+      file: s.filePath,
+      sha: s.sha,
+      revision: s.revision,
+      status: s.status,
+      counts: s.counts,
+      simplified: s.rows.filter((row) => row.simplified).length,
+      scrollApi: this.sync.lastScrollApi,
+      editor: !!((_a = this.notePane()) == null ? void 0 : _a.editorView),
+      error: s.error
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      new import_obsidian5.Notice("Relat\xF3rio copiado.");
+    } catch (e) {
+      warn("Clipboard unavailable", report);
+      new import_obsidian5.Notice("Relat\xF3rio dispon\xEDvel no console.");
+    }
   }
 };

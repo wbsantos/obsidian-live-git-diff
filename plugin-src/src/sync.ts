@@ -23,6 +23,8 @@ import type { MarkdownViewLike, PaneHost } from './panes.ts';
 import type { Row } from './session.ts';
 import type { ViewZones } from './viewzones.ts';
 import * as log from './log.ts';
+import { editorTopLine, scrollEditorToLine } from './editor.ts';
+import { noteScrollTarget } from './scrollModel.ts';
 
 export interface SyncHost extends PaneHost {
   zones: ViewZones;
@@ -85,7 +87,7 @@ export class ScrollSync {
   attach(): void {
     this.detach();
     const session = this.host.session;
-    if (!session || session.error) return;
+    if (!session || session.error || session.status !== 'ready') return;
 
     const note = this.host.notePane();
     if (note) this.addListener(note.scroller, 'scroll', () => this.onScroll('note'));
@@ -277,7 +279,12 @@ export class ScrollSync {
     // BEFORE anchoring, not after: the zones we are about to correct change where the
     // anchor's counterpart sits. Measuring on-screen blocks only, this is a handful of
     // rect reads — and reading a rect we are about to read anyway for the anchor.
-    this.host.zones.refresh();
+    if (note.editorView) {
+      const line = editorTopLine(note.editorView);
+      const target = noteScrollTarget(this.host.session?.noteRows || [], line, (row, fraction) => this.baseScrollTopFor(row, fraction));
+      if (target !== null && Math.abs(base.scrollTop - target) >= 1) this.scrollLock('base', () => { base.scrollTop = target; });
+      return;
+    }
 
     const hit = topmostVisible(
       note.scroller,
@@ -351,7 +358,10 @@ export class ScrollSync {
 
     const line = this.noteLineFor(row, hit.frac);
     if (line == null || !isFinite(line)) return;
-    this.scrollLock('note', () => { this.applyNoteScroll(note.view, line); });
+    this.scrollLock('note', () => {
+      if (note.editorView) { scrollEditorToLine(note.editorView, line); this.lastScrollApi = 'EditorView.scrollIntoView'; }
+      else this.applyNoteScroll(note.view, line);
+    });
   }
 
   /**

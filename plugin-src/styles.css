@@ -189,6 +189,19 @@ body.theme-dark {
 .lgd-nblock.lgd-mod.lgd-rowwise tr.lgd-rowchanged { background-color: var(--lgd-ins-bg); }
 .lgd-block.lgd-mod.lgd-rowwise  tr.lgd-rowchanged { background-color: var(--lgd-del-bg); }
 
+/* A changed list retains unchanged items. Both panes use the worker's item matches. */
+.lgd-nblock.lgd-mod.lgd-itemwise,
+.lgd-block.lgd-mod.lgd-itemwise { background-color: transparent; }
+.lgd-itemwise::before { display: none; }
+.lgd-itemwise li.lgd-item-changed { position: relative; }
+.lgd-itemwise li.lgd-item-changed::before {
+  content: ''; position: absolute; left: -1.6em; top: 0; bottom: 0; width: 3px; border-radius: 2px;
+}
+.lgd-nblock.lgd-itemwise li.lgd-item-changed { background-color: var(--lgd-ins-bg); }
+.lgd-block.lgd-itemwise li.lgd-item-changed { background-color: var(--lgd-del-bg); }
+.lgd-nblock.lgd-itemwise li.lgd-item-changed::before { background-color: var(--lgd-ins-rail); }
+.lgd-block.lgd-itemwise li.lgd-item-changed::before { background-color: var(--lgd-del-rail); }
+
 /* ------------------------------------------------------------------ *
  * TWO STATES, NOT THREE — the rail always agrees with the wash it borders.
  *
@@ -491,3 +504,14 @@ body.theme-dark {
   color: var(--text-normal);
   font-size: var(--font-ui-smaller);
 }
+
+/* Public CodeMirror decorations: no spacer widgets or document changes. */
+.lgd-gutter { min-width: 10px; color: var(--text-muted); }
+.lgd-gutter-ins { color: var(--color-green); font-weight: 700; }
+.lgd-gutter-mod { color: var(--color-orange); font-weight: 700; }
+.lgd-editor-ins { background: var(--lgd-ins-bg); border-left: 3px solid var(--lgd-ins-rail); }
+.lgd-editor-mod { background: color-mix(in srgb, var(--lgd-ins-bg) 45%, transparent); border-left: 3px solid var(--color-orange); }
+.lgd-content { min-width: 0; }
+.lgd-explanation { color: var(--text-muted); font-size: var(--font-smallest); line-height: 1.4; padding: 4px 8px; }
+.lgd-explanation:empty { display: none; }
+.lgd-explanation:not(:empty) { border-top: 1px dashed var(--background-modifier-border); }

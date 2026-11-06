@@ -77,6 +77,13 @@ const CAPTURE_HINT =
 const required = process.env.LGD_REQUIRE_ORACLE === '1';
 const present = fs.existsSync(ORACLE);
 
+test('extended Obsidian oracle: headings, continued lists, properties, fences and references', () => {
+  const text = fs.readFileSync(path.join(HERE, 'fixtures', 'extended-structure.md'), 'utf8');
+  const oracle: Oracle = JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures', 'obsidian-extended-sections.json'), 'utf8'));
+  assert.equal(crypto.createHash('sha256').update(text).digest('hex'), oracle.sourceSha256);
+  assert.deepEqual(blocks(text).map(b => [b.lineStart, b.lineEnd]), oracle.sections.map(s => [s.startLine, s.endLine]));
+});
+
 test('grain oracle: our block boundaries match Obsidian\'s sections', { skip: !present && !required }, () => {
   if (!present) {
     // Only reachable when `required` — otherwise the skip above short-circuits.

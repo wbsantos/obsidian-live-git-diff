@@ -7,7 +7,7 @@
     "target": "ES2018",
     "allowJs": true,
     "noImplicitAny": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     // Typecheck-only: esbuild does the emit, so this affects `tsc --noEmit` alone.
     // Needed for `import test from 'node:test'` / `import fs from 'node:fs'` in the
     // test files, which is how node's own runner is documented.

@@ -21,7 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { blocks } from '../src/diff/mddiff.ts';
-import { buildSession, errorSession } from '../src/session.ts';
+import { errorSession } from '../src/session.ts';
+import { buildSession } from './helpers/build-session.ts';
 import type { BasePin, Row } from '../src/session.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -219,3 +220,4 @@ test('counts agree with the rows', () => {
   assert.equal(idx.counts.curBlocks, blocks(CURRENT).length);
   assert.equal(idx.counts.changed, idx.rows.filter((r) => r.kind !== 'same').length);
 });
+

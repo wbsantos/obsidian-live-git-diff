@@ -170,7 +170,7 @@ const fixture = {
   ],
   capturedAt: new Date().toISOString(),
   obsidianApiVersion: payload.apiVersion,
-  sourceFile: 'test/fixtures/corpus-head.md',
+  sourceFile: arg('source', 'test/fixtures/corpus-head.md'),
   sourceSha256: sha256,
   sectionCount: payload.sections.length,
   sections: payload.sections,

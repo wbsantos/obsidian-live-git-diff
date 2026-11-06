@@ -24,3 +24,8 @@ npm-debug.log*
 # Vault-open artifacts — this repo is a plugin, not a vault; anyone opening it
 # in Obsidian gets a config dir that must never publish.
 .obsidian/
+
+# Local build caches and worker audit artifacts
+.npm-cache/
+worker-audit.js
+worker-metafile.json

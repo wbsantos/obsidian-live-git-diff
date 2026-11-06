@@ -5,10 +5,9 @@
  *   whole-block wash  -> .lgd-ins / .lgd-mod / .lgd-del
  *   changed WORDS     -> .lgd-char-ins / .lgd-char-del    (this module)
  *
- * WE DIFF THE RENDERED TEXT, NOT THE MARKDOWN. Both blocks are rendered and in
- * hand, so `baseEl.textContent` vs `noteEl.textContent` sidesteps source->rendered
- * offset mapping entirely — `**bold**` in source is `bold` on screen, and every
- * offset derived from the source would be wrong by the width of the syntax.
+ * The worker compares structural Markdown and refines its visible text. This layer
+ * maps those ranges into Obsidian's rendered DOM, including inline code. Rendering
+ * never defines equality; if text cannot be mapped, the block indicator survives.
  *
  * THE INVARIANT (spike 1 proved the safety, so this only has to preserve it):
  * `el.textContent` must be BYTE-IDENTICAL before and after wrapping. Characters may
@@ -23,10 +22,11 @@
  * string half (tokenize/wordDiffRanges/coalesceRanges) is pure. That is what lets
  * test/charmarks.test.ts exercise the real range math in plain node, without a DOM.
  */
-import { opcodes } from './diff/mddiff.ts';
+import { opcodes } from './diff/sequence.ts';
 import { CLS } from './panes.ts';
 import type { PaneHost } from './panes.ts';
 import type { Row } from './session.ts';
+import type { PairRow } from './diff/mddiff.ts';
 import * as log from './log.ts';
 
 /**
@@ -55,7 +55,7 @@ interface Tokenized {
 
 /** Split into words AND the whitespace between them (both kept, offsets exact). */
 export function tokenize(text: string | null | undefined): Tokenized {
-  const toks = String(text == null ? '' : text).split(/(\s+)/);
+  const toks = String(text == null ? '' : text).match(/[\p{L}\p{M}\p{N}_]+|\s+|[^\s\p{L}\p{M}\p{N}_]/gu) || [''];
   const offs: number[] = [];
   let o = 0;
   for (const t of toks) { offs.push(o); o += t.length; }
@@ -143,7 +143,7 @@ export function wordDiffRanges(ta: string, tb: string): CharRanges | null {
 
 /**
  * Is this text node somewhere we must not split?
- * Code fences, inline code and math render their own internal structure; splitting a
+ * Code fences and math render their own internal structure; splitting a
  * token inside them is a confound at best and visibly wrong at worst. Their text
  * still COUNTS toward offsets (textContent includes it) — it is only skipped for
  * wrapping. Getting that distinction backwards would shift every later range.
@@ -153,7 +153,8 @@ function inSkippedContext(node: Node, root: Element): boolean {
     if (p.nodeType !== 1) continue;
     const pe = p as Element;
     const tag = pe.tagName;
-    if (tag === 'PRE' || tag === 'CODE' || tag === 'SVG' || tag === 'MJX-CONTAINER') return true;
+    // Inline code is visible content. Excluding CODE hid endpoint/identifier changes.
+    if (tag === 'PRE' || tag === 'SVG' || tag === 'MJX-CONTAINER') return true;
     if (pe.classList && (pe.classList.contains('math') || pe.classList.contains('MathJax'))) return true;
   }
   return false;
@@ -228,10 +229,16 @@ function collectTextNodes(root: Element): TextEntry[] {
  * `normalize()` merges the adjacent text nodes back together — it changes node
  * structure, never characters, so the cumulative-offset walk is unaffected.
  */
+function presentationRoot(el: Element): HTMLElement {
+  return (el.classList.contains('lgd-content') && el.parentElement?.classList.contains(CLS.block) ? el.parentElement : el) as HTMLElement;
+}
+
 export function unwrapCharMarks(el: Element): number {
   // Row washes are DERIVED from the marks, so they go when the marks go. Left behind, a
   // recycled block would keep yesterday's rows colored with nothing explaining why.
   (el as HTMLElement).removeClass(CLS.rowwise);
+  presentationRoot(el).classList.remove(CLS.rowwise, 'lgd-itemwise');
+  for (const item of Array.from(el.querySelectorAll('.lgd-item-changed'))) item.classList.remove('lgd-item-changed');
   for (const tr of Array.from(el.querySelectorAll('tr.' + CLS.rowchanged))) {
     (tr as HTMLElement).removeClass(CLS.rowchanged);
   }
@@ -265,16 +272,60 @@ export function unwrapCharMarks(el: Element): number {
  *          suppressed — both keep the ordinary block wash, which is the honest fallback:
  *          "something in here changed" is still true, and still visible.
  */
-function markTableRows(el: HTMLElement): boolean {
-  const tbl = el.querySelector('table');
-  if (!tbl) return false;
-  let any = false;
-  for (const tr of Array.from(tbl.querySelectorAll('tr'))) {
-    const changed = !!tr.querySelector('[' + CHAR_MARK_ATTR + ']');
-    tr.toggleClass(CLS.rowchanged, changed);
-    if (changed) any = true;
+/** Translate worker ranges only when rendered text agrees; plugin output never defines equality. */
+function renderedRanges(source: string, rendered: string, ranges: CharRange[]): CharRange[] {
+  const positions = (text: string): number[] => {
+    const result: number[] = [];
+    for (let i = 0; i < text.length; i++) if (!/\s/.test(text[i])) result.push(i);
+    return result;
+  };
+  if (source.replace(/\s/g, '') !== rendered.replace(/\s/g, '')) return [];
+  const a = positions(source), b = positions(rendered);
+  const output: CharRange[] = [];
+  for (const [start, end] of ranges) {
+    const lo = a.findIndex(p => p >= start), hi = a.findIndex(p => p >= end);
+    const last = (hi < 0 ? a.length : hi) - 1;
+    if (lo >= 0 && last >= lo) output.push([b[lo], b[last] + 1]);
   }
-  return any;
+  return output;
+}
+
+export function applyRowMarks(row: PairRow, element: HTMLElement, side: 'a' | 'b'): number {
+  const block = row[side];
+  if (row.kind !== 'mod' || !block || row.simplified || block.conservative) return 0;
+  const cls = side === 'a' ? CLS.charDel : CLS.charIns;
+  let count = 0;
+  if (block.items && row.items && !row.listStructureChanged) {
+    const list = element.matches('ul,ol') ? element : element.querySelector('ul,ol');
+    const items = list ? Array.from(list.children).filter(child => child.tagName === 'LI') : [];
+    // A renderer/plugin may replace the list. Keep the block indicator if it cannot be mapped.
+    if (items.length !== block.items.length) return 0;
+    presentationRoot(element).classList.add('lgd-itemwise');
+    for (const change of row.items) {
+      if (change.kind === 'same' || !change[side]) continue;
+      const index = block.items.findIndex(item => item.sourceStart === change[side]!.sourceStart);
+      const item = items[index] as HTMLElement | undefined;
+      if (!item) continue;
+      item.classList.add('lgd-item-changed');
+      count += applyRowMarks(change, item, side);
+    }
+  } else if (block.cells && row.cells) {
+    const rows = element.querySelectorAll('tr');
+    for (const change of row.cells) {
+      const index = side === 'a' ? change.rowA : change.rowB;
+      const tr = rows[index], cell = tr?.querySelectorAll<HTMLElement>('th,td')[change.column];
+      const text = block.cells[index]?.[change.column]?.text;
+      if (!cell || text === undefined) continue;
+      tr.classList.add(CLS.rowchanged);
+      count += Math.max(0, wrapRanges(cell, renderedRanges(text, cell.textContent || '', change.detail[side]), cls));
+    }
+    // Insertions and structural changes can have no removed words on the old side.
+    // Cell changes, not the presence of word spans, determine the row wash.
+    presentationRoot(element).toggleClass(CLS.rowwise, row.cells.length > 0);
+  } else if (row.detail) {
+    count = Math.max(0, wrapRanges(element, renderedRanges(block.visibleText, element.textContent || '', row.detail[side]), cls));
+  }
+  return count;
 }
 
 /**
@@ -410,53 +461,11 @@ export class CharMarkLayer {
    * warm, and keying off the cache would leave the base permanently bare.
    */
   apply(row: Row, noteEl: HTMLElement): void {
-    if (!row || row.kind !== 'mod' || !noteEl) return;
-    const view = this.host.baseView();
-    const baseEl = view && view.blockEls ? view.blockEls.get(row.idx) : null;
-    if (!baseEl || !baseEl.isConnected) return;
-
-    let ranges = this.ranges.get(row.idx);
-    if (ranges === undefined) {
-      // Both texts must be read UNWRAPPED, or a previous run's spans would be diffed
-      // against fresh text. (textContent ignores element boundaries, so this is belt and
-      // braces — but the cost is a no-op query and the failure mode is silent.)
-      unwrapCharMarks(baseEl);
-      unwrapCharMarks(noteEl);
-      ranges = wordDiffRanges(baseEl.textContent || '', noteEl.textContent || '');
-      this.ranges.set(row.idx, ranges);
-    }
-    if (!ranges) return; // suppressed: the block wash carries the signal alone
-
-    if (!baseEl.querySelector('[' + CHAR_MARK_ATTR + ']')) {
-      // HEIGHT PROBE — see the class comment. Measure rather than assume, and surface
-      // the number in the report instead of asserting it in a comment.
-      const h0 = baseEl.getBoundingClientRect().height;
-      const made = wrapRanges(baseEl, ranges.a, CLS.charDel);
-      const h1 = baseEl.getBoundingClientRect().height;
-      const d = Math.abs(h1 - h0);
-      if (d > this.heightDeltaMax) this.heightDeltaMax = d;
-      if (d > 0.5) {
-        this.heightChangedBlocks++;
-        // Wrong premise, but recoverable: re-derive the zones from the new heights
-        // rather than leave them quietly stale.
-        if (this.onHeightChange) this.onHeightChange();
-      }
-      if (made < 0) this.revertCount++;
-      else this.spanCount += made;
-    }
-
-    // The note side re-applies on every call: its sections recycle, so each render is a
-    // fresh element whose spans are gone. Unwrap first — never double-wrap.
+    const baseEl = this.host.baseView()?.blockEls.get(row.idx)?.querySelector<HTMLElement>('.lgd-content');
+    if (baseEl) { unwrapCharMarks(baseEl); this.spanCount += applyRowMarks(row, baseEl, 'a'); }
     unwrapCharMarks(noteEl);
-    const madeB = wrapRanges(noteEl, ranges.b, CLS.charIns);
-    if (madeB < 0) this.revertCount++;
-
-    // TABLES: hand the wash to the changed rows. Both sides, independently — a row can be
-    // touched on one side and not the other. See markTableRows.
-    baseEl.toggleClass(CLS.rowwise, markTableRows(baseEl));
-    noteEl.toggleClass(CLS.rowwise, markTableRows(noteEl));
+    this.spanCount += applyRowMarks(row, noteEl, 'b');
   }
-
   /** Diagnostic snapshot for the alignment report. */
   stats(modRows: number): Record<string, number> {
     let suppressed = 0;
@@ -473,3 +482,5 @@ export class CharMarkLayer {
     };
   }
 }
+
+

@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "Obsidian's OWN sectioning of test/fixtures/corpus-head.md, used as the grain oracle.",
+    "Captured by tools/capture-sections.mjs from a running Obsidian over CDP.",
+    "Regenerate with: npm run capture-oracle -- --window \"<vault>\" --file \"corpus-head.md\"",
+    "sourceSha256 must match the local corpus, or the oracle is stale and the test fails."
+  ],
+  "capturedAt": "2026-11-05T19:08:10.372Z",
+  "obsidianApiVersion": "1.15.0",
+  "sourceFile": "test/fixtures/extended-structure.md",
+  "sourceSha256": "a927e0f098016246190848364d400618d4827d9c8a56d093fbbb7e7f35a4230a",
+  "sectionCount": 13,
+  "sections": [
+    {
+      "type": "yaml",
+      "startLine": 0,
+      "endLine": 4
+    },
+    {
+      "type": "heading",
+      "startLine": 5,
+      "endLine": 5
+    },
+    {
+      "type": "heading",
+      "startLine": 6,
+      "endLine": 6
+    },
+    {
+      "type": "paragraph",
+      "startLine": 7,
+      "endLine": 7
+    },
+    {
+      "type": "list",
+      "startLine": 8,
+      "endLine": 13
+    },
+    {
+      "type": "heading",
+      "startLine": 15,
+      "endLine": 16
+    },
+    {
+      "type": "paragraph",
+      "startLine": 17,
+      "endLine": 17
+    },
+    {
+      "type": "code",
+      "startLine": 19,
+      "endLine": 25
+    },
+    {
+      "type": "code",
+      "startLine": 27,
+      "endLine": 29
+    },
+    {
+      "type": "callout",
+      "startLine": 31,
+      "endLine": 32
+    },
+    {
+      "type": "table",
+      "startLine": 34,
+      "endLine": 36
+    },
+    {
+      "type": "paragraph",
+      "startLine": 38,
+      "endLine": 38
+    },
+    {
+      "type": "definition",
+      "startLine": 40,
+      "endLine": 40
+    }
+  ]
+}

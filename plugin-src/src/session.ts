@@ -6,8 +6,8 @@
  * Obsidian and it is gone, which is the intended blast radius for a thing whose only
  * job is to describe two texts to each other.
  */
-import type { Block, PairRow, PairKind } from './diff/mddiff.ts';
-import { blocks, pair } from './diff/mddiff.ts';
+import type { PairRow, PairKind } from './diff/mddiff.ts';
+
 import type { CommitInfo } from './git.ts';
 
 /**
@@ -36,6 +36,12 @@ export interface Row extends PairRow {
 }
 
 export interface Session {
+  revision: number;
+  status: 'updating' | 'ready' | 'error';
+  currentText: string;
+  baseText: string;
+  baseReferences: string;
+  breaks: boolean;
   filePath: string;
   fileName: string;
   sha: string;
@@ -122,16 +128,15 @@ export interface BasePin {
   readAs: string | null;
 }
 
-export function buildSession(
-  file: { path: string; name: string },
-  baseText: string,
-  ctx: { root: string; rel: string },
-  pin: BasePin,
-  currentText: string
+/** Production comparisons arrive from the worker; building indexes performs no diff. */
+export function sessionFromRows(
+  file: { path: string; name: string }, baseText: string,
+  ctx: { root: string; rel: string }, pin: BasePin, currentText: string,
+  input: PairRow[], revision = 0, breaks = false
 ): Session {
-  const headBlocks: Block[] = blocks(baseText);
-  const curBlocks: Block[] = blocks(currentText);
-  const rows = pair(headBlocks, curBlocks) as Row[];
+  const rows = input as Row[];
+  const headBlocks = rows.flatMap(r => r.a ? [r.a] : []);
+  const curBlocks = rows.flatMap(r => r.b ? [r.b] : []);
 
   // Line map for the RIGHT pane: only rows that exist in the current file.
   const curMap: Session['curMap'] = [];
@@ -158,6 +163,7 @@ export function buildSession(
   indexSide(baseRows, 'pb');
 
   return {
+    revision, status: 'ready', currentText, baseText, baseReferences: '', breaks,
     filePath: file.path,
     fileName: file.name,
     sha: pin.sha,
@@ -187,6 +193,7 @@ export function buildSession(
  */
 export function errorSession(file: { path: string; name: string }, msg: string): Session {
   return {
+    revision: 0, status: 'error', currentText: '', baseText: '', baseReferences: '', breaks: false,
     filePath: file.path,
     fileName: file.name,
     sha: '',
@@ -205,3 +212,24 @@ export function errorSession(file: { path: string; name: string }, msg: string):
     error: msg,
   };
 }
+
+export interface Revision { epoch: number; filePath: string; sha: string; revision: number }
+/** Identity is independent of worker cancellation, protecting every async boundary. */
+export class RevisionGate {
+  private epoch = 0;
+  private active: Revision | null = null;
+  begin(filePath: string, sha: string): Revision {
+    this.active = { epoch: ++this.epoch, filePath, sha, revision: 0 };
+    return this.active;
+  }
+  next(): Revision | null {
+    if (this.active) this.active = { ...this.active, revision: this.active.revision + 1 };
+    return this.active;
+  }
+  accepts(value: Revision): boolean {
+    const a = this.active;
+    return !!a && a.epoch === value.epoch && a.filePath === value.filePath && a.sha === value.sha && a.revision === value.revision;
+  }
+  close(): void { this.active = null; this.epoch++; }
+}
+

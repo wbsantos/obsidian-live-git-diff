@@ -159,8 +159,8 @@ test('similarity: multiset semantics — a repeated token cannot inflate the sco
   assert.equal(s, 0.5, '2*1/(3+1) = 0.5, not 1.0');
 });
 
-test('similarity: insensitive to word order (the reworded-sentence case it exists for)', () => {
-  assert.equal(similarity('one two three', 'three two one'), 1);
+test('similarity: word order is evidence for alignment', () => {
+  assert.equal(similarity('one two three', 'three two one'), 1 / 3);
 });
 
 /* ------------------------------------------------------------------ *

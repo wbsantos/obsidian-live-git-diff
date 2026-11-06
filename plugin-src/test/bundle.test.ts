@@ -77,6 +77,7 @@ function loadBundle(): unknown {
   const original = M._load;
   M._load = function (request: string, parent: unknown, isMain: boolean): unknown {
     if (request === 'obsidian') return stub;
+    if (request.startsWith('@codemirror/')) return original.call(this, Module.createRequire(import.meta.url).resolve(request), parent, isMain);
     return original.call(this, request, parent, isMain);
   };
   try {
