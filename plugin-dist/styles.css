@@ -319,7 +319,6 @@ body.theme-dark {
 
 /* The header identifies the pinned base IN WORDS. Once any commit can be the base, a
    sha alone cannot answer "which version am I looking at?" — the subject can. */
-.lgd-sep { color: var(--text-faint); }
 
 .lgd-subject {
   color: var(--text-normal);
@@ -330,40 +329,8 @@ body.theme-dark {
 
 /* Shown only across a rename, where the base pane is legitimately reading a file under
    a name that no longer exists. Unflagged, that looks like a bug. */
-.lgd-renamed,
-.lgd-pick-renamed {
+.lgd-renamed {
   color: var(--text-accent);
-}
-
-/* ---- version picker (SuggestModal) ----
-   The SUBJECT leads because that is the only field anyone recognises; the sha and dates
-   are the supporting detail, not the identifier. */
-.lgd-pick {
-  /* Two lines per row, so let them breathe without the list getting tall enough that
-     only three commits fit on screen. */
-  line-height: 1.35;
-}
-
-.lgd-pick-subject {
-  color: var(--text-normal);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.lgd-pick-meta {
-  margin-top: 2px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
-
-.lgd-pick-rel { color: var(--text-muted); }
-
-.lgd-pick-date { color: var(--text-faint); }
-
-.lgd-pick-sha {
-  font-family: var(--font-monospace);
-  color: var(--text-faint);
 }
 
 .lgd-empty {
@@ -516,6 +483,30 @@ body.theme-dark {
 .lgd-explanation:empty { display: none; }
 .lgd-explanation:not(:empty) { border-top: 1px dashed var(--background-modifier-border); }
 
+/* File history sidebar: all layout rules stay inside this view. */
+.lgd-history { display:flex; flex-direction:column; gap:10px; padding:12px; overflow:hidden; min-height:0; }
+.lgd-history-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.lgd-history-file { min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:600; }
+.lgd-history-refresh { flex:none; }
+.lgd-history-filter { width:100%; }
+.lgd-history-help,.lgd-history-hint { color:var(--text-muted); font-size:var(--font-ui-smaller); line-height:1.45; }
+.lgd-history-hint:empty { display:none; }
+.lgd-history-list { flex:1; min-height:0; overflow:auto; padding:2px 2px 2px 9px; }
+.lgd-history button.lgd-history-commit { position:relative; display:flex; flex-direction:column; align-items:stretch; gap:4px; width:100%; height:auto; padding:10px 10px 10px 16px; margin:0; text-align:start; white-space:normal; background:transparent; border:0; border-inline-start:1px solid var(--background-modifier-border); border-radius:0; box-shadow:none; color:var(--text-normal); }
+.lgd-history-commit::before { content:""; position:absolute; width:7px; height:7px; inset-inline-start:-4px; top:17px; background:var(--text-faint); border-radius:50%; }
+.lgd-history button.lgd-history-commit:hover { background:var(--background-modifier-hover); }
+.lgd-history button.lgd-history-commit.is-selected { background:var(--background-modifier-active-hover); }
+.lgd-history-commit.is-selected::before { background:var(--interactive-accent); }
+.lgd-history button.lgd-history-commit:focus-visible { outline:2px solid var(--interactive-accent); outline-offset:-2px; }
+.lgd-history-subject { overflow-wrap:anywhere; font-weight:500; line-height:1.4; }
+.lgd-history-meta,.lgd-history-date,.lgd-history-renamed { color:var(--text-muted); font-size:var(--font-ui-smaller); line-height:1.4; overflow-wrap:anywhere; }
+.lgd-history-meta { font-family:var(--font-monospace); }
+.lgd-history-empty { padding:12px 4px; color:var(--text-muted); }
+.lgd-history-more { flex:none; }
+.lgd-history-more[hidden] { display:none; }
+.lgd-history-footer { flex:none; border-top:1px solid var(--background-modifier-border); padding-top:10px; color:var(--text-muted); font-size:var(--font-ui-smaller); line-height:1.5; }
+.lgd-history-footer.lgd-error { color:var(--text-error); }
+
 /* Paint the visible cell surface, including native Live Preview table widgets. */
 .lgd-table-cell-ins { --lgd-table-fill: var(--lgd-ins-bg); }
 .lgd-table-cell-del { --lgd-table-fill: var(--lgd-del-bg); }
@@ -539,3 +530,9 @@ body.theme-dark {
 .cm-line.lgd-editor-ins, .cm-line.lgd-editor-mod {
   background-image: linear-gradient(var(--lgd-ins-bg), var(--lgd-ins-bg)) !important;
 }
+.lgd-view[data-lgd-side="b"] .lgd-block.lgd-mod:not(.lgd-rowwise):not(.lgd-itemwise) { background-color: var(--lgd-ins-bg); }
+.lgd-view[data-lgd-side="b"] .lgd-block.lgd-mod::before { background-color: var(--lgd-ins-rail); }
+.lgd-view[data-lgd-side="b"] .lgd-block.lgd-itemwise li.lgd-item-changed { background-color: var(--lgd-ins-bg); }
+.lgd-swap { margin-top: 8px; }
+
+.lgd-compare-action, .lgd-history-action { flex-shrink: 0; }

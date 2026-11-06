@@ -1,9 +1,10 @@
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, editorInfoField } from 'obsidian';
+import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, setIcon, setTooltip } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { GitBaseView, VIEW_TYPE } from './baseView.ts';
-import { GitError, commitInfoFor, fileLog, readBaseAt, resolveGit, resolveRef } from './git.ts';
-import type { GitContext } from './git.ts';
-import { CommitPickerModal } from './refPicker.ts';
+import { GitError, commitInfoForAsync, fileLogAsync, readBaseAtAsync, resolveGitAsync, resolveRefAsync } from './git.ts';
+import type { CommitInfo, GitContext } from './git.ts';
+import { GitHistoryView, HISTORY_VIEW_TYPE } from './historyView.ts';
+import { HistoryCache } from './history.ts';
 import { sessionFromRows, errorSession, RevisionGate } from './session.ts';
 import type { Row, Session, Revision } from './session.ts';
 import { ComparisonWorker } from './workerClient.ts';
@@ -18,10 +19,11 @@ import { DEFAULT_SETTINGS, LiveGitDiffSettingTab, applyColors, clearColors, merg
 import type { LiveGitDiffSettings } from './settings.ts';
 import * as log from './log.ts';
 
-/** All document edits belong to Obsidian. Publish presentation effects only. */
+/** All edits belong to Obsidian. Git reads and presentation have independent lifetimes. */
 export default class LiveGitDiffPlugin extends Plugin {
   settings: LiveGitDiffSettings = DEFAULT_SETTINGS;
   session: Session | null = null;
+  historyCache = new HistoryCache();
   zones!: ViewZones;
   sync!: ScrollSync;
   private marks!: CharMarkLayer;
@@ -30,10 +32,16 @@ export default class LiveGitDiffPlugin extends Plugin {
   private editors = new Set<EditorView>();
   private preferredEditor: EditorView | null = null;
   private reviewLeaf: WorkspaceLeaf | null = null;
+  private participants = new Map<WorkspaceLeaf, { type: string; path?: string; side?: 'a' | 'b' }>();
+  private actions = new Map<MarkdownView, { compare: HTMLElement; history: HTMLElement }>();
+  private tableIssues = new Map<EditorView, string>();
   private noteLines = new WeakMap<HTMLElement, { lineStart: number; lineEnd: number }>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private gitJob: AbortController | null = null;
   private opening = 0;
+  private creating = false;
   private disposed = false;
+  private layoutPending = false;
   private previewObserver: MutationObserver | null = null;
   private previewRoot: HTMLElement | null = null;
   private previewFrame: number | null = null;
@@ -42,16 +50,17 @@ export default class LiveGitDiffPlugin extends Plugin {
     await this.loadSettings();
     this.zones = new ViewZones(this); this.sync = new ScrollSync(this); this.marks = new CharMarkLayer(this);
     this.registerEditorExtension(reviewExtension(this));
-    this.registerView(VIEW_TYPE, leaf => new GitBaseView(leaf, this));
+    this.registerView(VIEW_TYPE, leaf => new GitBaseView(leaf, this, this.participants.get(leaf)?.side));
+    this.registerView(HISTORY_VIEW_TYPE, leaf => new GitHistoryView(leaf, this));
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
     const command = (id: string, name: string, run: () => void, review = false): void => {
       this.addCommand({ id, name, checkCallback: checking => {
-        const allowed = review ? !!this.session : this.app.workspace.getActiveFile()?.extension === 'md';
+        const allowed = review ? !!this.session : !!this.contextFile();
         if (allowed && !checking) run(); return allowed;
       } });
     };
     command('open-review', 'Open git diff review for this file', () => { void this.openReview(); });
-    command('open-review-against-ref', 'Open review against a version…', () => this.pickBaseAndOpen());
+    command('open-review-against-ref', 'Open review against a version…', () => { void this.openHistory(); });
     command('refresh-review', 'Refresh review (re-pin the base version)', () => { void this.openReview({ repin: true }); });
     command('close-review', 'Close review', () => this.closeReview(), true);
     command('toggle-scroll-sync', 'Toggle scroll sync', () => this.toggleSync(), true);
@@ -60,38 +69,32 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.registerMarkdownPostProcessor((element, context) => {
       if (element.closest('.lgd-view') || context.sourcePath !== this.session?.filePath) return;
       const info = context.getSectionInfo(element); if (info) this.decorateNoteSection(element, info);
+      // Postprocessors may run before the section is attached to its leaf.
       this.scheduleReadingPaint();
     });
-    const layout = (): void => {
-      this.sync.attach();
-      queueMicrotask(() => {
-        if (!this.disposed) {
-          this.publishEditorMarks();
-          // Obsidian may reuse a reading view whose old marks were cleared while editing.
-          this.watchReadingPane(); this.decorateNotePaneInPlace();
-        }
-      });
-      if (this.session) void this.checkBreaks();
-    };
-    this.registerEvent(this.app.workspace.on('layout-change', layout));
-    this.registerEvent(this.app.workspace.on('active-leaf-change', layout));
+    this.registerEvent(this.app.workspace.on('layout-change', () => this.scheduleLayout()));
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => { this.scheduleLayout(); this.followHistory(); }));
+    this.registerEvent(this.app.workspace.on('file-open', () => { this.scheduleLayout(); this.followHistory(); }));
     this.registerEvent(this.app.workspace.on('resize', () => this.sync.attach()));
-    this.registerEvent(this.app.vault.on('modify', file => { if (file instanceof TFile && file.path === this.session?.filePath) void this.externalChange(file); }));
-    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      if (oldPath !== this.session?.filePath) return;
-      this.invalidate();
-      if (this.session) { this.session.error = `Nota renomeada para ${file.path}. Reabra a revisão.`; this.session.status = 'error'; }
-      this.baseView()?.updateStatus();
+    this.registerEvent(this.app.vault.on('modify', file => {
+      if (!this.isHistoricalPair() && file instanceof TFile && file.path === this.session?.filePath) void this.externalChange(file);
+    }));
+    this.registerEvent(this.app.vault.on('rename', (_file, oldPath) => {
+      if (oldPath === this.session?.filePath) this.closeReview(); this.followHistory();
     }));
     this.registerEvent(this.app.vault.on('delete', file => { if (file.path === this.session?.filePath) this.closeReview(); }));
-    this.register(() => this.worker.dispose()); this.register(() => this.sync.dispose());
+    this.app.workspace.onLayoutReady(() => {
+      if (!this.disposed) {
+        if (!this.session) this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+        this.scheduleLayout(); this.followHistory();
+      }
+    });
   }
   onunload(): void {
-    this.disposed = true; this.opening++; this.revisions.close();
-    if (this.timer) clearTimeout(this.timer);
-    this.previewObserver?.disconnect(); if (this.previewFrame !== null) window.cancelAnimationFrame(this.previewFrame);
-    this.worker.dispose(); this.sync.dispose(); this.clearNoteDecorations();
-    this.session = null; this.publishEditorMarks(); this.zones.dispose(); clearColors();
+    this.disposed = true; this.closeReview(); this.historyCache.dispose();
+    this.app.workspace.detachLeavesOfType(HISTORY_VIEW_TYPE);
+    for (const buttons of this.actions.values()) { buttons.compare.remove(); buttons.history.remove(); }
+    this.actions.clear(); this.sync.dispose(); this.zones.dispose(); clearColors();
   }
   async loadSettings(): Promise<void> {
     this.settings = mergeSettings(await this.loadData()); log.setDebug(this.settings.debug); applyColors(this.settings);
@@ -99,29 +102,58 @@ export default class LiveGitDiffPlugin extends Plugin {
   async saveSettings(): Promise<void> {
     await persistSettings(this); log.setDebug(this.settings.debug); applyColors(this.settings);
   }
-  editorAttached(view: EditorView): void {
-    this.editors.add(view);
-    queueMicrotask(() => { if (!this.disposed && this.editors.has(view)) { this.publishEditorMarks(); this.sync?.attach(); } });
+  private isHistoricalPair(): boolean { return this.session?.endpoints[1].kind === 'commit'; }
+  private contextFile(): TFile | null {
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+    if (active?.extension === 'md') return active;
+    const leaf = this.app.workspace.activeLeaf;
+    const path = leaf?.view instanceof GitBaseView ? this.session?.filePath : this.historyView()?.controller.state.file?.path;
+    const file = path ? this.app.vault.getAbstractFileByPath(path) : this.app.workspace.getActiveFile();
+    return file instanceof TFile && file.extension === 'md' ? file : null;
   }
-  editorDetached(view: EditorView): void {
-    this.editors.delete(view);
-    if (this.preferredEditor === view) this.preferredEditor = null;
-    queueMicrotask(() => { if (!this.disposed) this.sync?.attach(); });
+  private scheduleLayout(): void {
+    if (this.layoutPending || this.disposed) return;
+    this.layoutPending = true;
+    queueMicrotask(() => {
+      this.layoutPending = false; if (this.disposed) return;
+      this.checkParticipants(); this.updateActions(); this.publishEditorMarks();
+      this.watchReadingPane(); this.decorateNotePaneInPlace(); this.sync.attach();
+      if (this.session) void this.checkBreaks();
+    });
   }
-  editorChanged(view: EditorView, path: string): void {
-    if (path === this.session?.filePath) { this.preferredEditor = view; this.requestUpdate(); }
+  private updateActions(): void {
+    const views = new Set(this.app.workspace.getLeavesOfType('markdown').map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView));
+    for (const [view, buttons] of this.actions) if (!views.has(view)) {
+      buttons.compare.remove(); buttons.history.remove(); this.actions.delete(view);
+    }
+    for (const view of views) {
+      let buttons = this.actions.get(view);
+      if (!buttons || !view.containerEl.contains(buttons.compare)) {
+        buttons?.compare.remove(); buttons?.history.remove();
+        buttons = {
+          compare: view.addAction('git-compare', 'Compare', () => {
+            if (this.participants.has(view.leaf)) this.closeReview();
+            else if (view.file) void this.openReview({ file: view.file, leaf: view.leaf });
+          }),
+          history: view.addAction('history', 'Git history', () => { void this.openHistory(view.file); }),
+        };
+        buttons.compare.addClass('lgd-compare-action'); buttons.history.addClass('lgd-history-action'); this.actions.set(view, buttons);
+      }
+      const closing = this.participants.has(view.leaf);
+      setIcon(buttons.compare, closing ? 'x' : 'git-compare'); setTooltip(buttons.compare, closing ? 'Close comparison' : 'Compare');
+      buttons.compare.setAttr('aria-label', closing ? 'Close comparison' : 'Compare');
+    }
   }
-  editorGeometryChanged(): void { /* Public scroll anchors are measured on demand. */ }
   private scheduleReadingPaint(): void {
     if (this.disposed || this.previewFrame !== null) return;
     this.previewFrame = window.requestAnimationFrame(() => {
       this.previewFrame = null;
-      if (!this.disposed) { this.watchReadingPane(); this.watchReadingPane(); this.decorateNotePaneInPlace(); }
+      if (!this.disposed) { this.watchReadingPane(); this.decorateNotePaneInPlace(); }
     });
   }
   private watchReadingPane(): void {
     const view = this.reviewLeaf?.view;
-    const root = this.session?.status === 'ready' && view instanceof MarkdownView && view.getMode() === 'preview' ? view.containerEl : null;
+    const root = !this.isHistoricalPair() && this.session?.status === 'ready' && view instanceof MarkdownView && view.getMode() === 'preview' ? view.containerEl : null;
     if (root === this.previewRoot) return;
     this.previewObserver?.disconnect(); this.previewObserver = null; this.previewRoot = root;
     if (root) {
@@ -132,17 +164,92 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.previewObserver.observe(root, { childList: true, subtree: true });
     }
   }
-  private currentEditor(path = this.session?.filePath): EditorView | null {
-    if (this.preferredEditor && this.editors.has(this.preferredEditor) && editorPath(this.preferredEditor) === path) return this.preferredEditor;
+  private checkParticipants(): void {
+    if (this.creating || !this.participants.size) return;
+    const alive = new Set<WorkspaceLeaf>(); this.app.workspace.iterateAllLeaves(leaf => { alive.add(leaf); });
+    for (const [leaf, expected] of this.participants) {
+      if (!alive.has(leaf) || leaf.view.getViewType() !== expected.type ||
+          (expected.path && (!(leaf.view instanceof MarkdownView) || leaf.view.file?.path !== expected.path)) ||
+          (expected.side && (!(leaf.view instanceof GitBaseView) || leaf.view.side !== expected.side))) {
+        this.closeReview(); return;
+      }
+    }
+  }
+  snapshotClosed(view: GitBaseView): void {
+    if (!this.creating && this.participants.has(view.leaf)) this.closeReview(false, view.leaf);
+  }
+  private historyView(): GitHistoryView | null {
+    const view = this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)[0]?.view;
+    return view instanceof GitHistoryView ? view : null;
+  }
+  private followHistory(): void {
+    const view = this.historyView(); if (!view) return;
     const active = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const candidates = [...this.editors].filter(view => editorPath(view) === path);
-    return candidates.find(v => v.state.field(editorInfoField, false)?.editor === active?.editor) ||
-      candidates.find(v => this.reviewLeaf?.view.containerEl.contains(v.dom)) || candidates[0] || null;
+    if (active) { void view.setFile(active.file); return; }
+    if (this.app.workspace.activeLeaf?.view instanceof GitBaseView) {
+      const file = this.session && this.app.vault.getAbstractFileByPath(this.session.filePath);
+      if (file instanceof TFile) void view.setFile(file);
+    }
+  }
+  async openHistory(file: TFile | null = this.contextFile()): Promise<void> {
+    let view = this.historyView();
+    if (!view) {
+      const leaf = this.app.workspace.getRightLeaf(false); if (!leaf) return;
+      await leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
+      view = this.historyView();
+    }
+    if (view) { void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); }
+  }
+  async compareHistory(filePath: string, commits: CommitInfo[]): Promise<void> {
+    if (!commits.length) { if (this.session?.filePath === filePath) this.closeReview(); return; }
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) throw new Error('The note is no longer available.');
+    if (commits.length === 1) await this.openReview({ file, ref: commits[0].sha, label: commits[0].shortSha, commit: commits[0] });
+    else await this.openHistorical(file, commits[0], commits[1]);
+  }
+  swapSides(): void {
+    const s = this.session;
+    const [left, right] = s?.endpoints || [];
+    const file = s && this.app.vault.getAbstractFileByPath(s.filePath);
+    if (file instanceof TFile && left?.kind === 'commit' && right?.kind === 'commit' && left.commit && right.commit)
+      void this.openHistorical(file, right.commit, left.commit);
+  }
+  editorAttached(view: EditorView): void {
+    this.editors.add(view);
+    queueMicrotask(() => { if (!this.disposed && this.editors.has(view)) { this.publishEditorMarks(); this.sync?.attach(); } });
+  }
+  editorDetached(view: EditorView): void {
+    this.editors.delete(view); this.tableIssues.delete(view);
+    if (this.preferredEditor === view) this.preferredEditor = null;
+    this.scheduleLayout();
+  }
+  editorChanged(view: EditorView, path: string): void {
+    if (!this.isHistoricalPair() && path === this.session?.filePath && this.isReviewEditor(view)) {
+      this.preferredEditor = view; this.requestUpdate();
+    }
+  }
+  editorGeometryChanged(): void { /* Anchors are measured on demand. */ }
+  editorTablePresentationIssue(view: EditorView, message: string | null): void {
+    if (message) this.tableIssues.set(view, message); else this.tableIssues.delete(view);
+    for (const snapshot of this.snapshotViews()) snapshot.updateStatus();
+  }
+  presentationWarning(): string | null { return this.tableIssues.size ? 'Unable to highlight some table changes.' : null; }
+  private isReviewEditor(view: EditorView): boolean {
+    // Cell editors inherit the same file identity. Their document is only one cell,
+    // so neither comparison input nor the document gutter may belong to them.
+    return !!this.reviewLeaf?.view.containerEl.contains(view.dom) &&
+      !view.dom.parentElement?.closest('.cm-editor, .markdown-embed');
+  }
+  private currentEditor(path = this.session?.filePath): EditorView | null {
+    // Obsidian may retain a hidden editor buffer while Reading view receives an external update.
+    if (this.isHistoricalPair() || !(this.reviewLeaf?.view instanceof MarkdownView) || this.reviewLeaf.view.getMode() !== 'source') return null;
+    const candidates = [...this.editors].filter(view => editorPath(view) === path && this.isReviewEditor(view));
+    return this.preferredEditor && candidates.includes(this.preferredEditor) ? this.preferredEditor : candidates[0] || null;
   }
   private publishEditorMarks(): void {
     const s = this.session;
     for (const view of this.editors) {
-      const reviewing = !!s && editorPath(view) === s.filePath;
+      const reviewing = !!s && !this.isHistoricalPair() && editorPath(view) === s.filePath && this.isReviewEditor(view);
       publish(view, s?.status === 'ready' && !s.error && reviewing
         ? { filePath: s.filePath, revision: s.revision, text: s.currentText, rows: s.rows } : null, reviewing);
     }
@@ -150,10 +257,9 @@ export default class LiveGitDiffPlugin extends Plugin {
   private invalidate(): Revision | null {
     this.worker.cancel(); if (this.timer) clearTimeout(this.timer); this.timer = null;
     const identity = this.revisions.next();
-    if (this.session && identity) {
-      this.session.revision = identity.revision; this.session.status = 'updating'; this.session.error = null;
-    }
-    this.sync.detach(); this.clearNoteDecorations(); this.baseView()?.updateStatus();
+    if (this.session && identity) { this.session.revision = identity.revision; this.session.status = 'updating'; this.session.error = null; }
+    this.sync.detach(); this.clearNoteDecorations();
+    for (const view of this.snapshotViews()) view.updateStatus();
     queueMicrotask(() => { if (!this.disposed) this.publishEditorMarks(); });
     return identity;
   }
@@ -166,12 +272,10 @@ export default class LiveGitDiffPlugin extends Plugin {
     const session = this.session;
     try {
       const saved = await this.app.vault.read(file);
-      // A save of the already compared live buffer does not invalidate a correct result.
       if (session === this.session && saved !== session?.currentText) this.requestUpdate();
     } catch (error) {
       if (session === this.session) {
-        this.invalidate();
-        if (this.session) { this.session.status = 'error'; this.session.error = (error as Error).message; }
+        this.invalidate(); if (this.session) { this.session.status = 'error'; this.session.error = (error as Error).message; }
         this.baseView()?.updateStatus();
       }
     }
@@ -194,110 +298,138 @@ export default class LiveGitDiffPlugin extends Plugin {
     if (!previous || !this.revisions.accepts(identity)) return;
     try {
       const file = this.app.vault.getAbstractFileByPath(identity.filePath);
-      if (!(file instanceof TFile)) throw new Error('A nota não está mais disponível.');
-      const currentText = this.currentEditor(identity.filePath)?.state.doc.toString() ?? await this.app.vault.read(file);
+      if (!(file instanceof TFile)) throw new Error('The note is no longer available.');
+      const currentText = this.isHistoricalPair() ? previous.currentText : this.currentEditor(identity.filePath)?.state.doc.toString() ?? await this.app.vault.read(file);
       if (!this.revisions.accepts(identity)) return;
       const result = await this.worker.compare({ identity, baseText: previous.baseText, currentText, options: { breaks: previous.breaks } });
       if (!this.revisions.accepts(identity)) return;
       this.session = sessionFromRows(file, previous.baseText, { root: previous.root, rel: previous.rel },
         { sha: previous.sha, label: previous.baseRefLabel, commit: previous.baseCommit, readAs: previous.baseReadAs },
         currentText, result.rows || [], identity.revision, previous.breaks);
-      this.session.baseReferences = result.baseReferences || '';
-      await this.baseView()?.render();
+      this.session.endpoints = previous.endpoints;
+      this.session.baseReferences = result.baseReferences || ''; this.session.currentReferences = result.currentReferences || '';
+      for (const view of this.snapshotViews()) await view.render();
       if (!this.revisions.accepts(identity)) return;
-      this.publishEditorMarks(); this.watchReadingPane(); this.decorateNotePaneInPlace(); this.sync.attach(); this.sync.syncNoteToBase();
+      this.publishEditorMarks(); this.watchReadingPane(); this.decorateNotePaneInPlace(); this.sync.attach(); this.sync.syncNoteToBase(); this.updateActions();
     } catch (error) {
       if (!this.revisions.accepts(identity) || (error as Error).name === 'AbortError') return;
-      if (this.session) { this.session.error = `Falha na comparação: ${(error as Error).message}`; this.session.status = 'error'; }
-      this.baseView()?.updateStatus();
+      if (this.session) { this.session.error = `Comparison failed: ${(error as Error).message}`; this.session.status = 'error'; }
+      for (const view of this.snapshotViews()) view.updateStatus();
     }
   }
-  private resolveBase(ctx: GitContext): { sha: string; label: string } {
+  private async resolveBase(ctx: GitContext, signal: AbortSignal): Promise<{ sha: string; label: string }> {
     const mode = this.settings.baseRefMode;
     if (mode === 'file-prev') {
-      const commits = fileLog(ctx.root, ctx.rel, 2);
-      if (commits.length < 2) throw new GitError('A nota precisa de dois commits para comparar com a versão anterior.');
+      const commits = await fileLogAsync(ctx.root, ctx.rel, 2, { signal });
+      if (commits.length < 2) throw new GitError('This note needs two commits to compare with its previous version.');
       return { sha: commits[1].sha, label: 'previous version' };
     }
     const ref = mode === 'custom' ? this.settings.baseRef : mode === 'head~1' ? 'HEAD~1' : 'HEAD';
-    return { sha: resolveRef(ctx.root, ref), label: ref };
+    return { sha: await resolveRefAsync(ctx.root, ref, signal), label: ref };
   }
-  private pickBaseAndOpen(): void {
-    const file = this.app.workspace.getActiveFile(); if (!file) return;
-    try {
-      const ctx = resolveGit(this.app, file), commits = fileLog(ctx.root, ctx.rel, this.settings.logLimit);
-      if (!commits.length) { new Notice('A nota não possui commits.'); return; }
-      const modal = new CommitPickerModal(this.app, file.name, commits, c => { void this.openReview({ ref: c.sha, label: c.shortSha, file }); });
-      modal.currentPath = ctx.rel; modal.open();
-    } catch (error) { new Notice((error as Error).message); }
+  private async noteLeaf(file: TFile, preferred?: WorkspaceLeaf): Promise<WorkspaceLeaf> {
+    const active = preferred || this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
+    if (active?.view instanceof MarkdownView && active.view.file?.path === file.path) return active;
+    const existing = this.app.workspace.getLeavesOfType('markdown').find(leaf => leaf.view instanceof MarkdownView && leaf.view.file?.path === file.path);
+    if (existing) return existing;
+    const leaf = this.app.workspace.getLeaf('tab'); await leaf.openFile(file); return leaf;
   }
-  async openReview(opts: { repin?: boolean; ref?: string; label?: string; file?: TFile } = {}): Promise<void> {
-    const file = opts.file || this.app.workspace.getActiveFile();
-    if (!file || file.extension !== 'md') { new Notice('Abra uma nota Markdown.'); return; }
-    const opening = ++this.opening;
-    const keep = !opts.repin && !opts.ref && this.session?.filePath === file.path && this.session.sha
+  async openReview(opts: { repin?: boolean; ref?: string; label?: string; file?: TFile; leaf?: WorkspaceLeaf; commit?: CommitInfo } = {}): Promise<void> {
+    const file = opts.file || this.contextFile();
+    if (!file || file.extension !== 'md') { new Notice('Open a Markdown note.'); return; }
+    const keep = !opts.repin && !opts.ref && !this.isHistoricalPair() && this.session?.filePath === file.path && this.session.sha
       ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
-    this.worker.cancel(); this.revisions.close(); if (this.timer) clearTimeout(this.timer);
-    this.clearNoteDecorations(); this.sync.detach();
-    this.reviewLeaf = this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf || null; this.preferredEditor = null;
+    this.closeReview(true); const opening = ++this.opening; this.creating = true;
+    const signal = (this.gitJob = new AbortController()).signal;
     try {
-      const noteView = this.reviewLeaf?.view;
-      if (noteView instanceof MarkdownView && noteView.file?.path === file.path) {
-        const state = noteView.getState();
-        if (noteView.getMode() !== 'source' || state.source !== false) {
-          await this.reviewLeaf!.setViewState({ type: 'markdown', state: { ...state, mode: 'source', source: false }, active: true });
-        }
-      }
+      this.reviewLeaf = await this.noteLeaf(file, opts.leaf);
       if (opening !== this.opening) return;
-      const ctx = resolveGit(this.app, file);
-      const base = keep || (opts.ref ? { sha: resolveRef(ctx.root, opts.ref), label: opts.label || opts.ref } : this.resolveBase(ctx));
-      const read = readBaseAt(ctx.root, ctx.rel, base.sha), commit = commitInfoFor(ctx.root, base.sha);
-      const breaks = await this.readBreaks(); if (opening !== this.opening) return;
+      this.participants.set(this.reviewLeaf, { type: 'markdown', path: file.path });
+      this.creating = false; this.checkParticipants(); this.updateActions();
+      const ctx = await resolveGitAsync(this.app, file, signal);
+      const base = keep || (opts.ref ? { sha: await resolveRefAsync(ctx.root, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal));
+      const [read, commit, breaks] = await Promise.all([readBaseAtAsync(ctx.root, ctx.rel, base.sha, signal, opts.commit?.path), commitInfoForAsync(ctx.root, base.sha, signal), this.readBreaks()]);
+      if (opening !== this.opening) return;
       this.session = sessionFromRows(file, read.text, ctx, { ...base, commit, readAs: read.renamedFrom }, '', [], 0, breaks);
       this.session.status = 'updating';
       const identity = this.revisions.begin(file.path, base.sha);
-      this.publishEditorMarks(); await this.revealView();
-      if (opening === this.opening) await this.updateComparison(identity);
-    } catch (error) {
-      if (opening !== this.opening) return;
-      this.session = errorSession(file, (error as Error).message);
-      this.publishEditorMarks(); await this.revealView(); new Notice((error as Error).message);
-    }
+      this.creating = true; this.publishEditorMarks(); await this.createSnapshot('a', this.reviewLeaf);
+      if (opening === this.opening) { this.creating = false; this.checkParticipants(); await this.updateComparison(identity); }
+    } catch (error) { await this.openingError(error, file, opening); }
+    finally { if (opening === this.opening) { this.creating = false; this.checkParticipants(); this.updateActions(); } }
   }
-  closeReview(): void {
-    this.opening++; this.revisions.close(); this.worker.dispose(); if (this.timer) clearTimeout(this.timer);
+  private async openHistorical(file: TFile, left: CommitInfo, right: CommitInfo): Promise<void> {
+    this.closeReview(true); const opening = ++this.opening; this.creating = true;
+    const signal = (this.gitJob = new AbortController()).signal;
+    try {
+      const ctx = await resolveGitAsync(this.app, file, signal);
+      const [a, b, breaks] = await Promise.all([readBaseAtAsync(ctx.root, ctx.rel, left.sha, signal, left.path || undefined), readBaseAtAsync(ctx.root, ctx.rel, right.sha, signal, right.path || undefined), this.readBreaks()]);
+      if (opening !== this.opening) return;
+      this.session = sessionFromRows(file, a.text, ctx, { sha: left.sha, label: left.shortSha, commit: left, readAs: a.renamedFrom }, b.text, [], 0, breaks);
+      this.session.endpoints[1] = { kind: 'commit', sha: right.sha, label: right.shortSha, path: b.path, commit: right };
+      this.session.status = 'updating';
+      const identity = this.revisions.begin(file.path, `${left.sha}..${right.sha}`);
+      const rightLeaf = this.app.workspace.getLeaf('tab');
+      this.participants.set(rightLeaf, { type: VIEW_TYPE, side: 'b' });
+      await rightLeaf.setViewState({ type: VIEW_TYPE, state: { side: 'b' }, active: true });
+      if (opening !== this.opening) return;
+      await this.createSnapshot('a', rightLeaf);
+      if (opening === this.opening) { this.creating = false; this.checkParticipants(); await this.updateComparison(identity); }
+    } catch (error) { await this.openingError(error, file, opening); }
+    finally { if (opening === this.opening) { this.creating = false; this.checkParticipants(); this.updateActions(); } }
+  }
+  private async openingError(error: unknown, file: TFile, opening: number): Promise<void> {
+    if (opening !== this.opening || (error as Error).name === 'AbortError') return;
+    const message = (error as Error).message; new Notice(message);
+    this.session = errorSession(file, message); this.publishEditorMarks();
+    if (!this.baseView()) { this.creating = true; await this.createSnapshot('a', this.reviewLeaf || this.app.workspace.getLeaf(false)); }
+    for (const view of this.snapshotViews()) await view.render();
+  }
+  closeReview(preserveHistorySelection = false, closingLeaf?: WorkspaceLeaf): void {
+    const path = this.session?.filePath;
+    this.opening++; this.creating = false; this.gitJob?.abort(); this.gitJob = null; this.revisions.close(); this.worker.dispose();
+    if (this.timer) clearTimeout(this.timer); this.timer = null;
+    this.sync?.detach(); this.clearNoteDecorations();
     this.previewObserver?.disconnect(); this.previewObserver = null; this.previewRoot = null;
     if (this.previewFrame !== null) window.cancelAnimationFrame(this.previewFrame); this.previewFrame = null;
-    this.sync.detach(); this.clearNoteDecorations(); this.session = null;
-    this.publishEditorMarks(); this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+    const generated = new Set([...this.participants].filter(([, value]) => value.type === VIEW_TYPE).map(([leaf]) => leaf));
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) generated.add(leaf);
+    this.participants.clear(); this.session = null; this.reviewLeaf = null; this.preferredEditor = null; this.tableIssues.clear();
+    this.publishEditorMarks();
+    for (const leaf of generated) if (leaf !== closingLeaf && leaf.view instanceof GitBaseView) leaf.detach();
+    if (!preserveHistorySelection) this.historyView()?.clearSelection(path);
+    if (!this.disposed) this.updateActions();
   }
-  private async revealView(): Promise<void> {
-    let leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
-    if (!leaf) {
-      leaf = this.app.workspace.createLeafBySplit(this.reviewLeaf || this.app.workspace.getLeaf(false), 'vertical', true);
-      await leaf.setViewState({ type: VIEW_TYPE, active: false });
-    }
-    await this.baseView()?.render();
+  private async createSnapshot(side: 'a' | 'b', anchor: WorkspaceLeaf): Promise<void> {
+    const leaf = this.app.workspace.createLeafBySplit(anchor, 'vertical', side === 'a');
+    this.participants.set(leaf, { type: VIEW_TYPE, side });
+    await leaf.setViewState({ type: VIEW_TYPE, state: { side }, active: false });
+  }
+  private snapshotViews(): GitBaseView[] {
+    return [...this.participants.keys()].map(leaf => leaf.view).filter((view): view is GitBaseView => view instanceof GitBaseView);
   }
   notePane(): NotePane | null {
     const session = this.session;
     if (!session || session.error || session.status !== 'ready') return null;
-    const cm = this.currentEditor(), owner = cm?.state.field(editorInfoField, false);
-    if (cm && owner instanceof MarkdownView && owner.getMode() === 'source' && cm.dom.isConnected) return { view: owner, scroller: cm.scrollDOM, editorView: cm };
-    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-      const view = leaf.view;
-      if (!(view instanceof MarkdownView) || view.file?.path !== session.filePath || view.getMode() !== 'preview') continue;
-      const scroller = findPreviewScroller(view); if (scroller) return { view, scroller };
+    if (this.isHistoricalPair()) {
+      const view = this.snapshotViews().find(view => view.side === 'b');
+      return view?.bodyEl ? { view: {}, scroller: view.bodyEl, scrollToLine: line => view.scrollToLine(line) } : null;
     }
+    const view = this.reviewLeaf?.view;
+    if (!(view instanceof MarkdownView) || view.file?.path !== session.filePath) return null;
+    const cm = this.currentEditor();
+    if (cm && view.getMode() === 'source' && cm.dom.isConnected) return { view, scroller: cm.scrollDOM, editorView: cm };
+    if (view.getMode() === 'preview') { const scroller = findPreviewScroller(view); if (scroller) return { view, scroller }; }
     return null;
   }
-  baseView(): GitBaseView | null {
-    const view = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0]?.view;
-    return view instanceof GitBaseView ? view : null;
-  }
+  baseView(): GitBaseView | null { return this.snapshotViews().find(view => view.side === 'a') || null; }
   basePane(): HTMLElement | null { return this.baseView()?.bodyEl || null; }
   baseElFor(index: number): HTMLElement | null { return this.baseView()?.blockEls.get(index) || null; }
-  noteLineInfo(element: HTMLElement): { lineStart: number; lineEnd: number } | undefined { return this.noteLines.get(element); }
+  noteLineInfo(element: HTMLElement): { lineStart: number; lineEnd: number } | undefined {
+    if (element.closest('.lgd-view[data-lgd-side="b"]') && element.dataset.lineStart !== undefined)
+      return { lineStart: Number(element.dataset.lineStart), lineEnd: Number(element.dataset.lineEnd) };
+    return this.noteLines.get(element);
+  }
   rowForNoteRange(start: number, end: number): Row | null {
     let best: Row | null = null, overlap = 0;
     for (const row of this.session?.noteRows || []) {
@@ -307,7 +439,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     return best;
   }
   private decorateNoteSection(element: HTMLElement, info: { lineStart: number; lineEnd: number }): void {
-    if (this.session?.status !== 'ready' || this.session.error) return;
+    if (this.isHistoricalPair() || this.session?.status !== 'ready' || this.session.error || !this.reviewLeaf?.view.containerEl.contains(element)) return;
     const row = this.rowForNoteRange(info.lineStart, info.lineEnd);
     element.addClass(CLS.nblock); this.noteLines.set(element, info);
     if (row) element.setAttr(ATTR_ROW, String(row.idx));
@@ -326,7 +458,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   private decorateNotePaneInPlace(): void {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
-      if (view instanceof MarkdownView && view.file?.path === this.session?.filePath && view.getMode() === 'preview') {
+      if (!this.isHistoricalPair() && leaf === this.reviewLeaf && view instanceof MarkdownView && view.file?.path === this.session?.filePath && view.getMode() === 'preview') {
         for (const section of this.readingSections(view)) this.decorateNoteSection(section.el, section.info);
       }
     }
@@ -341,7 +473,7 @@ export default class LiveGitDiffPlugin extends Plugin {
       }
     }
   }
-  toggleSync(): void { this.sync.enabled = !this.sync.enabled; this.baseView()?.updateSyncBadge(); }
+  toggleSync(): void { this.sync.enabled = !this.sync.enabled; for (const view of this.snapshotViews()) view.updateSyncBadge(); }
   private rerenderPreviews(): void {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
@@ -353,7 +485,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     const report = { file: s.filePath, sha: s.sha, revision: s.revision, status: s.status, counts: s.counts,
       simplified: s.rows.filter(row => row.simplified).length, scrollApi: this.sync.lastScrollApi,
       editor: !!this.notePane()?.editorView, error: s.error };
-    try { await navigator.clipboard.writeText(JSON.stringify(report, null, 2)); new Notice('Relatório copiado.'); }
-    catch { log.warn('Clipboard unavailable', report); new Notice('Relatório disponível no console.'); }
+    try { await navigator.clipboard.writeText(JSON.stringify(report, null, 2)); new Notice('Alignment report copied.'); }
+    catch { log.warn('Clipboard unavailable', report); new Notice('Alignment report is available in the console.'); }
   }
 }

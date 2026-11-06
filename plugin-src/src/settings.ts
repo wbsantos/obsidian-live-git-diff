@@ -199,7 +199,7 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
     const pickerNote = containerEl.createEl('p', { cls: 'lgd-settings-note' });
     pickerNote.setText(
       'To choose a version per review, use the command "Open review against a version…" — ' +
-      'it lists this file\'s recent commits by subject and age. These settings only decide ' +
+      'the Git history sidebar lists this file\'s versions and supports selecting two commits. These settings only decide ' +
       'what the plain "Open git diff review" command compares against.'
     );
 
@@ -262,7 +262,7 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Versions to list')
-      .setDesc('How many commits the version picker shows.')
+      .setDesc('How many commits to load per page in the Git history sidebar.')
       .addSlider((s) =>
         s
           .setLimits(10, 200, 10)

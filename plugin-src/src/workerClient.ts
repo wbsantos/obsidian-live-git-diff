@@ -26,7 +26,7 @@ export class ComparisonWorker {
     this.worker?.terminate(); this.worker = null;
     if (this.pending) {
       clearTimeout(this.pending.timer);
-      const error = new Error('Comparação substituída.'); error.name = 'AbortError';
+      const error = new Error('Comparison superseded.'); error.name = 'AbortError';
       this.pending.reject(error); this.pending = null;
     }
   }
@@ -43,19 +43,19 @@ export class ComparisonWorker {
           if (this.pending) clearTimeout(this.pending.timer);
           this.pending = null; worker.terminate(); this.worker = null; reject(error);
         };
-        this.pending = { reject, timer: setTimeout(() => fail(new Error('A comparação excedeu o tempo limite.')), 15000) };
+        this.pending = { reject, timer: setTimeout(() => fail(new Error('Comparison timed out.')), 15000) };
         worker.onmessage = event => {
           if (this.worker !== worker) return;
           const result = event.data;
           if (JSON.stringify(result.identity) !== JSON.stringify(request.identity)) return;
           if (result.error) { fail(new Error(result.error)); return; }
-          if (!Array.isArray(result.rows)) { fail(new Error('Resposta incompleta do worker; comparação indisponível.')); return; }
+          if (!Array.isArray(result.rows)) { fail(new Error('Incomplete worker response; comparison unavailable.')); return; }
           if (this.pending) clearTimeout(this.pending.timer);
           this.pending = null;
           if (result.baseBlocks) this.cache = { key, blocks: result.baseBlocks, references: result.baseReferences || '' };
           resolve(result);
         };
-        worker.onerror = event => fail(new Error(event.message || 'Falha no worker da comparação.'));
+        worker.onerror = event => fail(new Error(event.message || 'Comparison worker failed.'));
         worker.postMessage(request);
       } catch (error) { reject(error); }
     });

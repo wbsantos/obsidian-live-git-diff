@@ -6,7 +6,7 @@ import { connect } from './cdp.mjs';
 if (!process.argv[2]) throw new Error('Provide the local visual-cases manifest.');
 const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const output=manifest.output;fs.mkdirSync(output,{recursive:true});
-const c=await connect(manifest.port),results=[];
+const c=await connect(manifest.port),results=[];let originalTheme=null;
 const evaluate=code=>c.evaluate(`const p=app.plugins.plugins['live-git-diff'];${code}`);
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const check=(name,ok,detail)=>{results.push({name,pass:!!ok,detail});assert.ok(ok,`${name}: ${JSON.stringify(detail)}`);};
@@ -55,6 +55,8 @@ async function verifyCell(rowIndex,column,changed,side,label,artifact){
 try{
   const actual=await evaluate('return app.vault.adapter.basePath;');assert.equal(path.resolve(actual),path.resolve(manifest.vault),'Refuse to modify a non-QA vault');
   await c.send('Emulation.setDeviceMetricsOverride',{width:1800,height:1100,deviceScaleFactor:1,mobile:false});
+  originalTheme=await evaluate('return {dark:document.body.classList.contains("theme-dark"),light:document.body.classList.contains("theme-light")};');
+  if(manifest.theme)await evaluate(`document.body.classList.toggle('theme-dark',${manifest.theme==='dark'});document.body.classList.toggle('theme-light',${manifest.theme==='light'});return true;`);
   await evaluate(`require('@electron/remote').getCurrentWindow().webContents.setBackgroundThrottling(false);app.workspace.leftSplit.collapse();app.workspace.rightSplit.collapse();
     const s=document.createElement('style');s.id='lgd-qa-hide-style';s.textContent='body.lgd-qa-hide .lgd-table-cell-ins.lgd-table-cell-ins,body.lgd-qa-hide .lgd-table-cell-del.lgd-table-cell-del,.lgd-qa-hide .lgd-table-cell-detail .table-cell-wrapper {background-image:none!important;} .lgd-qa-hide tr.lgd-rowchanged{background-color:transparent!important;} .lgd-qa-hide [data-lgd-char]{background:transparent!important;} .lgd-qa-hide .lgd-editor-ins,.lgd-qa-hide .lgd-editor-mod{background-image:none!important;background-color:transparent!important;}';document.head.append(s);return true;`);
   for(const item of manifest.cases){
@@ -79,6 +81,7 @@ try{
   }
 }finally{
   await evaluate("document.body.classList.remove('lgd-qa-hide');document.getElementById('lgd-qa-hide-style')?.remove();delete window.__lgdQaTable;return true;").catch(()=>{});
+  if(originalTheme)await evaluate(`document.body.classList.toggle('theme-dark',${originalTheme.dark});document.body.classList.toggle('theme-light',${originalTheme.light});return true;`).catch(()=>{});
   fs.writeFileSync(path.join(output,'visual-coverage.json'),JSON.stringify({generatedAt:new Date().toISOString(),sources:manifest.cases.map(({file,sha,head,fileHead,beforeHash,afterHash})=>({file,sha,head,fileHead,beforeHash,afterHash})),results},null,2));c.close();
 }
 console.log(`${results.length} visual assertions passed`);

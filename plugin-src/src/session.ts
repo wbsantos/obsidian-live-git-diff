@@ -35,7 +35,13 @@ export interface Row extends PairRow {
   pb?: SideIndex;
 }
 
+export type ComparisonEndpoint =
+  | { kind: 'worktree'; path: string }
+  | { kind: 'commit'; sha: string; label: string; path: string; commit: CommitInfo | null };
+
 export interface Session {
+  endpoints: [ComparisonEndpoint, ComparisonEndpoint];
+  currentReferences: string;
   revision: number;
   status: 'updating' | 'ready' | 'error';
   currentText: string;
@@ -163,6 +169,9 @@ export function sessionFromRows(
   indexSide(baseRows, 'pb');
 
   return {
+    endpoints: [{ kind: 'commit', sha: pin.sha, label: pin.label, path: pin.readAs || ctx.rel, commit: pin.commit },
+      { kind: 'worktree', path: file.path }],
+    currentReferences: '',
     revision, status: 'ready', currentText, baseText, baseReferences: '', breaks,
     filePath: file.path,
     fileName: file.name,
@@ -193,6 +202,8 @@ export function sessionFromRows(
  */
 export function errorSession(file: { path: string; name: string }, msg: string): Session {
   return {
+    endpoints: [{ kind: 'commit', sha: '', label: '', path: file.path, commit: null }, { kind: 'worktree', path: file.path }],
+    currentReferences: '',
     revision: 0, status: 'error', currentText: '', baseText: '', baseReferences: '', breaks: false,
     filePath: file.path,
     fileName: file.name,

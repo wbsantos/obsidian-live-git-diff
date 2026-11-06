@@ -133,6 +133,6 @@ test('incomplete worker responses fail explicitly instead of claiming no changes
   const identity = { epoch: 1, revision: 1, filePath: 'a', sha: 'sha' };
   const pending = client.compare({ identity, baseText: 'a', currentText: 'b', options: {} });
   worker.onmessage?.({ data: { identity } } as MessageEvent<CompareResponse>);
-  await assert.rejects(pending, /incompleta/);
+  await assert.rejects(pending, /Incomplete/);
   client.dispose();
 });

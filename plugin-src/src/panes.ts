@@ -87,6 +87,7 @@ export interface MarkdownViewLike {
 }
 
 export interface NotePane {
+  scrollToLine?: (line: number) => void;
   editorView?: import('@codemirror/view').EditorView;
   view: MarkdownViewLike;
   scroller: HTMLElement;

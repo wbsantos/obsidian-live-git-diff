@@ -360,6 +360,7 @@ export class ScrollSync {
     if (line == null || !isFinite(line)) return;
     this.scrollLock('note', () => {
       if (note.editorView) { scrollEditorToLine(note.editorView, line); this.lastScrollApi = 'EditorView.scrollIntoView'; }
+      else if (note.scrollToLine) { note.scrollToLine(line); this.lastScrollApi = 'historical anchors'; }
       else this.applyNoteScroll(note.view, line);
     });
   }

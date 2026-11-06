@@ -1,21 +1,33 @@
-# Live Git Diff — versão local 0.2.1
+# Live Git Diff
 
-Compara uma nota com um commit Git fixo e permite editar a versão atual no Live Preview nativo do Obsidian. A versão antiga aparece renderizada, em somente leitura. A comparação atualiza após 300 ms de pausa na digitação e invalida destaques antigos imediatamente.
+Compare Markdown notes with Git versions while editing in Obsidian's native Live Preview. The historical version is rendered read-only. Changes to visible content, formatting, links and structure remain visible; equivalent Markdown spelling and table padding are ignored.
 
-## Uso
+## Open a comparison
 
-1. Reative o plugin após atualizar seus arquivos.
-2. Abra uma nota Markdown rastreada pelo Git.
-3. Execute **Live Git Diff: Open review against a version…** e escolha o commit.
-4. Edite a nota normalmente. Desfazer, refazer, seleção e cursor continuam nativos.
+Use **Compare** in the note header, next to Obsidian's reading/editing controls, to compare with the configured reference (HEAD by default). The button becomes **Close comparison** during review. Closing either participating tab also closes the review and clears its highlights. Other note tabs remain open.
 
-**Open git diff review for this file** usa a referência configurada, HEAD por padrão. **Refresh review (re-pin the base version)** troca explicitamente a referência. Alterações comuns e salvamentos mantêm o commit escolhido. **Close review** remove os destaques e fecha o painel. O modo de leitura continua disponível.
+Use the adjacent **Git history** button to open the sidebar:
 
-A igualdade preserva caixa, código, hierarquia, formatação efetiva e destinos de links. Delimitadores equivalentes, entidades e espaços sem efeito visual são ignorados. A configuração de quebras de linha do vault é respeitada. Propriedades e sintaxes não interpretadas recebem indicação de comparação conservadora. Em tabelas e widgets nativos, a margem indica alterações quando o interior não pode ser decorado pela API pública.
+- Click one commit to compare it with the current note, including unsaved edits.
+- Ctrl/Cmd+click a second commit to compare two historical versions in read-only panes. The earlier version starts on the left; **Swap sides** reverses them.
+- Ctrl/Cmd+click a selected commit to deselect it. Up to two versions can be selected.
+- Filter loaded commits, select **Load more**, or refresh the history. The footer shows Git loading progress and the time of the last successful synchronization.
 
-Listas recebem destaques por item, incluindo suas continuações; itens preservados ficam sem cor. Código inline recebe marcação por palavra nos dois painéis de leitura. Fora de uma revisão, a extensão não reserva espaço para indicadores no editor.
+The command palette remains available. **Open review against a version…** opens the same history sidebar. **Refresh review (re-pin the base version)** explicitly chooses the base again. Ordinary edits, external saves and history refreshes retain the chosen commit.
 
-## Desenvolvimento
+If the note has already been committed, select its previous file version or two historical commits to see that committed change. Comparing an unchanged worktree with HEAD correctly produces no differences.
+
+## Review behavior
+
+The comparison updates after 300 ms without typing. Obsolete highlights disappear immediately. Obsidian retains control of edits, the cursor, selection, undo, redo and saving. Reading mode is also supported. Outside a review, the plugin reserves no gutter space and leaves the editor content width unchanged.
+
+Added content is green and removed content is red. Modified content shows its old and current forms. Tables are compared by rows and cells: added rows are green on the current side, removed rows are red on the base side, and unchanged headers and rows keep their normal appearance. A note explains additions that have no corresponding row on the opposite side. Lists are highlighted by changed item, including continuations.
+
+History is cached per repository and file. A late Git result may populate that file's cache, but cannot change a panel that has switched to a different note or a newer visit to the same note. Paging retains its original HEAD, and history refresh never changes the pinned comparison.
+
+## Installation and development
+
+This desktop plugin requires Git on PATH. Install `main.js`, `manifest.json` and `styles.css` from `plugin-dist` into `.obsidian/plugins/live-git-diff/`. Reload the plugin after replacing its files. Back up the existing plugin directory first; retain `data.json` to preserve settings.
 
 ```powershell
 cd plugin-src
@@ -23,10 +35,14 @@ npm ci --ignore-scripts
 npm run ci
 ```
 
-A distribuição é gerada em `plugin-dist` com três arquivos: `main.js`, `manifest.json` e `styles.css`. O Web Worker é auditado antes de ser incorporado ao bundle. `npm run dev` acompanha os fontes, inclusive os do worker. Os testes usam Node 22.6 ou posterior; a entrega foi verificada com Node 24.13.0 e Obsidian 1.15.0 no Windows.
+The build produces `plugin-dist`. The parser and diff libraries are bundled and pinned in the lockfile. The comparison worker is audited before embedding; the build and tests check the bundle's read-only constraints. Plugin transactions contain presentation and scrolling effects only. Settings are saved through Obsidian's plugin API.
 
-O código de execução não escreve conteúdo de notas. As transações no editor contêm apenas efeitos de apresentação e rolagem; quem edita e salva é o Obsidian. Configurações próprias são persistidas em `data.json`. A análise ocorre em um worker com operações de diff limitadas, e a versão histórica é analisada e renderizada novamente apenas quando necessário.
+See [validation and compatibility notes](VALIDATION.md) for the tested environment, verification tools and limitations. The original project documentation is retained in [README-0.1.1.md](README-0.1.1.md).
 
-Documentos muito grandes têm custo perceptível na primeira renderização histórica; o ensaio de 882 mil caracteres levou cerca de 15 segundos no aplicativo. Resultados que excedem o orçamento de detalhamento continuam marcados como alterados. Blocos movidos não recebem categoria especial. A versão histórica não reproduz o Live Preview e conteúdo dinâmico de plugins não define igualdade.
+## Limits
 
-Veja o [relatório de implementação e validação](LOCAL-REVIEW.md), com 154 testes, e o [relatório da correção 0.2.1](FIX-HIGHLIGHTS-0.2.1.md), com a reprodução da nota real, medidas de largura e localização do backup. A versão anterior da documentação está em [README-0.1.1.md](README-0.1.1.md).
+The historical side uses Obsidian's Markdown renderer, rather than a second editable Live Preview. Properties and unsupported syntax are compared conservatively and identified in the panel. Dynamic plugin output does not define equality. Moved blocks have no special category. When refinement reaches its budget, the block remains marked as changed with an explicit simplified-details message.
+
+Native table presentation uses the registered public CodeMirror view and source positions, with guarded DOM mapping to Obsidian's table widgets. If a future renderer prevents reliable mapping, the panel reports the limitation. Other replacement widgets, including formulas, use margin indicators. Reading-mode section discovery retains a guarded compatibility fallback for already-rendered sections.
+
+Large documents are analyzed in a worker and rendered in batches. Their first historical render can still take several seconds; subsequent edits reuse the fixed historical content.

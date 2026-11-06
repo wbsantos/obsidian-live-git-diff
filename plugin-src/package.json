@@ -1,6 +1,6 @@
 {
   "name": "obsidian-live-git-diff",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Compare and edit notes in native Live Preview against a pinned Git version. Changes only the presentation; never writes note content.",
   "main": "main.js",
   "type": "module",
