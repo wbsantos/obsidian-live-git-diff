@@ -661,9 +661,9 @@ var GitError = class extends Error {
 var US = "";
 var RS = "";
 var HUMAN_DATE = "format:%b %d, %I:%M %p";
-var COMMIT_FIELDS = ["%h", "%H", "%ar", "%ad", "%s"].join(US);
+var COMMIT_FIELDS = ["%h", "%H", "%ar", "%ad", "%s", "%an"].join(US);
 function parseCommitFields(line, path2) {
-  const [shortSha, sha, relative, date, subject] = line.split(US);
+  const [shortSha, sha, relative, date, subject, author] = line.split(US);
   if (!sha) return null;
   return {
     shortSha,
@@ -671,6 +671,7 @@ function parseCommitFields(line, path2) {
     relative,
     date: date.replace(/(^|\s)0(\d)/g, "$1$2"),
     subject: subject || "(no subject)",
+    author: author || "",
     path: path2
   };
 }
@@ -735,7 +736,7 @@ ${e.message}`
 }
 function showAt(root, sha, rel) {
   try {
-    return git(["-C", root, "show", "--end-of-options", `${sha}:${rel}`]);
+    return git(["-C", root, "cat-file", "--end-of-options", "blob", `${sha}:${rel}`]);
   } catch (e) {
     const m = e.message || "";
     if (/exists on disk, but not in|does not exist in|path .* does not exist/i.test(m)) {

@@ -6,7 +6,7 @@
  * the plugin imports a filesystem module at all (tools/check-invariant.mjs asserts
  * that as a capability check, which is stronger than grepping for method names).
  */
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import * as path from 'path';
 import type { App, TFile } from 'obsidian';
 
@@ -32,6 +32,8 @@ export interface CommitInfo {
   date: string;
   /** Commit subject (first line). */
   subject: string;
+  /** Author name displayed in the file history. */
+  author?: string;
   /**
    * The file's path AS OF this commit. Differs from the current path across a rename,
    * which is why it is captured here rather than assumed — see `fileLog`.
@@ -75,13 +77,13 @@ const RS = '\x1e';
 const HUMAN_DATE = 'format:%b %d, %I:%M %p';
 
 /** shortSha, sha, relative, absolute, subject — the fields every CommitInfo needs. */
-const COMMIT_FIELDS = ['%h', '%H', '%ar', '%ad', '%s'].join(US);
+const COMMIT_FIELDS = ['%h', '%H', '%ar', '%ad', '%s', '%an'].join(US);
 
 function parseCommitFields(line: string, path: string): CommitInfo | null {
-  const [shortSha, sha, relative, date, subject] = line.split(US);
+  const [shortSha, sha, relative, date, subject, author] = line.split(US);
   if (!sha) return null;
   return { shortSha, sha, relative, date: date.replace(/(^|\s)0(\d)/g, '$1$2'),
-    subject: subject || '(no subject)', path };
+    subject: subject || '(no subject)', author: author || '', path };
 }
 
 /**
@@ -215,7 +217,7 @@ export function showAt(root: string, sha: string, rel: string): string {
     // depth rather than a live hole. It is in anyway: the rule is that no ref reaches
     // git argv without it, and a rule with an exception is not a rule — the next caller
     // to pass this an unresolved ref should not be the one who discovers that.
-    return git(['-C', root, 'show', '--end-of-options', `${sha}:${rel}`]);
+    return git(['-C', root, 'cat-file', '--end-of-options', 'blob', `${sha}:${rel}`]);
   } catch (e: unknown) {
     const m = (e as Error).message || '';
     if (/exists on disk, but not in|does not exist in|path .* does not exist/i.test(m)) {
@@ -354,5 +356,93 @@ export function readBaseAt(
       `Pick that commit or a later one. (If you expected it here, the commit may be on ` +
       `a branch that is not an ancestor of this file's history.)`
     );
+  }
+}
+
+/** Asynchronous, read-only Git transport for interactive actions and history. */
+function gitAsync(args: string[], signal?: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, {
+      encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true, timeout: 30_000, signal,
+    }, (error, stdout, stderr) => {
+      if (!error) { resolve(stdout); return; }
+      if (error.code === 'ENOENT') { reject(new GitError('git not found on PATH. Is git installed?')); return; }
+      reject(new GitError(String(stderr || error.message || 'git failed').trim()));
+    });
+  });
+}
+
+export async function resolveGitAsync(app: App, file: TFile, signal?: AbortSignal): Promise<GitContext> {
+  const abs = absPathOf(app, file), dir = path.dirname(abs);
+  let output: string;
+  try { output = await gitAsync(['-C', dir, 'rev-parse', '--show-toplevel', '--show-prefix'], signal); }
+  catch (e) { throw new GitError(`Not inside a git repository (${dir}).\n${(e as Error).message}`); }
+  const [root, prefix] = output.split(/\r?\n/), rel = prefix + path.basename(abs);
+  if (!root || !rel || rel.startsWith('..')) throw new GitError(`File resolves outside its git root: ${abs}`);
+  return { abs, root, rel };
+}
+
+export async function resolveRefAsync(root: string, ref: string, signal?: AbortSignal): Promise<string> {
+  const wanted = String(ref || '').trim();
+  if (!wanted) throw new GitError('Base ref is empty. Set one in the plugin settings.');
+  try { return (await gitAsync(['-C', root, 'rev-parse', '--verify', '--end-of-options', `${wanted}^{commit}`], signal)).trim(); }
+  catch (e) { throw new GitError(`Cannot resolve base ref "${wanted}" in this repository.\n${(e as Error).message}`); }
+}
+
+export async function showAtAsync(root: string, sha: string, rel: string, signal?: AbortSignal): Promise<string> {
+  try { return await gitAsync(['-C', root, 'cat-file', '--end-of-options', 'blob', `${sha}:${rel}`], signal); }
+  catch (e) { throw new GitError(`Cannot read ${rel} at ${sha.slice(0, 7)}. The file may not exist at this version.\n${(e as Error).message}`); }
+}
+
+export async function commitInfoForAsync(root: string, ref: string, signal?: AbortSignal): Promise<CommitInfo> {
+  const output = await gitAsync(['-C', root, 'show', '-s', `--format=${COMMIT_FIELDS}`,
+    `--date=${HUMAN_DATE}`, '--end-of-options', ref], signal);
+  const info = parseCommitFields(output.split('\n')[0], '');
+  if (!info) throw new GitError(`Cannot read commit ${ref}: git returned no usable output.`);
+  return info;
+}
+
+export interface FileLogOptions { head?: string; signal?: AbortSignal }
+/** A larger prefix of the SAME pinned history is requested for each page, retaining rename context. */
+export async function fileLogAsync(root: string, rel: string, limit = 50, options: FileLogOptions = {}): Promise<CommitInfo[]> {
+  const count = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 50;
+  const head = options.head || await resolveRefAsync(root, 'HEAD', options.signal);
+  let output: string;
+  try {
+    output = await gitAsync(['--literal-pathspecs', '-c', 'core.quotepath=false', '-C', root, 'log',
+      '--follow', '--name-status', '-z', `--format=${RS}${COMMIT_FIELDS}`,
+      `--date=${HUMAN_DATE}`, '-n', String(count), '--end-of-options', head, '--', rel], options.signal);
+  } catch (e) { throw new GitError(`Cannot read the history of ${rel}:\n${(e as Error).message}`); }
+  const commits: CommitInfo[] = [];
+  let currentPath = rel;
+  for (const record of output.split(RS)) {
+    if (!record.trim()) continue;
+    const parts = record.split('\0'), line = parts.shift() || '';
+    const info = parseCommitFields(line.replace(/\r?\n$/, ''), currentPath);
+    if (!info) continue;
+    // With --follow Git emits one file change. -z preserves spaces and tabs in its names.
+    const status = (parts.shift() || '').replace(/^\r?\n/, '');
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const before = parts.shift(), after = parts.shift();
+      if (after) info.path = after;
+      if (before) currentPath = before;
+    } else if (parts[0]) { info.path = parts[0]; currentPath = parts[0]; }
+    commits.push(info);
+  }
+  return commits;
+}
+
+export async function readBaseAtAsync(root: string, rel: string, sha: string, signal?: AbortSignal, pathAtCommit?: string): Promise<{ text: string; path: string; renamedFrom: string | null }> {
+  if (pathAtCommit) return { text: await showAtAsync(root, sha, pathAtCommit, signal), path: pathAtCommit, renamedFrom: pathAtCommit === rel ? null : pathAtCommit };
+  try { return { text: await showAtAsync(root, sha, rel, signal), path: rel, renamedFrom: null }; }
+  catch (original) {
+    if (signal?.aborted) throw original;
+    const history = await fileLogAsync(root, rel, 500, { signal });
+    const hit = history.find(commit => commit.sha === sha || (sha.length >= 7 && commit.sha.startsWith(sha)));
+    if (hit && hit.path !== rel) return { text: await showAtAsync(root, sha, hit.path, signal), path: hit.path, renamedFrom: hit.path };
+    if (!history.length) throw new GitError(`Not tracked in git: ${rel}. This file has no commits to compare against.`);
+    if (hit) throw original;
+    throw new GitError(`This file did not exist at ${sha.slice(0, 7)}: ${rel}. Choose a version in this file's history.\n${(original as Error).message}`);
   }
 }
