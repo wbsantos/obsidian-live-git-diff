@@ -6,6 +6,7 @@ import type { CommitInfo, GitContext } from './git.ts';
 import { GitHistoryView, HISTORY_VIEW_TYPE } from './historyView.ts';
 import type { HistoryReviewState } from './historyView.ts';
 import { HistoryCache } from './history.ts';
+import { registerFileMenus } from './contextMenus.ts';
 import { sessionFromRows, errorSession, RevisionGate } from './session.ts';
 import type { Row, Session, Revision } from './session.ts';
 import { ComparisonWorker } from './workerClient.ts';
@@ -55,6 +56,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.registerEditorExtension(reviewExtension(this));
     this.registerView(VIEW_TYPE, leaf => new GitBaseView(leaf, this, this.participants.get(leaf)?.side));
     this.registerView(HISTORY_VIEW_TYPE, leaf => new GitHistoryView(leaf, this));
+    registerFileMenus(this, this);
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
     const command = (id: string, name: string, run: () => void, review = false): void => {
       this.addCommand({ id, name, checkCallback: checking => {

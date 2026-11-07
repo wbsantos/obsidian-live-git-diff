@@ -49,7 +49,7 @@ __export(main_exports, {
   default: () => LiveGitDiffPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 
 // src/baseView.ts
 var import_obsidian = require("obsidian");
@@ -1234,6 +1234,85 @@ ${commit.path}`);
   }
 };
 
+// src/contextMenus.ts
+var import_obsidian3 = require("obsidian");
+function registerFileMenus(plugin, host) {
+  const { app } = plugin;
+  const decorated = /* @__PURE__ */ new WeakSet();
+  const bindings = /* @__PURE__ */ new Map();
+  let disposed = false, scheduled = false;
+  function addActions(menu, file, leaf) {
+    if (!(file instanceof import_obsidian3.TFile) || file.extension !== "md" || decorated.has(menu)) return;
+    decorated.add(menu);
+    const run = async (compare) => {
+      if (disposed) return;
+      if (app.vault.getAbstractFileByPath(file.path) !== file) {
+        new import_obsidian3.Notice("The file is no longer available.");
+        return;
+      }
+      try {
+        if (compare) await host.openReview({ file, leaf, repin: true });
+        else await host.openHistory(file);
+      } catch (error2) {
+        new import_obsidian3.Notice(`Unable to ${compare ? "compare this file" : "open Git history"}: ${error2.message || error2}`);
+      }
+    };
+    menu.addItem((item) => item.setSection("action").setTitle("Git History").setIcon("history").onClick(() => run(false)));
+    menu.addItem((item) => item.setSection("action").setTitle("Git Compare").setIcon("git-compare").onClick(() => run(true)));
+  }
+  plugin.registerEvent(app.workspace.on("file-menu", (menu, file, _source, leaf) => addActions(menu, file, leaf)));
+  plugin.registerEvent(app.workspace.on("editor-menu", (menu, _editor, info) => {
+    addActions(menu, info.file, info instanceof import_obsidian3.MarkdownView ? info.leaf : void 0);
+  }));
+  function attach() {
+    if (disposed) return;
+    const views = new Set(app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian3.MarkdownView));
+    for (const [view, remove] of bindings) if (!views.has(view)) {
+      remove();
+      bindings.delete(view);
+    }
+    for (const view of views) if (!bindings.has(view)) {
+      const handler = (event) => {
+        const target = event.target;
+        if (!(target instanceof view.containerEl.ownerDocument.defaultView.Element) || !view.file) return;
+        if (target.closest('a,img,video,audio,input,textarea,button,.markdown-embed,.metadata-container,.cm-table-widget [contenteditable="true"]')) return;
+        const reading = view.getMode() === "preview" && !!target.closest(".markdown-preview-view");
+        const table = view.getMode() === "source" && !!target.closest(".cm-table-widget");
+        const header = !!target.closest(".view-header-title");
+        if (!reading && !table && !header) return;
+        if (reading && target.closest('[contenteditable="true"]')) return;
+        const alreadyHandled = event.defaultPrevented;
+        const menu = import_obsidian3.Menu.forEvent(event);
+        if (reading && !alreadyHandled) {
+          const selection = view.containerEl.ownerDocument.getSelection();
+          const text = selection && view.containerEl.contains(selection.anchorNode) && view.containerEl.contains(selection.focusNode) ? selection.toString() : "";
+          if (text) menu.addItem((item) => item.setSection("clipboard").setTitle("Copy").setIcon("copy").onClick(() => view.containerEl.ownerDocument.defaultView.navigator.clipboard.writeText(text).catch(() => {
+            new import_obsidian3.Notice("Unable to copy the selected text.");
+          })));
+        }
+        addActions(menu, view.file, view.leaf);
+      };
+      view.containerEl.addEventListener("contextmenu", handler);
+      bindings.set(view, () => view.containerEl.removeEventListener("contextmenu", handler));
+    }
+  }
+  const schedule = () => {
+    if (scheduled || disposed) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      attach();
+    });
+  };
+  plugin.registerEvent(app.workspace.on("layout-change", schedule));
+  app.workspace.onLayoutReady(attach);
+  plugin.register(() => {
+    disposed = true;
+    for (const remove of bindings.values()) remove();
+    bindings.clear();
+  });
+}
+
 // src/session.ts
 function indexSide(list, K) {
   let lastPaired = null;
@@ -1447,7 +1526,7 @@ var ComparisonWorker = class {
 // src/editor.ts
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 var presentReview = import_state.StateEffect.define();
 var ChangeMarker = class extends import_view.GutterMarker {
   constructor(kind, message) {
@@ -1472,7 +1551,7 @@ var reviewMarks = import_state.StateField.define({
   update(value, transaction) {
     var _a, _b;
     if (transaction.docChanged) return empty();
-    const info = transaction.state.field(import_obsidian3.editorInfoField, false);
+    const info = transaction.state.field(import_obsidian4.editorInfoField, false);
     for (const effect of transaction.effects) if (effect.is(presentReview)) {
       const data = effect.value;
       if (!data || data.filePath !== ((_a = info == null ? void 0 : info.file) == null ? void 0 : _a.path) || data.text !== transaction.state.doc.toString()) return empty();
@@ -1515,7 +1594,7 @@ function reviewExtension(host) {
         var _a, _b;
         const marks = update.state.field(reviewMarks);
         this.tables.update(marks.rows, marks.revision);
-        const path2 = (_b = (_a = update.state.field(import_obsidian3.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+        const path2 = (_b = (_a = update.state.field(import_obsidian4.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
         if (update.docChanged && path2) host.editorChanged(update.view, path2);
         if (update.geometryChanged || update.viewportChanged) host.editorGeometryChanged();
       }
@@ -1528,7 +1607,7 @@ function reviewExtension(host) {
 }
 function editorPath(view) {
   var _a, _b;
-  return (_b = (_a = view.state.field(import_obsidian3.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  return (_b = (_a = view.state.field(import_obsidian4.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
 }
 function publish(view, value, reviewing = !!value) {
   const effects = [presentReview.of(value)];
@@ -2261,7 +2340,7 @@ var ViewZones = class {
 };
 
 // src/settings.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 var DEFAULT_SETTINGS = {
   colors: { insBg: "", delBg: "", insRail: "", delRail: "" },
   baseRefMode: "head",
@@ -2326,7 +2405,7 @@ function mergeSettings(loaded) {
     colors: { ...DEFAULT_SETTINGS.colors, ...l.colors || {} }
   };
 }
-var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
+var LiveGitDiffSettingTab = class extends import_obsidian5.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -2334,12 +2413,12 @@ var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian4.Setting(containerEl).setName("Base version").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Base version").setHeading();
     const pickerNote = containerEl.createEl("p", { cls: "lgd-settings-note" });
     pickerNote.setText(
-      `To choose a version per review, use the command "Open review against a version\u2026" \u2014 the Git history sidebar lists this file's versions and supports selecting two commits. These settings only decide what the plain "Open git diff review" command compares against.`
+      'To choose a version per review, use the command "Open review against a version\u2026" \u2014 the Git History sidebar stays on the chosen file. Select one or two versions, then choose Compare. These settings decide what the note-header Compare action, Git Compare menu and plain "Open git diff review" command compare against.'
     );
-    new import_obsidian4.Setting(containerEl).setName("Compare against by default").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("Compare against by default").setDesc(
       "Whichever you pick is resolved to a commit when the review opens, and that commit is then pinned for the session \u2014 so the diff cannot shrink while something else commits to the repo mid-review."
     ).addDropdown(
       (d) => d.addOption("head", "The latest commit (HEAD)").addOption("head~1", "One commit before HEAD (HEAD~1)").addOption("file-prev", "This file's previous version").addOption("custom", "A specific ref\u2026").setValue(this.plugin.settings.baseRefMode).onChange(async (v) => {
@@ -2361,7 +2440,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
       );
     }
     if (this.plugin.settings.baseRefMode === "custom") {
-      new import_obsidian4.Setting(containerEl).setName("Ref").setDesc(
+      new import_obsidian5.Setting(containerEl).setName("Ref").setDesc(
         "Anything git resolves: main, origin/main, v1.2, HEAD~5, a sha, main@{yesterday}."
       ).addText(
         (t) => t.setPlaceholder("main").setValue(this.plugin.settings.baseRef).onChange(async (v) => {
@@ -2370,13 +2449,13 @@ var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
         })
       );
     }
-    new import_obsidian4.Setting(containerEl).setName("Versions to list").setDesc("How many commits to load per page in the Git history sidebar.").addSlider(
+    new import_obsidian5.Setting(containerEl).setName("Versions to list").setDesc("How many commits to load per page in the Git history sidebar.").addSlider(
       (s) => s.setLimits(10, 200, 10).setValue(this.plugin.settings.logLimit).setDynamicTooltip().onChange(async (v) => {
         this.plugin.settings.logLimit = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("Colors").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Colors").setHeading();
     const note = containerEl.createEl("p", { cls: "lgd-settings-note" });
     note.setText(
       "Defaults are GitHub's diff palette and follow your light/dark theme. Any CSS color works \u2014 including alpha, which matters: these are washes that sit behind text, and the defaults are translucent on purpose. Leave a field empty to use the default. An override applies to both themes."
@@ -2384,7 +2463,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
     Object.keys(CSS_VAR).forEach((key) => {
       const label = FIELD_LABEL[key];
       let swatch = null;
-      const setting = new import_obsidian4.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
+      const setting = new import_obsidian5.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
         t.setPlaceholder(LIGHT_DEFAULT[key]).setValue(this.plugin.settings.colors[key]).onChange(async (v) => {
           const val = v.trim();
           const ok = isValidColor(val);
@@ -2400,15 +2479,15 @@ var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
       swatch = setting.controlEl.createDiv({ cls: "lgd-swatch", text: "abc" });
       swatch.style.background = this.plugin.settings.colors[key] || LIGHT_DEFAULT[key];
     });
-    new import_obsidian4.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
+    new import_obsidian5.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
       (b) => b.setButtonText("Reset").onClick(async () => {
         this.plugin.settings.colors = { ...DEFAULT_SETTINGS.colors };
         await this.plugin.saveSettings();
         this.display();
       })
     );
-    new import_obsidian4.Setting(containerEl).setName("Advanced").setHeading();
-    new import_obsidian4.Setting(containerEl).setName("Debug logging").setDesc(
+    new import_obsidian5.Setting(containerEl).setName("Advanced").setHeading();
+    new import_obsidian5.Setting(containerEl).setName("Debug logging").setDesc(
       "Verbose console output, and extra detail in the alignment report. Warnings and errors are logged regardless of this setting."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.debug).onChange(async (v) => {
@@ -2420,7 +2499,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian4.PluginSettingTab {
 };
 
 // src/main.ts
-var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
+var LiveGitDiffPlugin = class extends import_obsidian6.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -2458,6 +2537,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
       return new GitBaseView(leaf, this, (_a = this.participants.get(leaf)) == null ? void 0 : _a.side);
     });
     this.registerView(HISTORY_VIEW_TYPE, (leaf) => new GitHistoryView(leaf, this));
+    registerFileMenus(this, this);
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
     const command = (id, name, run, review = false) => {
       this.addCommand({ id, name, checkCallback: (checking) => {
@@ -2494,7 +2574,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     this.registerEvent(this.app.workspace.on("resize", () => this.sync.attach()));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       var _a;
-      if (!this.isHistoricalPair() && file instanceof import_obsidian5.TFile && file.path === ((_a = this.session) == null ? void 0 : _a.filePath)) void this.externalChange(file);
+      if (!this.isHistoricalPair() && file instanceof import_obsidian6.TFile && file.path === ((_a = this.session) == null ? void 0 : _a.filePath)) void this.externalChange(file);
     }));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       var _a, _b;
@@ -2503,7 +2583,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
       const view = this.historyView(), path2 = (_b = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b.path;
       if (path2 && contains(path2)) {
         const renamed = this.app.vault.getAbstractFileByPath(file.path + path2.slice(oldPath.length));
-        if (renamed instanceof import_obsidian5.TFile) void view.setFile(renamed);
+        if (renamed instanceof import_obsidian6.TFile) void view.setFile(renamed);
       }
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
@@ -2550,12 +2630,12 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
   }
   contextFile() {
     var _a, _b, _c, _d;
-    const active = (_a = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _a.file;
+    const active = (_a = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView)) == null ? void 0 : _a.file;
     if ((active == null ? void 0 : active.extension) === "md") return active;
     const leaf = this.app.workspace.activeLeaf;
     const path2 = (leaf == null ? void 0 : leaf.view) instanceof GitBaseView ? (_b = this.session) == null ? void 0 : _b.filePath : (_d = (_c = this.historyView()) == null ? void 0 : _c.controller.state.file) == null ? void 0 : _d.path;
     const file = path2 ? this.app.vault.getAbstractFileByPath(path2) : this.app.workspace.getActiveFile();
-    return file instanceof import_obsidian5.TFile && file.extension === "md" ? file : null;
+    return file instanceof import_obsidian6.TFile && file.extension === "md" ? file : null;
   }
   scheduleLayout() {
     if (this.layoutPending || this.disposed) return;
@@ -2573,7 +2653,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     });
   }
   updateActions() {
-    const views = new Set(this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian5.MarkdownView));
+    const views = new Set(this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian6.MarkdownView));
     for (const [view, buttons] of this.actions) if (!views.has(view)) {
       buttons.compare.remove();
       buttons.history.remove();
@@ -2598,8 +2678,8 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
         this.actions.set(view, buttons);
       }
       const closing = this.participants.has(view.leaf);
-      (0, import_obsidian5.setIcon)(buttons.compare, closing ? "x" : "git-compare");
-      (0, import_obsidian5.setTooltip)(buttons.compare, closing ? "Close comparison" : "Compare");
+      (0, import_obsidian6.setIcon)(buttons.compare, closing ? "x" : "git-compare");
+      (0, import_obsidian6.setTooltip)(buttons.compare, closing ? "Close comparison" : "Compare");
       buttons.compare.setAttr("aria-label", closing ? "Close comparison" : "Compare");
     }
   }
@@ -2616,7 +2696,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
   watchReadingPane() {
     var _a, _b, _c;
     const view = (_a = this.reviewLeaf) == null ? void 0 : _a.view;
-    const root = !this.isHistoricalPair() && ((_b = this.session) == null ? void 0 : _b.status) === "ready" && view instanceof import_obsidian5.MarkdownView && view.getMode() === "preview" ? view.containerEl : null;
+    const root = !this.isHistoricalPair() && ((_b = this.session) == null ? void 0 : _b.status) === "ready" && view instanceof import_obsidian6.MarkdownView && view.getMode() === "preview" ? view.containerEl : null;
     if (root === this.previewRoot) return;
     (_c = this.previewObserver) == null ? void 0 : _c.disconnect();
     this.previewObserver = null;
@@ -2636,7 +2716,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
       alive.add(leaf);
     });
     for (const [leaf, expected] of this.participants) {
-      if (!alive.has(leaf) || leaf.view.getViewType() !== expected.type || expected.path && (!(leaf.view instanceof import_obsidian5.MarkdownView) || ((_a = leaf.view.file) == null ? void 0 : _a.path) !== expected.path) || expected.side && (!(leaf.view instanceof GitBaseView) || leaf.view.side !== expected.side)) {
+      if (!alive.has(leaf) || leaf.view.getViewType() !== expected.type || expected.path && (!(leaf.view instanceof import_obsidian6.MarkdownView) || ((_a = leaf.view.file) == null ? void 0 : _a.path) !== expected.path) || expected.side && (!(leaf.view instanceof GitBaseView) || leaf.view.side !== expected.side)) {
         this.closeReview();
         return;
       }
@@ -2680,7 +2760,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     if (this.openingFile) return;
     if (commits.length < 1 || commits.length > 2) throw new Error("Select one or two versions to compare.");
     const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof import_obsidian5.TFile)) throw new Error("The note is no longer available.");
+    if (!(file instanceof import_obsidian6.TFile)) throw new Error("The note is no longer available.");
     if (commits.length === 1) await this.openReview({ file, ref: commits[0].sha, label: commits[0].shortSha, commit: commits[0] });
     else await this.openHistorical(file, commits[0], commits[1]);
   }
@@ -2688,7 +2768,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     const s = this.session;
     const [left, right] = (s == null ? void 0 : s.endpoints) || [];
     const file = s && this.app.vault.getAbstractFileByPath(s.filePath);
-    if (file instanceof import_obsidian5.TFile && (left == null ? void 0 : left.kind) === "commit" && (right == null ? void 0 : right.kind) === "commit" && left.commit && right.commit)
+    if (file instanceof import_obsidian6.TFile && (left == null ? void 0 : left.kind) === "commit" && (right == null ? void 0 : right.kind) === "commit" && left.commit && right.commit)
       void this.openHistorical(file, right.commit, left.commit);
   }
   editorAttached(view) {
@@ -2730,7 +2810,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
   }
   currentEditor(path2 = ((_a) => (_a = this.session) == null ? void 0 : _a.filePath)()) {
     var _a2;
-    if (this.isHistoricalPair() || !(((_a2 = this.reviewLeaf) == null ? void 0 : _a2.view) instanceof import_obsidian5.MarkdownView) || this.reviewLeaf.view.getMode() !== "source") return null;
+    if (this.isHistoricalPair() || !(((_a2 = this.reviewLeaf) == null ? void 0 : _a2.view) instanceof import_obsidian6.MarkdownView) || this.reviewLeaf.view.getMode() !== "source") return null;
     const candidates = [...this.editors].filter((view) => editorPath(view) === path2 && this.isReviewEditor(view));
     return this.preferredEditor && candidates.includes(this.preferredEditor) ? this.preferredEditor : candidates[0] || null;
   }
@@ -2810,7 +2890,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     if (!previous || !this.revisions.accepts(identity)) return;
     try {
       const file = this.app.vault.getAbstractFileByPath(identity.filePath);
-      if (!(file instanceof import_obsidian5.TFile)) throw new Error("The note is no longer available.");
+      if (!(file instanceof import_obsidian6.TFile)) throw new Error("The note is no longer available.");
       const currentText = this.isHistoricalPair() ? previous.currentText : (_b = (_a = this.currentEditor(identity.filePath)) == null ? void 0 : _a.state.doc.toString()) != null ? _b : await this.app.vault.read(file);
       if (!this.revisions.accepts(identity)) return;
       const result = await this.worker.compare({ identity, baseText: previous.baseText, currentText, options: { breaks: previous.breaks } });
@@ -2857,11 +2937,11 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
   }
   async noteLeaf(file, preferred) {
     var _a, _b;
-    const active = preferred || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _a.leaf);
-    if ((active == null ? void 0 : active.view) instanceof import_obsidian5.MarkdownView && ((_b = active.view.file) == null ? void 0 : _b.path) === file.path) return active;
+    const active = preferred || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView)) == null ? void 0 : _a.leaf);
+    if ((active == null ? void 0 : active.view) instanceof import_obsidian6.MarkdownView && ((_b = active.view.file) == null ? void 0 : _b.path) === file.path) return active;
     const existing = this.app.workspace.getLeavesOfType("markdown").find((leaf2) => {
       var _a2;
-      return leaf2.view instanceof import_obsidian5.MarkdownView && ((_a2 = leaf2.view.file) == null ? void 0 : _a2.path) === file.path;
+      return leaf2.view instanceof import_obsidian6.MarkdownView && ((_a2 = leaf2.view.file) == null ? void 0 : _a2.path) === file.path;
     });
     if (existing) return existing;
     const leaf = this.app.workspace.getLeaf("tab");
@@ -2872,7 +2952,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     var _a, _b, _c, _d;
     const file = opts.file || this.contextFile();
     if (!file || file.extension !== "md") {
-      new import_obsidian5.Notice("Open a Markdown note.");
+      new import_obsidian6.Notice("Open a Markdown note.");
       return;
     }
     const keep = !opts.repin && !opts.ref && !this.isHistoricalPair() && ((_a = this.session) == null ? void 0 : _a.filePath) === file.path && this.session.sha ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
@@ -2959,7 +3039,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
   async openingError(error2, file, opening) {
     if (opening !== this.opening || error2.name === "AbortError") return;
     const message = error2.message;
-    new import_obsidian5.Notice(message);
+    new import_obsidian6.Notice(message);
     this.session = errorSession(file, message);
     this.publishEditorMarks();
     if (!this.baseView()) {
@@ -3015,7 +3095,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
       return (view2 == null ? void 0 : view2.bodyEl) ? { view: {}, scroller: view2.bodyEl, scrollToLine: (line) => view2.scrollToLine(line) } : null;
     }
     const view = (_a = this.reviewLeaf) == null ? void 0 : _a.view;
-    if (!(view instanceof import_obsidian5.MarkdownView) || ((_b = view.file) == null ? void 0 : _b.path) !== session.filePath) return null;
+    if (!(view instanceof import_obsidian6.MarkdownView) || ((_b = view.file) == null ? void 0 : _b.path) !== session.filePath) return null;
     const cm = this.currentEditor();
     if (cm && view.getMode() === "source" && cm.dom.isConnected) return { view, scroller: cm.scrollDOM, editorView: cm };
     if (view.getMode() === "preview") {
@@ -3075,7 +3155,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     var _a, _b;
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (!this.isHistoricalPair() && leaf === this.reviewLeaf && view instanceof import_obsidian5.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath) && view.getMode() === "preview") {
+      if (!this.isHistoricalPair() && leaf === this.reviewLeaf && view instanceof import_obsidian6.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath) && view.getMode() === "preview") {
         for (const section of this.readingSections(view)) this.decorateNoteSection(section.el, section.info);
       }
     }
@@ -3086,7 +3166,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     (_b = this.zones) == null ? void 0 : _b.reset();
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (!(view instanceof import_obsidian5.MarkdownView)) continue;
+      if (!(view instanceof import_obsidian6.MarkdownView)) continue;
       const elements = /* @__PURE__ */ new Set([...this.readingSections(view).map((s) => s.el), ...Array.from(view.containerEl.querySelectorAll(`.${CLS.nblock}`))]);
       for (const el of elements) if (el.hasClass(CLS.nblock)) {
         unwrapCharMarks(el);
@@ -3104,7 +3184,7 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     var _a, _b;
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian5.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath)) view.previewMode.rerender(true);
+      if (view instanceof import_obsidian6.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath)) view.previewMode.rerender(true);
     }
   }
   async reportAlignment() {
@@ -3124,10 +3204,10 @@ var LiveGitDiffPlugin = class extends import_obsidian5.Plugin {
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
-      new import_obsidian5.Notice("Alignment report copied.");
+      new import_obsidian6.Notice("Alignment report copied.");
     } catch (e) {
       warn("Clipboard unavailable", report);
-      new import_obsidian5.Notice("Alignment report is available in the console.");
+      new import_obsidian6.Notice("Alignment report is available in the console.");
     }
   }
 };

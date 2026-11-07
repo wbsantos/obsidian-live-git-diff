@@ -199,8 +199,8 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
     const pickerNote = containerEl.createEl('p', { cls: 'lgd-settings-note' });
     pickerNote.setText(
       'To choose a version per review, use the command "Open review against a version…" — ' +
-      'the Git history sidebar lists this file\'s versions and supports selecting two commits. These settings only decide ' +
-      'what the plain "Open git diff review" command compares against.'
+      'the Git History sidebar stays on the chosen file. Select one or two versions, then choose Compare. These settings decide ' +
+      'what the note-header Compare action, Git Compare menu and plain "Open git diff review" command compare against.'
     );
 
     new Setting(containerEl)
