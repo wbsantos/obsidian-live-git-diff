@@ -4,6 +4,7 @@ import { GitBaseView, VIEW_TYPE } from './baseView.ts';
 import { GitError, commitInfoForAsync, fileLogAsync, readBaseAtAsync, resolveGitAsync, resolveRefAsync } from './git.ts';
 import type { CommitInfo, GitContext } from './git.ts';
 import { GitHistoryView, HISTORY_VIEW_TYPE } from './historyView.ts';
+import type { HistoryReviewState } from './historyView.ts';
 import { HistoryCache } from './history.ts';
 import { sessionFromRows, errorSession, RevisionGate } from './session.ts';
 import type { Row, Session, Revision } from './session.ts';
@@ -39,6 +40,8 @@ export default class LiveGitDiffPlugin extends Plugin {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private gitJob: AbortController | null = null;
   private opening = 0;
+  private openingFile: string | null = null;
+  private historyOpening = 0;
   private creating = false;
   private disposed = false;
   private layoutPending = false;
@@ -73,20 +76,31 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.scheduleReadingPaint();
     });
     this.registerEvent(this.app.workspace.on('layout-change', () => this.scheduleLayout()));
-    this.registerEvent(this.app.workspace.on('active-leaf-change', () => { this.scheduleLayout(); this.followHistory(); }));
-    this.registerEvent(this.app.workspace.on('file-open', () => { this.scheduleLayout(); this.followHistory(); }));
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.scheduleLayout()));
+    this.registerEvent(this.app.workspace.on('file-open', () => this.scheduleLayout()));
     this.registerEvent(this.app.workspace.on('resize', () => this.sync.attach()));
     this.registerEvent(this.app.vault.on('modify', file => {
       if (!this.isHistoricalPair() && file instanceof TFile && file.path === this.session?.filePath) void this.externalChange(file);
     }));
-    this.registerEvent(this.app.vault.on('rename', (_file, oldPath) => {
-      if (oldPath === this.session?.filePath) this.closeReview(); this.followHistory();
+    this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+      const contains = (path?: string): boolean => !!path && (path === oldPath || path.startsWith(oldPath + '/'));
+      if (contains(this.session?.filePath) || contains(this.openingFile || undefined)) this.closeReview();
+      const view = this.historyView(), path = view?.controller.state.file?.path;
+      if (path && contains(path)) {
+        const renamed = this.app.vault.getAbstractFileByPath(file.path + path.slice(oldPath.length));
+        if (renamed instanceof TFile) void view!.setFile(renamed);
+      }
     }));
-    this.registerEvent(this.app.vault.on('delete', file => { if (file.path === this.session?.filePath) this.closeReview(); }));
+    this.registerEvent(this.app.vault.on('delete', file => {
+      const contains = (path?: string): boolean => !!path && (path === file.path || path.startsWith(file.path + '/'));
+      if (contains(this.session?.filePath) || contains(this.openingFile || undefined)) this.closeReview();
+      const view = this.historyView();
+      if (contains(view?.controller.state.file?.path)) view!.controller.fileUnavailable();
+    }));
     this.app.workspace.onLayoutReady(() => {
       if (!this.disposed) {
         if (!this.session) this.app.workspace.detachLeavesOfType(VIEW_TYPE);
-        this.scheduleLayout(); this.followHistory();
+        this.scheduleLayout();
       }
     });
   }
@@ -135,7 +149,7 @@ export default class LiveGitDiffPlugin extends Plugin {
             if (this.participants.has(view.leaf)) this.closeReview();
             else if (view.file) void this.openReview({ file: view.file, leaf: view.leaf });
           }),
-          history: view.addAction('history', 'Git history', () => { void this.openHistory(view.file); }),
+          history: view.addAction('history', 'Git History', () => { void this.openHistory(view.file); }),
         };
         buttons.compare.addClass('lgd-compare-action'); buttons.history.addClass('lgd-history-action'); this.actions.set(view, buttons);
       }
@@ -176,32 +190,31 @@ export default class LiveGitDiffPlugin extends Plugin {
     }
   }
   snapshotClosed(view: GitBaseView): void {
-    if (!this.creating && this.participants.has(view.leaf)) this.closeReview(false, view.leaf);
+    if (!this.creating && this.participants.has(view.leaf)) this.closeReview(view.leaf);
   }
   private historyView(): GitHistoryView | null {
     const view = this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)[0]?.view;
     return view instanceof GitHistoryView ? view : null;
   }
-  private followHistory(): void {
-    const view = this.historyView(); if (!view) return;
-    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (active) { void view.setFile(active.file); return; }
-    if (this.app.workspace.activeLeaf?.view instanceof GitBaseView) {
-      const file = this.session && this.app.vault.getAbstractFileByPath(this.session.filePath);
-      if (file instanceof TFile) void view.setFile(file);
-    }
+  historyReviewState(): HistoryReviewState {
+    const s = this.session;
+    return { openingFile: this.openingFile, error: s?.error || null,
+      active: s?.sha && !s.error ? { filePath: s.filePath, left: s.sha.slice(0, 7),
+        right: s.endpoints[1].kind === 'commit' ? s.endpoints[1].sha.slice(0, 7) : 'Working tree' } : null };
   }
   async openHistory(file: TFile | null = this.contextFile()): Promise<void> {
+    const request = ++this.historyOpening;
     let view = this.historyView();
     if (!view) {
       const leaf = this.app.workspace.getRightLeaf(false); if (!leaf) return;
       await leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
       view = this.historyView();
     }
-    if (view) { void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); }
+    if (view && !this.disposed && request === this.historyOpening) { void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); }
   }
-  async compareHistory(filePath: string, commits: CommitInfo[]): Promise<void> {
-    if (!commits.length) { if (this.session?.filePath === filePath) this.closeReview(); return; }
+  async compareHistory(filePath: string, commits: readonly CommitInfo[]): Promise<void> {
+    if (this.openingFile) return;
+    if (commits.length < 1 || commits.length > 2) throw new Error('Select one or two versions to compare.');
     const file = this.app.vault.getAbstractFileByPath(filePath);
     if (!(file instanceof TFile)) throw new Error('The note is no longer available.');
     if (commits.length === 1) await this.openReview({ file, ref: commits[0].sha, label: commits[0].shortSha, commit: commits[0] });
@@ -339,10 +352,13 @@ export default class LiveGitDiffPlugin extends Plugin {
     if (!file || file.extension !== 'md') { new Notice('Open a Markdown note.'); return; }
     const keep = !opts.repin && !opts.ref && !this.isHistoricalPair() && this.session?.filePath === file.path && this.session.sha
       ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
-    this.closeReview(true); const opening = ++this.opening; this.creating = true;
+    this.closeReview(); const opening = ++this.opening; this.creating = true; this.openingFile = file.path;
+    this.historyView()?.updateComparisonState();
     const signal = (this.gitJob = new AbortController()).signal;
     try {
       this.reviewLeaf = await this.noteLeaf(file, opts.leaf);
+      if (opening !== this.opening) return;
+      await this.app.workspace.revealLeaf(this.reviewLeaf);
       if (opening !== this.opening) return;
       this.participants.set(this.reviewLeaf, { type: 'markdown', path: file.path });
       this.creating = false; this.checkParticipants(); this.updateActions();
@@ -356,10 +372,11 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.creating = true; this.publishEditorMarks(); await this.createSnapshot('a', this.reviewLeaf);
       if (opening === this.opening) { this.creating = false; this.checkParticipants(); await this.updateComparison(identity); }
     } catch (error) { await this.openingError(error, file, opening); }
-    finally { if (opening === this.opening) { this.creating = false; this.checkParticipants(); this.updateActions(); } }
+    finally { if (opening === this.opening) { this.openingFile = null; this.creating = false; this.checkParticipants(); this.updateActions(); this.historyView()?.updateComparisonState(); } }
   }
   private async openHistorical(file: TFile, left: CommitInfo, right: CommitInfo): Promise<void> {
-    this.closeReview(true); const opening = ++this.opening; this.creating = true;
+    this.closeReview(); const opening = ++this.opening; this.creating = true; this.openingFile = file.path;
+    this.historyView()?.updateComparisonState();
     const signal = (this.gitJob = new AbortController()).signal;
     try {
       const ctx = await resolveGitAsync(this.app, file, signal);
@@ -376,7 +393,7 @@ export default class LiveGitDiffPlugin extends Plugin {
       await this.createSnapshot('a', rightLeaf);
       if (opening === this.opening) { this.creating = false; this.checkParticipants(); await this.updateComparison(identity); }
     } catch (error) { await this.openingError(error, file, opening); }
-    finally { if (opening === this.opening) { this.creating = false; this.checkParticipants(); this.updateActions(); } }
+    finally { if (opening === this.opening) { this.openingFile = null; this.creating = false; this.checkParticipants(); this.updateActions(); this.historyView()?.updateComparisonState(); } }
   }
   private async openingError(error: unknown, file: TFile, opening: number): Promise<void> {
     if (opening !== this.opening || (error as Error).name === 'AbortError') return;
@@ -385,9 +402,8 @@ export default class LiveGitDiffPlugin extends Plugin {
     if (!this.baseView()) { this.creating = true; await this.createSnapshot('a', this.reviewLeaf || this.app.workspace.getLeaf(false)); }
     for (const view of this.snapshotViews()) await view.render();
   }
-  closeReview(preserveHistorySelection = false, closingLeaf?: WorkspaceLeaf): void {
-    const path = this.session?.filePath;
-    this.opening++; this.creating = false; this.gitJob?.abort(); this.gitJob = null; this.revisions.close(); this.worker.dispose();
+  closeReview(closingLeaf?: WorkspaceLeaf): void {
+    this.opening++; this.openingFile = null; this.creating = false; this.gitJob?.abort(); this.gitJob = null; this.revisions.close(); this.worker.dispose();
     if (this.timer) clearTimeout(this.timer); this.timer = null;
     this.sync?.detach(); this.clearNoteDecorations();
     this.previewObserver?.disconnect(); this.previewObserver = null; this.previewRoot = null;
@@ -397,7 +413,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.participants.clear(); this.session = null; this.reviewLeaf = null; this.preferredEditor = null; this.tableIssues.clear();
     this.publishEditorMarks();
     for (const leaf of generated) if (leaf !== closingLeaf && leaf.view instanceof GitBaseView) leaf.detach();
-    if (!preserveHistorySelection) this.historyView()?.clearSelection(path);
+    this.historyView()?.updateComparisonState();
     if (!this.disposed) this.updateActions();
   }
   private async createSnapshot(side: 'a' | 'b', anchor: WorkspaceLeaf): Promise<void> {

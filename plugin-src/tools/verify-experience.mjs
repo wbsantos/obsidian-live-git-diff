@@ -5,9 +5,9 @@ const c=await connect(m.port),results=[];const e=code=>c.evaluate(`const p=app.p
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const check=(name,condition,detail)=>{results.push({name,pass:!!condition,detail});assert.ok(condition,`${name}: ${JSON.stringify(detail)}`);console.log('PASS '+name);};
 async function until(code){for(let i=0;i<160;i++){if(await e(`return ${code};`)){await wait(80);return;}await wait(40);}throw new Error('Timed out: '+code);}
-const ready=()=>until("p.session?.status==='ready'&&p.snapshotViews().every(v=>v.blockEls.size===(v.side==='a'?p.session.baseRows:p.session.noteRows).length)");
+const ready=()=>until("!p.historyReviewState().openingFile&&p.session?.status==='ready'&&p.snapshotViews().every(v=>v.blockEls.size===(v.side==='a'?p.session.baseRows:p.session.noteRows).length)");
 const width=()=>c.evaluate(`const view=app.workspace.getLeavesOfType('markdown').find(l=>l.view.file?.path===${JSON.stringify(fixture.file)}).view;return view.containerEl.querySelector('.cm-editor .cm-content').getBoundingClientRect().width;`);
-const choose=async(sha,ctrl=false)=>{await e(`const b=p.historyView().contentEl.querySelector('[data-commit="'+${JSON.stringify(sha)}+'"]');if(!b)throw new Error('Commit not listed');b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:${ctrl}}));return true;`);await ready();};
+const choose=async(sha,ctrl=false)=>{await e(`const b=p.historyView().contentEl.querySelector('[data-commit="'+${JSON.stringify(sha)}+'"]');if(!b)throw new Error('Commit not listed');b.dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:${ctrl}}));p.historyView().contentEl.querySelector('.lgd-history-compare').click();return true;`);await ready();};
 const key=async(mod,key,code)=>{await c.send('Input.dispatchKeyEvent',{type:'keyDown',key,code,modifiers:mod,windowsVirtualKeyCode:key.toUpperCase().charCodeAt(0)});await c.send('Input.dispatchKeyEvent',{type:'keyUp',key,code,modifiers:mod,windowsVirtualKeyCode:key.toUpperCase().charCodeAt(0)});};
 try{
  assert.equal(path.resolve(await e('return app.vault.adapter.basePath;')),path.resolve(m.vault));

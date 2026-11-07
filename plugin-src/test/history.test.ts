@@ -7,10 +7,9 @@ const turn=()=>new Promise<void>(r=>setImmediate(r));
 function setup(){
   const jobs:Array<{root:string;head:string;limit:number;resolve:(v:CommitInfo[])=>void;reject:(e:Error)=>void}>=[];
   let head='head1',clock=1000,headCalls=0,events=0;
-  const comparisons:Array<{path:string;shas:string[]}>=[];
   const cache=new HistoryCache({head:async()=>{headCalls++;return head;},log:async(ctx,h,n)=>new Promise((resolve,reject)=>jobs.push({root:ctx.root,head:h,limit:n,resolve,reject}))},()=>++clock);
-  const panel=new HistoryController(cache,async f=>({root:'/repo/'+f.path,rel:'file.md',abs:'/repo/'+f.path+'/file.md'}),()=>2,()=>{events++;},(path,selected)=>comparisons.push({path,shas:selected.map(c=>c.sha)}));
-  return {cache,panel,jobs,comparisons,setHead:(v:string)=>{head=v;},get headCalls(){return headCalls;},get events(){return events;}};
+  const panel=new HistoryController(cache,async f=>({root:'/repo/'+f.path,rel:'file.md',abs:'/repo/'+f.path+'/file.md'}),()=>2,()=>{events++;});
+  return {cache,panel,jobs,setHead:(v:string)=>{head=v;},get headCalls(){return headCalls;},get events(){return events;}};
 }
 test('old-file completion updates its cache but cannot repaint current list, selection or footer',async()=>{
   const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();const b=s.panel.setFile({path:'B',name:'B'});await turn();
@@ -39,20 +38,53 @@ test('failure retains cache and last successful timestamp, including footer duri
 });
 test('load more remains on pinned HEAD; refresh and selection do not repin a comparison',async()=>{
   const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();s.jobs[0].resolve(['3','2','1'].map(commit));await a;
-  s.panel.select('2',false);s.setHead('head2');const more=s.panel.refresh(true);await turn();
+  s.panel.select('2',false);const request=s.panel.comparisonRequest();s.setHead('head2');const more=s.panel.refresh(true);await turn();
   assert.equal(s.jobs[1].head,'head1');assert.equal(s.headCalls,1);assert.equal(s.jobs[1].limit,5);
   s.jobs[1].resolve(['3','2','1'].map(commit));await more;const refresh=s.panel.refresh();await turn();assert.equal(s.jobs[2].head,'head2');
   s.jobs[2].resolve(['4','3','2','1'].map(commit));await refresh;
-  assert.deepEqual(s.comparisons,[{path:'A',shas:['2']}]);assert.equal(s.panel.state.selected[0].sha,'2');
+  assert.deepEqual(s.panel.comparisonRequest(),request);assert.equal(s.panel.state.selected[0].sha,'2');
 });
 test('selection supports one, two older-first, rejection of third, and deselect to zero',async()=>{
   const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();s.jobs[0].resolve(['3','2','1'].map(commit));await a;
   const more=s.panel.refresh(true);await turn();s.jobs[1].resolve(['3','2','1'].map(commit));await more;
-  s.panel.select('3',false);s.panel.select('2',true);assert.deepEqual(s.comparisons.at(-1)?.shas,['2','3']);
-  const count=s.comparisons.length;s.panel.select('1',true);assert.equal(s.comparisons.length,count);assert.match(s.panel.state.hint!,/up to two/);
-  s.panel.select('3',true);assert.deepEqual(s.comparisons.at(-1)?.shas,['2']);s.panel.select('2',true);assert.deepEqual(s.comparisons.at(-1)?.shas,[]);
+  s.panel.select('3',false);s.panel.select('2',true);assert.deepEqual(s.panel.comparisonRequest()?.commits.map(c=>c.sha),['2','3']);
+  const request=s.panel.comparisonRequest();s.panel.select('1',true);assert.deepEqual(s.panel.comparisonRequest(),request);assert.match(s.panel.state.hint!,/up to two/);
+  s.panel.select('3',true);assert.deepEqual(s.panel.comparisonRequest()?.commits.map(c=>c.sha),['2']);s.panel.select('2',true);assert.equal(s.panel.comparisonRequest(),null);
 });
 test('closed panel cannot receive responses but outstanding read can finish the original cache',async()=>{
   const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();const events=s.events;s.panel.dispose();s.jobs[0].resolve([commit('a')]);await a;
   assert.equal(s.events,events);assert.equal(s.cache.forFile('A')?.commits[0].sha,'a');
+});
+
+test('an explicit comparison request is independent of later selections, clears and file visits',async()=>{
+  const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();s.jobs[0].resolve(['3','2'].map(commit));await a;
+  s.panel.select('3',false);s.panel.select('2',true);const request=s.panel.comparisonRequest()!;
+  assert.ok(Object.isFrozen(request)&&Object.isFrozen(request.commits)&&Object.isFrozen(request.commits[0]));
+  s.panel.state.selected[0].path='changed-after-click.md';s.panel.select('3',false);s.panel.clearSelection();
+  assert.equal(s.panel.comparisonRequest(),null);
+  const b=s.panel.setFile({path:'B',name:'B'});await turn();s.jobs[1].resolve([commit('b')]);await b;s.panel.select('b',false);
+  assert.equal(request.filePath,'A');assert.deepEqual(request.commits.map(c=>[c.sha,c.path]),[['2','file.md'],['3','file.md']]);
+});
+
+test('reopening the chosen file retains the draft and does not request a refresh',async()=>{
+  const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();s.jobs[0].resolve([commit('a')]);await a;s.panel.select('a',false);
+  const state=s.panel.state,events=s.events;await s.panel.setFile({path:'A',name:'A'});
+  assert.equal(s.panel.state,state);assert.equal(s.events,events);assert.equal(s.jobs.length,1);
+});
+
+test('deleted file invalidates in-flight UI results but still permits cache completion',async()=>{
+  const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();s.panel.fileUnavailable();const state=s.panel.state;
+  s.jobs[0].resolve([commit('a')]);await a;
+  assert.equal(s.panel.state,state);assert.equal(s.cache.forFile('A')?.commits[0].sha,'a');assert.equal(s.panel.comparisonRequest(),null);
+  s.panel.select('a',false);await s.panel.refresh();assert.equal(s.jobs.length,1);assert.equal(s.panel.state.selected.length,0);
+  assert.match(historyStatus(s.panel.state),/^File is no longer available/);
+  const restored=s.panel.setFile({path:'A',name:'A'});await turn();s.jobs[1].resolve([commit('new')]);await restored;
+  assert.equal(s.panel.state.unavailable,false);s.panel.select('new',false);assert.equal(s.panel.comparisonRequest()?.commits[0].sha,'new');
+});
+
+test('plain click replaces two selected versions without applying or retaining a stale second version',async()=>{
+  const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();s.jobs[0].resolve(['3','2'].map(commit));await a;
+  s.panel.select('3',false);s.panel.select('2',true);const applied=s.panel.comparisonRequest()!;
+  s.panel.select('3',false);assert.deepEqual(s.panel.state.selected.map(c=>c.sha),['3']);
+  assert.deepEqual(applied.commits.map(c=>c.sha),['2','3']);s.panel.dispose();assert.equal(s.panel.comparisonRequest(),null);
 });

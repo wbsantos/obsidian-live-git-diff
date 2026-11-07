@@ -63,12 +63,17 @@ export interface HistoryState {
   error: string | null;
   selected: CommitInfo[];
   hint: string | null;
+  unavailable: boolean;
+}
+export interface HistoryComparisonRequest {
+  readonly filePath: string;
+  readonly commits: readonly Readonly<CommitInfo>[];
 }
 export type HistoryResolver = (file: HistoryFile, signal: AbortSignal) => Promise<GitContext>;
 
 /** One panel visit has an epoch, independently of file identity and Git request ordering. */
 export class HistoryController {
-  state: HistoryState = { file: null, loading: false, error: null, selected: [], hint: null };
+  state: HistoryState = { file: null, loading: false, error: null, selected: [], hint: null, unavailable: false };
   private epoch = 0;
   private request = 0;
   private closed = false;
@@ -76,22 +81,21 @@ export class HistoryController {
   private resolve: HistoryResolver;
   private pageSize: () => number;
   private changed: (state: HistoryState) => void;
-  private compare: (filePath: string, selected: CommitInfo[]) => void;
   constructor(cache: HistoryCache, resolve: HistoryResolver, pageSize: () => number,
-    changed: (state: HistoryState) => void, compare: (filePath: string, selected: CommitInfo[]) => void) {
-    this.cache = cache; this.resolve = resolve; this.pageSize = pageSize; this.changed = changed; this.compare = compare;
+    changed: (state: HistoryState) => void) {
+    this.cache = cache; this.resolve = resolve; this.pageSize = pageSize; this.changed = changed;
   }
   async setFile(file: HistoryFile | null): Promise<void> {
-    if (this.closed || (file?.path || null) === (this.state.file?.path || null)) return;
+    if (this.closed || (!this.state.unavailable && (file?.path || null) === (this.state.file?.path || null))) return;
     this.epoch++;
     this.state = { file, entry: file ? this.cache.forFile(file.path) : undefined,
-      loading: false, error: null, selected: [], hint: null };
+      loading: false, error: null, selected: [], hint: null, unavailable: false };
     this.emit();
     if (file) await this.refresh();
   }
   async refresh(more = false): Promise<void> {
     const file = this.state.file;
-    if (!file || this.closed || (more && (this.state.loading || !this.state.entry?.hasMore))) return;
+    if (!file || this.closed || this.state.unavailable || (more && (this.state.loading || !this.state.entry?.hasMore))) return;
     const epoch = this.epoch, request = this.cache.nextRequest(), previous = this.state.entry;
     this.request = request;
     const pageSize = Math.max(1, Math.floor(this.pageSize()) || 50);
@@ -110,7 +114,7 @@ export class HistoryController {
     }
   }
   select(sha: string, toggle: boolean): void {
-    if (!this.state.file || this.closed) return;
+    if (!this.state.file || this.closed || this.state.unavailable) return;
     const commit = this.state.entry?.commits.find(item => item.sha === sha) || this.state.selected.find(item => item.sha === sha);
     if (!commit) return;
     let selected = this.state.selected;
@@ -123,7 +127,19 @@ export class HistoryController {
     const order = this.state.entry?.commits || [];
     selected = [...selected].sort((a, b) => order.findIndex(item => item.sha === b.sha) - order.findIndex(item => item.sha === a.sha));
     this.state = { ...this.state, selected, hint: null }; this.emit();
-    this.compare(this.state.file!.path, selected);
+  }
+  /** Selection is a draft. Only an explicit action takes a detached, immutable request. */
+  comparisonRequest(): HistoryComparisonRequest | null {
+    const { file, selected, unavailable } = this.state;
+    if (this.closed || !file || unavailable || selected.length < 1 || selected.length > 2) return null;
+    return Object.freeze({ filePath: file.path, commits: Object.freeze(selected.map(commit => Object.freeze({ ...commit }))) });
+  }
+  fileUnavailable(): void {
+    if (this.closed || !this.state.file) return;
+    this.epoch++;
+    this.state = { ...this.state, unavailable: true, loading: false, selected: [], hint: null,
+      error: 'The file is no longer available. Choose another file with Git History.' };
+    this.emit();
   }
   clearSelection(filePath?: string): void {
     if (filePath && this.state.file?.path !== filePath) return;
@@ -138,7 +154,8 @@ export function historyStatus(state: HistoryState): string {
   const date = stamp === undefined ? null : new Date(stamp);
   const time = date ? [date.getHours(), date.getMinutes(), date.getSeconds()].map(value => String(value).padStart(2, '0')).join(':') : '';
   const synced = date ? `Last synced at ${time}` : '';
+  if (state.unavailable) return ['File is no longer available', synced].filter(Boolean).join(' · ');
   if (state.loading) return ['Loading Git history…', synced].filter(Boolean).join(' · ');
   if (state.error) return ['Unable to refresh Git history', synced].filter(Boolean).join(' · ');
-  return synced || (state.file ? 'No Git history loaded' : 'Open a Markdown note to view its history');
+  return synced || (state.file ? 'No Git history loaded' : 'Choose a file with Git History');
 }

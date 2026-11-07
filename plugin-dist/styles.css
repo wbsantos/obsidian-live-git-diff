@@ -506,6 +506,11 @@ body.theme-dark {
 .lgd-history-more[hidden] { display:none; }
 .lgd-history-footer { flex:none; border-top:1px solid var(--background-modifier-border); padding-top:10px; color:var(--text-muted); font-size:var(--font-ui-smaller); line-height:1.5; }
 .lgd-history-footer.lgd-error { color:var(--text-error); }
+.lgd-history-actions { flex:none; display:grid; grid-template-columns:1fr; gap:8px; border-top:1px solid var(--background-modifier-border); padding-top:10px; }
+.lgd-history-selection,.lgd-history-active { font-size:var(--font-ui-smaller); line-height:1.45; overflow-wrap:anywhere; white-space:pre-line; }
+.lgd-history-active { color:var(--text-muted); }
+.lgd-history-active.lgd-error { color:var(--text-error); }
+.lgd-history-compare,.lgd-history-clear { width:100%; height:auto; min-height:28px; white-space:normal; }
 
 /* Paint the visible cell surface, including native Live Preview table widgets. */
 .lgd-table-cell-ins { --lgd-table-fill: var(--lgd-ins-bg); }
