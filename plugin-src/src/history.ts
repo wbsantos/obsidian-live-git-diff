@@ -113,20 +113,28 @@ export class HistoryController {
       this.state = { ...this.state, loading: false, error: (error as Error).message || String(error) }; this.emit();
     }
   }
-  select(sha: string, toggle: boolean): void {
+  select(sha: string): void {
     if (!this.state.file || this.closed || this.state.unavailable) return;
     const commit = this.state.entry?.commits.find(item => item.sha === sha) || this.state.selected.find(item => item.sha === sha);
     if (!commit) return;
     let selected = this.state.selected;
-    if (!toggle) selected = [commit];
-    else if (selected.some(item => item.sha === sha)) selected = selected.filter(item => item.sha !== sha);
+    if (selected.some(item => item.sha === sha)) selected = selected.filter(item => item.sha !== sha);
     else if (selected.length === 2) {
       this.state = { ...this.state, hint: 'Select up to two versions. Deselect a version first.' }; this.emit(); return;
     } else selected = [...selected, commit];
+    this.setSelection(selected.map(item => item.sha));
+  }
+  /** Explicit actions replace the draft atomically, without intermediate toggle states. */
+  setSelection(shas: readonly string[]): boolean {
+    if (!this.state.file || this.closed || this.state.unavailable || shas.length > 2) return false;
+    const available = [...(this.state.entry?.commits || []), ...this.state.selected];
+    const commits = [...new Set(shas)].map(sha => available.find(item => item.sha === sha));
+    if (commits.some(commit => !commit)) return false;
     // The file history is newest first. The lower row is the earlier version, on the left.
     const order = this.state.entry?.commits || [];
-    selected = [...selected].sort((a, b) => order.findIndex(item => item.sha === b.sha) - order.findIndex(item => item.sha === a.sha));
+    const selected = (commits as CommitInfo[]).sort((a, b) => order.findIndex(item => item.sha === b.sha) - order.findIndex(item => item.sha === a.sha));
     this.state = { ...this.state, selected, hint: null }; this.emit();
+    return true;
   }
   /** Selection is a draft. Only an explicit action takes a detached, immutable request. */
   comparisonRequest(): HistoryComparisonRequest | null {

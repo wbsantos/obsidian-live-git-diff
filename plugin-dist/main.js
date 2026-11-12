@@ -965,23 +965,32 @@ var HistoryController = class {
       this.emit();
     }
   }
-  select(sha, toggle) {
-    var _a, _b;
+  select(sha) {
+    var _a;
     if (!this.state.file || this.closed || this.state.unavailable) return;
     const commit = ((_a = this.state.entry) == null ? void 0 : _a.commits.find((item) => item.sha === sha)) || this.state.selected.find((item) => item.sha === sha);
     if (!commit) return;
     let selected = this.state.selected;
-    if (!toggle) selected = [commit];
-    else if (selected.some((item) => item.sha === sha)) selected = selected.filter((item) => item.sha !== sha);
+    if (selected.some((item) => item.sha === sha)) selected = selected.filter((item) => item.sha !== sha);
     else if (selected.length === 2) {
       this.state = { ...this.state, hint: "Select up to two versions. Deselect a version first." };
       this.emit();
       return;
     } else selected = [...selected, commit];
+    this.setSelection(selected.map((item) => item.sha));
+  }
+  /** Explicit actions replace the draft atomically, without intermediate toggle states. */
+  setSelection(shas) {
+    var _a, _b;
+    if (!this.state.file || this.closed || this.state.unavailable || shas.length > 2) return false;
+    const available = [...((_a = this.state.entry) == null ? void 0 : _a.commits) || [], ...this.state.selected];
+    const commits = [...new Set(shas)].map((sha) => available.find((item) => item.sha === sha));
+    if (commits.some((commit) => !commit)) return false;
     const order = ((_b = this.state.entry) == null ? void 0 : _b.commits) || [];
-    selected = [...selected].sort((a, b) => order.findIndex((item) => item.sha === b.sha) - order.findIndex((item) => item.sha === a.sha));
+    const selected = commits.sort((a, b) => order.findIndex((item) => item.sha === b.sha) - order.findIndex((item) => item.sha === a.sha));
     this.state = { ...this.state, selected, hint: null };
     this.emit();
+    return true;
   }
   /** Selection is a draft. Only an explicit action takes a detached, immutable request. */
   comparisonRequest() {
@@ -1043,8 +1052,13 @@ var GitHistoryView = class extends import_obsidian2.ItemView {
     this.moreEl = null;
     this.queryEl = null;
     this.selectionEl = null;
-    this.compareEl = null;
-    this.clearEl = null;
+    this.headingEl = null;
+    this.followEl = null;
+    this.contextEl = null;
+    this.connectorEl = null;
+    this.resizeObserver = null;
+    this.applying = false;
+    this.closed = false;
     this.activeReviewEl = null;
     this.renderedFile = null;
     this.rows = /* @__PURE__ */ new Map();
@@ -1071,42 +1085,53 @@ var GitHistoryView = class extends import_obsidian2.ItemView {
     return "history";
   }
   async onOpen() {
+    var _a;
     const root = this.contentEl;
     root.empty();
     root.addClass("lgd-history");
     const heading = root.createDiv({ cls: "lgd-history-heading" });
+    this.headingEl = heading;
+    this.contextEl = heading.createSpan({ cls: "lgd-history-context", attr: { role: "status", "aria-live": "polite" } });
     this.fileTitleEl = heading.createDiv({ cls: "lgd-history-file", text: "Git History" });
     this.refreshEl = heading.createEl("button", { cls: "clickable-icon lgd-history-refresh", attr: { type: "button", "aria-label": "Refresh history", title: "Refresh history" } });
     (0, import_obsidian2.setIcon)(this.refreshEl, "refresh-cw");
     this.refreshEl.onclick = () => {
       void this.controller.refresh();
     };
+    this.followEl = heading.createEl("button", { cls: "clickable-icon lgd-history-follow", attr: { type: "button", "aria-label": "Show history for active note", title: "Show history for active note" } });
+    (0, import_obsidian2.setIcon)(this.followEl, "locate-fixed");
+    this.followEl.onclick = () => {
+      const file = this.host.historyActiveFile();
+      if (file) void this.setFile(file);
+    };
     this.queryEl = root.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: "Filter loaded commits", attr: { "aria-label": "Filter loaded commits" } });
     this.queryEl.oninput = () => this.renderState(this.controller.state);
-    root.createDiv({ cls: "lgd-history-help", text: "Click to select one version. Ctrl/Cmd+click selects two. Then choose Compare." });
     this.hintEl = root.createDiv({ cls: "lgd-history-hint", attr: { role: "status", "aria-live": "polite" } });
     this.listEl = root.createDiv({ cls: "lgd-history-list", attr: { role: "listbox", "aria-label": "File versions", "aria-multiselectable": "true" } });
     this.listEl.addEventListener("keydown", (event) => this.keydown(event));
+    this.connectorEl = this.listEl.createDiv({ cls: "lgd-history-connector", attr: { "aria-hidden": "true" } });
+    this.connectorEl.hidden = true;
+    const Resize = (_a = this.contentEl.ownerDocument.defaultView) == null ? void 0 : _a.ResizeObserver;
+    if (Resize) {
+      this.resizeObserver = new Resize(() => this.updateConnector());
+      this.resizeObserver.observe(this.listEl);
+    }
     this.moreEl = root.createEl("button", { cls: "lgd-history-more", text: "Load more", attr: { type: "button" } });
     this.moreEl.onclick = () => {
       void this.controller.refresh(true);
     };
     const actions = root.createDiv({ cls: "lgd-history-actions" });
     this.selectionEl = actions.createDiv({ cls: "lgd-history-selection", attr: { "aria-live": "polite" } });
-    this.compareEl = actions.createEl("button", { cls: "mod-cta lgd-history-compare", text: "Compare", attr: { type: "button", title: "Compare selected versions (Ctrl/Cmd+Enter)" } });
-    this.compareEl.onclick = () => {
-      void this.applySelection();
-    };
-    this.clearEl = actions.createEl("button", { cls: "lgd-history-clear", text: "Clear selection", attr: { type: "button" } });
-    this.clearEl.onclick = () => this.controller.clearSelection();
     this.activeReviewEl = actions.createDiv({ cls: "lgd-history-active", attr: { role: "status", "aria-live": "polite" } });
     this.footerEl = root.createDiv({ cls: "lgd-history-footer", attr: { role: "status", "aria-live": "polite" } });
     this.renderState(this.controller.state);
   }
   async onClose() {
-    var _a, _b;
+    var _a, _b, _c;
+    this.closed = true;
+    (_a = this.resizeObserver) == null ? void 0 : _a.disconnect();
     this.controller.dispose();
-    (_b = (_a = this.host).historyViewClosed) == null ? void 0 : _b.call(_a);
+    (_c = (_b = this.host).historyViewClosed) == null ? void 0 : _c.call(_b);
   }
   async setFile(file) {
     await this.controller.setFile(file ? { path: file.path, name: file.name } : null);
@@ -1115,41 +1140,96 @@ var GitHistoryView = class extends import_obsidian2.ItemView {
     this.controller.clearSelection(filePath);
   }
   async applySelection() {
-    if (this.host.historyReviewState().openingFile) return;
+    if (this.closed || this.applying || this.host.historyReviewState().openingFile) return;
     const request = this.controller.comparisonRequest();
     if (!request) return;
     const file = this.controller.state.file;
+    this.applying = true;
+    this.updateComparisonState();
     try {
       await this.host.compareHistory(request.filePath, request.commits);
     } catch (error2) {
       if (this.controller.state.file === file && this.hintEl) this.hintEl.setText(`Unable to open comparison: ${error2.message || error2}`);
+    } finally {
+      this.applying = false;
+      if (!this.closed) this.updateComparisonState();
     }
-    this.updateComparisonState();
+  }
+  compareCommits(shas) {
+    if (this.closed || this.applying || this.host.historyReviewState().openingFile) return;
+    if (this.controller.setSelection(shas)) void this.applySelection();
+  }
+  contextMenu(event, commit) {
+    event.preventDefault();
+    event.stopPropagation();
+    const { file, selected, unavailable } = this.controller.state;
+    if (!file || unavailable || this.closed) return;
+    const current = () => !this.closed && this.controller.state.file === file && !this.controller.state.unavailable;
+    const menu = new import_obsidian2.Menu();
+    menu.addItem((item) => item.setTitle("Compare with worktree").setIcon("git-compare").setDisabled(this.applying || !!this.host.historyReviewState().openingFile).onClick(() => {
+      if (current()) this.compareCommits([commit.sha]);
+    }));
+    for (const other of selected.filter((item) => item.sha !== commit.sha)) {
+      menu.addItem((item) => item.setTitle(`Compare with Selected \u201C${other.shortSha} \xB7 ${other.subject}\u201D`).setIcon("git-compare").setDisabled(this.applying || !!this.host.historyReviewState().openingFile).onClick(() => {
+        if (current()) this.compareCommits([commit.sha, other.sha]);
+      }));
+    }
+    menu.addSeparator();
+    menu.addItem((item) => item.setTitle("Clear Selections").setIcon("list-x").setDisabled(!selected.length).onClick(() => {
+      if (current()) this.controller.clearSelection();
+    }));
+    menu.showAtMouseEvent(event);
+  }
+  updateActiveFile() {
+    var _a, _b, _c;
+    const file = this.host.historyActiveFile(), history = this.controller.state.file;
+    const status = file && history && !this.controller.state.unavailable ? file.path === history.path ? "match" : "different" : "neutral";
+    const label = status === "match" ? "History matches the active note" : status === "different" ? `History is for another note. Active note: ${file.path}` : "No active note to match with this history";
+    (_a = this.headingEl) == null ? void 0 : _a.setAttr("data-note-context", status);
+    (_b = this.contextEl) == null ? void 0 : _b.setAttr("aria-label", label);
+    (_c = this.contextEl) == null ? void 0 : _c.setAttr("title", label);
+    if (this.followEl) this.followEl.hidden = !file || file.path === (history == null ? void 0 : history.path) && !this.controller.state.unavailable;
+  }
+  updateConnector() {
+    const line = this.connectorEl, list = this.listEl;
+    if (!line || !list) return;
+    const buttons = this.controller.state.selected.map((commit) => this.rows.get(commit.sha)).filter((row) => (row == null ? void 0 : row.parentElement) === list).map((row) => row.querySelector(".lgd-history-compare"));
+    line.hidden = buttons.length !== 2;
+    if (line.hidden) return;
+    const bounds = list.getBoundingClientRect(), rects = buttons.map((button) => button.getBoundingClientRect()).sort((a, b) => a.top - b.top);
+    line.style.top = `${rects[0].top + rects[0].height / 2 - bounds.top + list.scrollTop}px`;
+    line.style.left = `${rects[0].left + rects[0].width / 2 - bounds.left + list.scrollLeft}px`;
+    line.style.height = `${rects[1].top + rects[1].height / 2 - rects[0].top - rects[0].height / 2}px`;
   }
   updateComparisonState() {
     var _a, _b, _c;
     const { selected, unavailable } = this.controller.state, review = this.host.historyReviewState();
     const count = selected.length;
     (_a = this.selectionEl) == null ? void 0 : _a.setText(count ? `Selected: ${selected.map((commit) => commit.shortSha).join(" \u2192 ")}${count === 1 ? " \u2192 Working tree" : ""}` : "Select one or two versions.");
-    if (this.compareEl) {
-      this.compareEl.setText(review.openingFile ? "Opening comparison\u2026" : count === 1 ? "Compare with Working Tree" : count === 2 ? "Compare Selected Versions" : "Compare");
-      this.compareEl.disabled = !!review.openingFile || unavailable || count === 0;
+    for (const row of this.rows.values()) {
+      const button = row.querySelector(".lgd-history-compare");
+      if (!button) continue;
+      const label = review.openingFile || this.applying ? "Opening comparison\u2026" : count === 1 ? "Compare with Working Tree (Ctrl/Cmd+Enter)" : "Compare Selected Versions (Ctrl/Cmd+Enter)";
+      button.setAttr("title", label);
+      button.setAttr("aria-label", label);
+      button.disabled = this.applying || !!review.openingFile || unavailable || count === 0;
     }
-    if (this.clearEl) this.clearEl.disabled = count === 0;
     const active = review.active;
     (_b = this.activeReviewEl) == null ? void 0 : _b.setText(review.openingFile ? `Opening: ${review.openingFile}` : review.error ? `Comparison failed: ${review.error}` : active ? `Comparing: ${active.filePath}
 ${active.left} \u2194 ${active.right}` : "No comparison open.");
     (_c = this.activeReviewEl) == null ? void 0 : _c.toggleClass("lgd-error", !!review.error);
+    this.updateActiveFile();
   }
   keydown(event) {
     var _a;
     if (event.isComposing || event.key === "Enter" && (event.ctrlKey || event.metaKey)) return;
     const buttons = Array.from(((_a = this.listEl) == null ? void 0 : _a.querySelectorAll("button[data-commit]")) || []);
     const target = event.target, index = buttons.indexOf(target.closest("button"));
+    if (target.closest(".lgd-history-compare")) return;
     if ((event.key === "Enter" || event.key === " ") && index >= 0) {
       event.preventDefault();
       event.stopPropagation();
-      this.controller.select(buttons[index].dataset.commit, event.ctrlKey || event.metaKey);
+      this.controller.select(buttons[index].dataset.commit);
       return;
     }
     const destination = event.key === "ArrowDown" ? Math.min(buttons.length - 1, index + 1) : event.key === "ArrowUp" ? Math.max(0, index - 1) : event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : null;
@@ -1160,33 +1240,35 @@ ${active.left} \u2194 ${active.right}` : "No comparison open.");
     }
   }
   renderState(state) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
     const list = this.listEl;
     if (!list || !this.footerEl || !this.fileTitleEl) return;
     const changedFile = this.renderedFile !== (((_a = state.file) == null ? void 0 : _a.path) || null);
     if (changedFile) {
-      this.renderedFile = ((_b = state.file) == null ? void 0 : _b.path) || null;
+      (_b = this.resizeObserver) == null ? void 0 : _b.disconnect();
+      (_c = this.resizeObserver) == null ? void 0 : _c.observe(list);
+      this.renderedFile = ((_d = state.file) == null ? void 0 : _d.path) || null;
       this.rows.clear();
       list.empty();
+      if (this.connectorEl) list.appendChild(this.connectorEl);
       list.scrollTop = 0;
       if (this.queryEl) this.queryEl.value = "";
     }
-    this.fileTitleEl.setText(((_c = state.file) == null ? void 0 : _c.name) || "Git History");
-    this.fileTitleEl.setAttr("title", ((_d = state.file) == null ? void 0 : _d.path) || "Git History");
+    this.fileTitleEl.setText(((_e = state.file) == null ? void 0 : _e.name) || "Git History");
+    this.fileTitleEl.setAttr("title", ((_f = state.file) == null ? void 0 : _f.path) || "Git History");
     if (this.refreshEl) this.refreshEl.disabled = !state.file || state.loading || state.unavailable;
     if (this.queryEl) this.queryEl.disabled = !state.file;
     this.footerEl.setText(historyStatus(state));
     this.footerEl.setAttr("title", state.error || "");
     this.footerEl.toggleClass("lgd-error", !!state.error);
     list.setAttr("aria-busy", String(state.loading));
-    (_e = this.hintEl) == null ? void 0 : _e.setText(state.unavailable ? state.error || "" : state.hint || "");
-    this.updateComparisonState();
+    (_g = this.hintEl) == null ? void 0 : _g.setText(state.unavailable ? state.error || "" : state.hint || "");
     if (this.moreEl) {
-      this.moreEl.hidden = !((_f = state.entry) == null ? void 0 : _f.hasMore) || state.unavailable;
+      this.moreEl.hidden = !((_h = state.entry) == null ? void 0 : _h.hasMore) || state.unavailable;
       this.moreEl.disabled = state.loading;
     }
-    const query = (((_g = this.queryEl) == null ? void 0 : _g.value) || "").trim().toLowerCase();
-    const visible = [...((_h = state.entry) == null ? void 0 : _h.commits) || []];
+    const query = (((_i = this.queryEl) == null ? void 0 : _i.value) || "").trim().toLowerCase();
+    const visible = [...((_j = state.entry) == null ? void 0 : _j.commits) || []];
     for (const commit of state.selected) if (!visible.some((item) => item.sha === commit.sha)) visible.push(commit);
     const commits = visible.filter((commit) => [commit.sha, commit.subject, commit.author || "", commit.relative, commit.date].some((value) => value.toLowerCase().includes(query)));
     const top = list.getBoundingClientRect().top;
@@ -1194,43 +1276,67 @@ ${active.left} \u2194 ${active.right}` : "No comparison open.");
     const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
     const scroll = list.scrollTop;
     const focused = list.ownerDocument.activeElement;
-    const focusSha = (_i = focused == null ? void 0 : focused.closest("button[data-commit]")) == null ? void 0 : _i.dataset.commit;
+    const focusSha = (_k = focused == null ? void 0 : focused.closest("button[data-commit]")) == null ? void 0 : _k.dataset.commit;
+    const compareSha = (_l = focused == null ? void 0 : focused.closest(".lgd-history-row")) == null ? void 0 : _l.dataset.commit;
     const active = new Set(commits.map((commit) => commit.sha));
     for (const [sha, row] of this.rows) if (!active.has(sha)) row.remove();
     for (const empty2 of Array.from(list.querySelectorAll(".lgd-history-empty"))) empty2.remove();
-    for (const commit of commits) {
+    for (const [index, commit] of commits.entries()) {
       let row = this.rows.get(commit.sha);
       if (!row) {
-        row = list.ownerDocument.createElement("button");
-        row.type = "button";
-        row.className = "lgd-history-commit";
+        row = list.ownerDocument.createElement("div");
+        row.className = "lgd-history-row";
         row.dataset.commit = commit.sha;
-        row.setAttr("role", "option");
-        row.onclick = (event) => this.controller.select(commit.sha, event.ctrlKey || event.metaKey);
-        row.createDiv({ cls: "lgd-history-subject", text: commit.subject });
-        row.createDiv({ cls: "lgd-history-meta", text: `${commit.shortSha} \xB7 ${commit.author || "Unknown author"}` });
-        row.createDiv({ cls: "lgd-history-date", text: `${commit.date} \xB7 ${commit.relative}` });
+        row.setAttr("role", "none");
+        const content2 = row.createEl("button", { cls: "lgd-history-commit", attr: { type: "button", role: "option", "data-commit": commit.sha } });
+        content2.onclick = (event) => {
+          if (event.detail < 2) this.controller.select(commit.sha);
+        };
+        content2.ondblclick = (event) => {
+          event.preventDefault();
+          this.compareCommits([commit.sha]);
+        };
+        row.oncontextmenu = (event) => this.contextMenu(event, commit);
+        content2.createDiv({ cls: "lgd-history-subject", text: commit.subject });
+        content2.createDiv({ cls: "lgd-history-meta", text: `${commit.shortSha} \xB7 ${commit.author || "Unknown author"}` });
+        content2.createDiv({ cls: "lgd-history-date", text: `${commit.date} \xB7 ${commit.relative}` });
+        const compare = row.createEl("button", { cls: "clickable-icon lgd-history-compare", attr: { type: "button" } });
+        (0, import_obsidian2.setIcon)(compare, "git-compare");
+        compare.onclick = (event) => {
+          event.stopPropagation();
+          void this.applySelection();
+        };
+        compare.ondblclick = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        };
         this.rows.set(commit.sha, row);
+        (_m = this.resizeObserver) == null ? void 0 : _m.observe(row);
       }
       const selected = state.selected.some((item) => item.sha === commit.sha);
-      row.disabled = state.unavailable;
-      row.setAttr("aria-selected", String(selected));
+      const content = row.querySelector(".lgd-history-commit");
+      content.disabled = state.unavailable;
+      content.setAttr("aria-selected", String(selected));
       row.toggleClass("is-selected", selected);
-      row.setAttr("title", `${commit.subject}
+      row.querySelector(".lgd-history-compare").hidden = !selected;
+      content.setAttr("title", `${commit.subject}
 ${commit.sha}
 ${commit.path}`);
       const renamed = state.entry && commit.path !== state.entry.context.rel;
       let rename = row.querySelector(".lgd-history-renamed");
       if (renamed) {
-        if (!rename) rename = row.createDiv({ cls: "lgd-history-renamed" });
+        if (!rename) rename = content.createDiv({ cls: "lgd-history-renamed" });
         rename.setText(`Previous path: ${commit.path}`);
       } else rename == null ? void 0 : rename.remove();
-      list.appendChild(row);
+      if (list.children[index + 1] !== row) list.insertBefore(row, list.children[index + 1] || null);
     }
     if (!commits.length) list.createDiv({ cls: "lgd-history-empty", text: !state.file ? "Choose Git History on a Markdown file to view its versions." : state.loading && !state.entry ? "Loading versions\u2026" : query ? "No loaded versions match." : state.error && !state.entry ? "Git history is unavailable." : "This file has no committed versions." });
     if ((anchor == null ? void 0 : anchor.parentElement) === list) list.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
     else list.scrollTop = scroll;
-    if (focusSha && ((_j = this.rows.get(focusSha)) == null ? void 0 : _j.parentElement) === list) (_k = this.rows.get(focusSha)) == null ? void 0 : _k.focus({ preventScroll: true });
+    const focusRow = this.rows.get(focusSha || compareSha || "");
+    if ((focusRow == null ? void 0 : focusRow.parentElement) === list) (_n = focusRow.querySelector(focusSha ? ".lgd-history-commit" : ".lgd-history-compare")) == null ? void 0 : _n.focus({ preventScroll: true });
+    this.updateComparisonState();
+    this.updateConnector();
   }
 };
 
@@ -2585,6 +2691,7 @@ var LiveGitDiffPlugin = class extends import_obsidian6.Plugin {
         const renamed = this.app.vault.getAbstractFileByPath(file.path + path2.slice(oldPath.length));
         if (renamed instanceof import_obsidian6.TFile) void view.setFile(renamed);
       }
+      this.scheduleLayout();
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
       var _a, _b;
@@ -2592,6 +2699,7 @@ var LiveGitDiffPlugin = class extends import_obsidian6.Plugin {
       if (contains((_a = this.session) == null ? void 0 : _a.filePath) || contains(this.openingFile || void 0)) this.closeReview();
       const view = this.historyView();
       if (contains((_b = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b.path)) view.controller.fileUnavailable();
+      this.scheduleLayout();
     }));
     this.app.workspace.onLayoutReady(() => {
       if (!this.disposed) {
@@ -2637,10 +2745,24 @@ var LiveGitDiffPlugin = class extends import_obsidian6.Plugin {
     const file = path2 ? this.app.vault.getAbstractFileByPath(path2) : this.app.workspace.getActiveFile();
     return file instanceof import_obsidian6.TFile && file.extension === "md" ? file : null;
   }
+  historyActiveFile() {
+    const leaf = this.app.workspace.getMostRecentLeaf();
+    if (!leaf) return null;
+    let alive = false;
+    this.app.workspace.iterateAllLeaves((candidate) => {
+      if (candidate === leaf) alive = true;
+    });
+    if (!alive) return null;
+    const view = leaf.view, participant = this.participants.get(leaf);
+    const file = view instanceof import_obsidian6.MarkdownView ? view.file : view instanceof GitBaseView && (participant == null ? void 0 : participant.type) === VIEW_TYPE && participant.side === view.side && this.session ? this.app.vault.getAbstractFileByPath(this.session.filePath) : null;
+    return file instanceof import_obsidian6.TFile && file.extension === "md" && this.app.vault.getAbstractFileByPath(file.path) === file ? file : null;
+  }
   scheduleLayout() {
-    if (this.layoutPending || this.disposed) return;
+    if (this.disposed) return;
+    if (this.layoutPending) return;
     this.layoutPending = true;
     queueMicrotask(() => {
+      var _a;
       this.layoutPending = false;
       if (this.disposed) return;
       this.checkParticipants();
@@ -2649,6 +2771,7 @@ var LiveGitDiffPlugin = class extends import_obsidian6.Plugin {
       this.watchReadingPane();
       this.decorateNotePaneInPlace();
       this.sync.attach();
+      (_a = this.historyView()) == null ? void 0 : _a.updateActiveFile();
       if (this.session) void this.checkBreaks();
     });
   }

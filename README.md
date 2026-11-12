@@ -8,14 +8,16 @@ Use **Compare** in the note header, next to Obsidian's reading/editing controls,
 
 Use the adjacent **Git History** button to open the sidebar. The panel stays on that file when you switch notes. **Git History** is also available by right-clicking a Markdown file in the File Explorer, a note's tab/header, or its content in Live Preview and reading mode. Looking up history does not open the note.
 
-- Click one commit to select it, or Ctrl/Cmd+click a second commit. Selection does not change the open comparison.
-- With one version selected, choose **Compare with Working Tree** to compare against the current note, including unsaved edits.
-- With two selected, choose **Compare Selected Versions** for two read-only historical panes. The earlier version starts on the left; **Swap sides** reverses them.
-- Ctrl/Cmd+click a selected commit to deselect it. Up to two versions can be selected.
-- **Clear selection** resets the draft without closing a review. Enter/Space selects a focused row; Ctrl/Cmd+Enter applies the selection while focus is inside the history panel.
+- Click a commit to select or deselect it. Up to two versions can be selected; clicking a third keeps the existing pair. Selection does not change the open comparison.
+- Selected rows show a compare icon on the right. With one version selected, it compares against that note's working tree, including unsaved edits. Double-click any commit to select only that version and compare it with the working tree immediately.
+- With two selected, either compare icon opens two read-only historical panes. A dashed line connects the icons when both rows are included in the filter. The earlier version starts on the left; **Swap sides** reverses them.
+- Right-click a commit to compare it with the worktree or any other selected commit, or choose **Clear Selections** to reset the draft without closing a review. Opening the menu preserves the current selection.
+- Enter/Space toggles a focused row; Ctrl/Cmd+Enter applies the selection while focus is inside the history panel.
 - Filter loaded commits, select **Load more**, or refresh the history. The footer shows Git loading progress and the time of the last successful synchronization.
 
 The selected versions and the active comparison are displayed separately. You can prepare a comparison for another file while the current review remains open. Closing a review preserves the prepared selection. Choosing **Git History** on another file changes the panel and clears the draft; choosing the same file preserves its selection, filter and scroll position.
+
+The header's small indicator and subtle border are green when the history belongs to the displayed note, amber when it belongs to another note, and neutral when the current content tab is not a note. Historical comparison panes count as their original note. Hover over the indicator for details. When the note differs, **Show history for active note**, beside Refresh, switches the panel to that note. Clicking any sidebar, including the File Explorer, preserves the displayed note context.
 
 The context-menu action **Git Compare** starts a comparison immediately against the configured reference, opening or revealing the clicked note. It is independent of the history panel's prepared selection. Reading menus preserve Copy for selected text and leave links and other interactive components with their native menus.
 

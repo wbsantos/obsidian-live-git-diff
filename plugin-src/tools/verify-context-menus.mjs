@@ -27,7 +27,7 @@ try{
  let menu=await context(explorer('mapping.md'));check('Explorer has one pair of Git actions alongside native items',hasPair(menu)&&menu.length>4,menu);
  await choose('Git History');await historyReady();
  check('Explorer History targets the clicked file without opening its note',await e("return p.historyView().controller.state.file.path==='mapping.md'&&!app.workspace.getLeavesOfType('markdown').some(l=>l.view.file?.path==='mapping.md');"));
- await e('const v=p.historyView();v.controller.select(v.controller.state.entry.commits[0].sha,false);window.__menuDraft=v.controller.state;return true;');
+ await e('const v=p.historyView();v.controller.setSelection([v.controller.state.entry.commits[0].sha]);window.__menuDraft=v.controller.state;return true;');
  menu=await context(explorer('history-fixture.md'));await choose('Git Compare');await ready();
  check('Explorer Compare uses its clicked file and the configured HEAD',await e(`return p.session.filePath==='history-fixture.md'&&p.session.sha===${JSON.stringify(JSON.parse(fs.readFileSync(path.join(m.output,'history-fixture.local.json'),'utf8')).commits[2])};`));
  check('direct Compare leaves the other file history and draft unchanged',await e("return p.historyView().controller.state===window.__menuDraft&&p.historyView().controller.state.file.path==='mapping.md';"));

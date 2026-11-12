@@ -92,12 +92,14 @@ export default class LiveGitDiffPlugin extends Plugin {
         const renamed = this.app.vault.getAbstractFileByPath(file.path + path.slice(oldPath.length));
         if (renamed instanceof TFile) void view!.setFile(renamed);
       }
+      this.scheduleLayout();
     }));
     this.registerEvent(this.app.vault.on('delete', file => {
       const contains = (path?: string): boolean => !!path && (path === file.path || path.startsWith(file.path + '/'));
       if (contains(this.session?.filePath) || contains(this.openingFile || undefined)) this.closeReview();
       const view = this.historyView();
       if (contains(view?.controller.state.file?.path)) view!.controller.fileUnavailable();
+      this.scheduleLayout();
     }));
     this.app.workspace.onLayoutReady(() => {
       if (!this.disposed) {
@@ -127,13 +129,28 @@ export default class LiveGitDiffPlugin extends Plugin {
     const file = path ? this.app.vault.getAbstractFileByPath(path) : this.app.workspace.getActiveFile();
     return file instanceof TFile && file.extension === 'md' ? file : null;
   }
+  historyActiveFile(): TFile | null {
+    // Obsidian excludes sidebars and includes pop-outs when resolving the content leaf.
+    const leaf = this.app.workspace.getMostRecentLeaf();
+    if (!leaf) return null;
+    let alive = false;
+    this.app.workspace.iterateAllLeaves(candidate => { if (candidate === leaf) alive = true; });
+    if (!alive) return null;
+    const view = leaf.view, participant = this.participants.get(leaf);
+    const file = view instanceof MarkdownView ? view.file :
+      view instanceof GitBaseView && participant?.type === VIEW_TYPE && participant.side === view.side && this.session
+        ? this.app.vault.getAbstractFileByPath(this.session.filePath) : null;
+    return file instanceof TFile && file.extension === 'md' && this.app.vault.getAbstractFileByPath(file.path) === file ? file : null;
+  }
   private scheduleLayout(): void {
-    if (this.layoutPending || this.disposed) return;
+    if (this.disposed) return;
+    if (this.layoutPending) return;
     this.layoutPending = true;
     queueMicrotask(() => {
       this.layoutPending = false; if (this.disposed) return;
       this.checkParticipants(); this.updateActions(); this.publishEditorMarks();
       this.watchReadingPane(); this.decorateNotePaneInPlace(); this.sync.attach();
+      this.historyView()?.updateActiveFile();
       if (this.session) void this.checkBreaks();
     });
   }
