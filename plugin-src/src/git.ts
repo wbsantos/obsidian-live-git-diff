@@ -16,6 +16,8 @@ export class GitError extends Error {}
 /** Resolved git context for a vault file. */
 export interface GitContext {
   abs: string;
+  backend?: 'git' | 'jj';
+  workspaceRoot?: string;
   root: string;
   rel: string;
 }
@@ -23,6 +25,12 @@ export interface GitContext {
 /** One commit from a file's history, as shown in the picker and the base pane header. */
 export interface CommitInfo {
   /** Abbreviated sha, for display. */
+  kind?: 'commit' | 'workcopy';
+  changeId?: string;
+  currentSha?: string;
+  groupId?: string;
+  snapshot?: boolean;
+  absent?: boolean;
   shortSha: string;
   /** Full sha. This is what gets pinned — an abbreviation can become ambiguous. */
   sha: string;

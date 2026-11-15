@@ -1,5 +1,5 @@
 import { ItemView, Menu, Scope, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
-import { resolveGitAsync } from './git.ts';
+import { resolveRepository, WORKCOPY } from './repository.ts';
 import type { CommitInfo } from './git.ts';
 import { HistoryCache, HistoryController, historyStatus } from './history.ts';
 import type { HistoryState } from './history.ts';
@@ -46,7 +46,7 @@ export class GitHistoryView extends ItemView {
     this.controller = new HistoryController(host.historyCache, (file, signal) => {
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof TFile)) return Promise.reject(new Error('The note is no longer available.'));
-      return resolveGitAsync(this.app, current, signal);
+      return resolveRepository(this.app, current, signal);
     }, () => host.settings.logLimit, state => this.renderState(state));
     this.scope = new Scope(this.app.scope);
     this.scope.register(['Mod'], 'Enter', event => {
@@ -56,23 +56,23 @@ export class GitHistoryView extends ItemView {
     });
   }
   getViewType(): string { return HISTORY_VIEW_TYPE; }
-  getDisplayText(): string { return 'Git History'; }
+  getDisplayText(): string { return 'File History'; }
   getIcon(): string { return 'history'; }
   async onOpen(): Promise<void> {
     const root = this.contentEl; root.empty(); root.addClass('lgd-history');
     const heading = root.createDiv({ cls: 'lgd-history-heading' });
     this.headingEl = heading;
     this.contextEl = heading.createSpan({ cls: 'lgd-history-context', attr: { role: 'status', 'aria-live': 'polite' } });
-    this.fileTitleEl = heading.createDiv({ cls: 'lgd-history-file', text: 'Git History' });
+    this.fileTitleEl = heading.createDiv({ cls: 'lgd-history-file', text: 'File History' });
     this.refreshEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-refresh', attr: { type: 'button', 'aria-label': 'Refresh history', title: 'Refresh history' } });
     setIcon(this.refreshEl, 'refresh-cw'); this.refreshEl.onclick = () => { void this.controller.refresh(); };
     this.followEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-follow', attr: { type: 'button', 'aria-label': 'Show history for active note', title: 'Show history for active note' } });
     setIcon(this.followEl, 'locate-fixed');
     this.followEl.onclick = () => { const file = this.host.historyActiveFile(); if (file) void this.setFile(file); };
-    this.queryEl = root.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: 'Filter loaded commits', attr: { 'aria-label': 'Filter loaded commits' } });
+    this.queryEl = root.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: 'Filter loaded versions', attr: { 'aria-label': 'Filter loaded versions' } });
     this.queryEl.oninput = () => this.renderState(this.controller.state);
     this.hintEl = root.createDiv({ cls: 'lgd-history-hint', attr: { role: 'status', 'aria-live': 'polite' } });
-    this.listEl = root.createDiv({ cls: 'lgd-history-list', attr: { role: 'listbox', 'aria-label': 'File versions', 'aria-multiselectable': 'true' } });
+    this.listEl = root.createDiv({ cls: 'lgd-history-list', attr: { role: 'tree', 'aria-label': 'File versions', 'aria-multiselectable': 'true' } });
     this.listEl.addEventListener('keydown', event => this.keydown(event));
     this.connectorEl = this.listEl.createDiv({ cls: 'lgd-history-connector', attr: { 'aria-hidden': 'true' } });
     this.connectorEl.hidden = true;
@@ -117,9 +117,9 @@ export class GitHistoryView extends ItemView {
     // The file object identifies this visit, including A → B → A while a menu is open.
     const current = (): boolean => !this.closed && this.controller.state.file === file && !this.controller.state.unavailable;
     const menu = new Menu();
-    menu.addItem(item => item.setTitle('Compare with worktree').setIcon('git-compare')
+    if (commit.kind!=='workcopy') menu.addItem(item => item.setTitle('Compare with Workcopy').setIcon('git-compare')
       .setDisabled(this.applying || !!this.host.historyReviewState().openingFile)
-      .onClick(() => { if (current()) this.compareCommits([commit.sha]); }));
+      .onClick(() => { if (current()) this.compareCommits([WORKCOPY, commit.sha]); }));
     for (const other of selected.filter(item => item.sha !== commit.sha)) {
       menu.addItem(item => item.setTitle(`Compare with Selected “${other.shortSha} · ${other.subject}”`).setIcon('git-compare')
         .setDisabled(this.applying || !!this.host.historyReviewState().openingFile)
@@ -156,13 +156,13 @@ export class GitHistoryView extends ItemView {
   updateComparisonState(): void {
     const { selected, unavailable } = this.controller.state, review = this.host.historyReviewState();
     const count = selected.length;
-    this.selectionEl?.setText(count ? `Selected: ${selected.map(commit => commit.shortSha).join(' → ')}${count === 1 ? ' → Working tree' : ''}` : 'Select one or two versions.');
+    this.selectionEl?.setText(count ? `Selected: ${selected.map(commit => commit.shortSha).join(' → ')}` : 'Select two versions.');
     for (const row of this.rows.values()) {
       const button = row.querySelector<HTMLButtonElement>('.lgd-history-compare');
       if (!button) continue;
       const label = review.openingFile || this.applying ? 'Opening comparison…' : count === 1 ? 'Compare with Working Tree (Ctrl/Cmd+Enter)' : 'Compare Selected Versions (Ctrl/Cmd+Enter)';
       button.setAttr('title', label); button.setAttr('aria-label', label);
-      button.disabled = this.applying || !!review.openingFile || unavailable || count === 0;
+      button.disabled = this.applying || !!review.openingFile || unavailable || count !== 2;
     }
     const active = review.active;
     this.activeReviewEl?.setText(review.openingFile ? `Opening: ${review.openingFile}` : review.error ? `Comparison failed: ${review.error}` :
@@ -175,7 +175,8 @@ export class GitHistoryView extends ItemView {
     if (event.isComposing || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) return;
     const buttons = Array.from(this.listEl?.querySelectorAll<HTMLButtonElement>('button[data-commit]') || []);
     const target = event.target as HTMLElement, index = buttons.indexOf(target.closest('button') as HTMLButtonElement);
-    if (target.closest('.lgd-history-compare')) return;
+    if (target.closest('.lgd-history-compare,.lgd-history-expand')) return;
+    if(index>=0 && (event.key==='ArrowRight' || event.key==='ArrowLeft')) { const sha=buttons[index].dataset.commit!;const opened=!!this.controller.state.expanded?.[sha];if((event.key==='ArrowRight')!==opened) void this.controller.expand(sha);event.preventDefault();return; }
     if ((event.key === 'Enter' || event.key === ' ') && index >= 0) {
       event.preventDefault(); event.stopPropagation();
       this.controller.select(buttons[index].dataset.commit!); return;
@@ -196,7 +197,7 @@ export class GitHistoryView extends ItemView {
       list.scrollTop = 0;
       if (this.queryEl) this.queryEl.value = '';
     }
-    this.fileTitleEl.setText(state.file?.name || 'Git History'); this.fileTitleEl.setAttr('title', state.file?.path || 'Git History');
+    this.fileTitleEl.setText(state.file?.name || 'File History'); this.fileTitleEl.setAttr('title', state.file?.path || 'File History');
     if (this.refreshEl) this.refreshEl.disabled = !state.file || state.loading || state.unavailable;
     if (this.queryEl) this.queryEl.disabled = !state.file;
     this.footerEl.setText(historyStatus(state)); this.footerEl.setAttr('title', state.error || '');
@@ -205,9 +206,9 @@ export class GitHistoryView extends ItemView {
     if (this.moreEl) { this.moreEl.hidden = !state.entry?.hasMore || state.unavailable; this.moreEl.disabled = state.loading; }
 
     const query = (this.queryEl?.value || '').trim().toLowerCase();
-    const visible = [...(state.entry?.commits || [])];
+    const visible = this.controller.available();
     for (const commit of state.selected) if (!visible.some(item => item.sha === commit.sha)) visible.push(commit);
-    const commits = visible.filter(commit => [commit.sha, commit.subject, commit.author || '', commit.relative, commit.date].some(value => value.toLowerCase().includes(query)));
+    const commits = visible.filter(commit => commit.kind==='workcopy' || state.selected.some(c=>c.sha===commit.sha) || [commit.sha, commit.subject, commit.author || '', commit.relative, commit.date].some(value => value.toLowerCase().includes(query)));
     const top = list.getBoundingClientRect().top;
     const anchor = [...this.rows.values()].find(row => row.parentElement === list && row.getBoundingClientRect().bottom > top);
     const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
@@ -217,18 +218,18 @@ export class GitHistoryView extends ItemView {
     const compareSha = focused?.closest<HTMLElement>('.lgd-history-row')?.dataset.commit;
     const active = new Set(commits.map(commit => commit.sha));
     for (const [sha, row] of this.rows) if (!active.has(sha)) row.remove();
-    for (const empty of Array.from(list.querySelectorAll('.lgd-history-empty'))) empty.remove();
+    for (const empty of Array.from(list.querySelectorAll('.lgd-history-empty,.lgd-history-evolution-status'))) empty.remove();
     for (const [index, commit] of commits.entries()) {
       let row = this.rows.get(commit.sha);
       if (!row) {
         row = list.ownerDocument.createElement('div'); row.className = 'lgd-history-row';
         row.dataset.commit = commit.sha; row.setAttr('role', 'none');
-        const content = row.createEl('button', { cls: 'lgd-history-commit', attr: { type: 'button', role: 'option', 'data-commit': commit.sha } });
+        const content = row.createEl('button', { cls: 'lgd-history-commit', attr: { type: 'button', role: 'treeitem', 'data-commit': commit.sha } });
         content.onclick = event => { if (event.detail < 2) this.controller.select(commit.sha); };
-        content.ondblclick = event => { event.preventDefault(); this.compareCommits([commit.sha]); };
+        content.ondblclick = event => { event.preventDefault(); if(this.controller.doubleSelect(commit.sha)) void this.applySelection(); };
         row.oncontextmenu = event => this.contextMenu(event, commit);
-        content.createDiv({ cls: 'lgd-history-subject', text: commit.subject });
-        content.createDiv({ cls: 'lgd-history-meta', text: `${commit.shortSha} · ${commit.author || 'Unknown author'}` });
+        content.createDiv({ cls: 'lgd-history-subject', text: commit.kind==='workcopy' ? 'Workcopy' : commit.subject });
+        content.createDiv({ cls: 'lgd-history-meta', text: commit.kind==='workcopy' ? (commit.changeId ? `@ · ${commit.changeId.slice(0,8)} · ${commit.subject}` : 'Live document') : `${commit.changeId ? commit.changeId.slice(0,8)+' · ' : ''}${commit.shortSha} · ${commit.author || 'Unknown author'}` });
         content.createDiv({ cls: 'lgd-history-date', text: `${commit.date} · ${commit.relative}` });
         const compare = row.createEl('button', { cls: 'clickable-icon lgd-history-compare', attr: { type: 'button' } });
         setIcon(compare, 'git-compare');
@@ -239,9 +240,23 @@ export class GitHistoryView extends ItemView {
       }
       const selected = state.selected.some(item => item.sha === commit.sha);
       const content = row.querySelector<HTMLButtonElement>('.lgd-history-commit')!;
+      row.querySelector<HTMLElement>('.lgd-history-subject')!.setText(commit.kind==='workcopy' ? 'Workcopy' : commit.absent ? 'File absent at this snapshot' : commit.subject);
+      row.querySelector<HTMLElement>('.lgd-history-meta')!.setText(commit.kind==='workcopy' ? (commit.changeId ? `@ · ${commit.changeId.slice(0,8)} · ${commit.currentSha?.slice(0,8)}` : 'Live document') : `${commit.changeId ? commit.changeId.slice(0,8)+' · ' : ''}${commit.shortSha} · ${commit.author || 'Unknown author'}`);
+      row.querySelector<HTMLElement>('.lgd-history-date')!.setText(commit.kind==='workcopy' ? 'Live document' : `${commit.snapshot ? 'Snapshot · ' : ''}${commit.date} · ${commit.relative}`);
       content.disabled = state.unavailable;
       content.setAttr('aria-selected', String(selected)); row.toggleClass('is-selected', selected);
-      row.querySelector<HTMLButtonElement>('.lgd-history-compare')!.hidden = !selected;
+      row.querySelector<HTMLButtonElement>('.lgd-history-compare')!.hidden = !selected || state.selected.length!==2;
+      row.toggleClass('is-snapshot', !!commit.snapshot);
+      row.toggleClass('is-workcopy', commit.kind==='workcopy');
+      content.setAttr('aria-level', commit.snapshot ? '2' : '1');
+      if (state.entry?.context.backend==='jj' && !commit.snapshot) {
+        let expand = row.querySelector<HTMLButtonElement>('.lgd-history-expand');
+        if(!expand) expand=row.createEl('button',{cls:'clickable-icon lgd-history-expand',attr:{type:'button','aria-label':'Toggle snapshots'}});
+        const group=state.expanded?.[commit.sha];
+        setIcon(expand,group ? 'chevron-down' : 'chevron-right');
+        content.setAttr('aria-expanded',String(!!group));
+        expand.onclick=event=>{event.stopPropagation();void this.controller.expand(commit.sha);};
+      }
       content.setAttr('title', `${commit.subject}\n${commit.sha}\n${commit.path}`);
       const renamed = state.entry && commit.path !== state.entry.context.rel;
       let rename = row.querySelector<HTMLElement>('.lgd-history-renamed');
@@ -258,6 +273,12 @@ export class GitHistoryView extends ItemView {
     else list.scrollTop = scroll;
     const focusRow = this.rows.get(focusSha || compareSha || '');
     if (focusRow?.parentElement === list) focusRow.querySelector<HTMLButtonElement>(focusSha ? '.lgd-history-commit' : '.lgd-history-compare')?.focus({ preventScroll: true });
+    for(const [sha,group] of Object.entries(state.expanded || {})) {
+      const parent=this.rows.get(sha); if(!parent || parent.parentElement!==list) continue;
+      const text=group.loading ? 'Loading snapshots…' : group.error || (!group.commits.length ? 'No earlier changes to this note.' : '');
+      if(text) { const status=list.createDiv({cls:'lgd-history-evolution-status',text}); parent.after(status); }
+      if(group.hasMore && !group.loading) { const more=list.createEl('button',{cls:'lgd-history-evolution-status',text:'Load more snapshots'});more.onclick=()=>{void this.controller.expand(sha,false,true);};const last=group.commits.at(-1);(last ? this.rows.get(last.sha) : parent)?.after(more); }
+    }
     this.updateComparisonState(); this.updateConnector();
   }
 }

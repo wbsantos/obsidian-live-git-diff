@@ -46,3 +46,18 @@ Run from `plugin-src` with an explicit local QA manifest. The tools verify the c
 The history fixture comes from `tools/prepare-history-qa.mjs`; table fixtures and independent visual expectations come from `tools/prepare-visual-qa.mjs`. The tools require a local Obsidian CDP endpoint and must not target a working vault.
 
 Minimum declared Obsidian version remains 1.7.2; the application verification covered 1.15.0. The historical side remains read-only. No editor private fields, monkey patches or content-writing transactions were introduced into the plugin. Table presentation retains guarded DOM mapping; existing defensive Reading-section compatibility remains unchanged.
+
+
+## Git / Jujutsu history and explicit Workcopy
+
+The history now starts with Workcopy selected. Comparisons require two distinct endpoints; selecting another historical target retains the Workcopy anchor. JJ change rows expand into immutable snapshots, filtered by the note's file content, with selected child snapshots cleared on collapse. Workcopy remains live and historical endpoints remain pinned.
+
+The complete automated suite passed **188 tests**. Targeted controller, active-note and bundle checks also passed after the final changes. Real JJ integration covers colocated and non-colocated workspaces, stable change identity during snapshotting, unrelated-file filtering, and unchanged file bytes after snapshotting. The filesystem-import and note-writing gates continue to pass.
+
+Actual Obsidian validation used the disposable vault under `.npm-cache/jj-app-qa`, never a working vault. It verified expansion/collapse, two historical endpoints, editable Workcopy comparisons, automatic snapshotting after the 15-second save debounce, and Git backend selection for a nested Git repository. The isolated Chromium DOM harness passed 15 assertions in each of the light/dark themes.
+
+Eight native application screenshots are saved in `docs/screenshots/history-jj/`, including Workcopy evolution, an expanded historical change, selected snapshots in both themes, historical comparison, live comparison and the Git equivalent. These screenshots contain demonstration notes only.
+
+JJ commands use `--ignore-working-copy` for queries and explicitly use `jj util snapshot` for authorized background recording. This records saved workspace contents according to JJ tracking rules and can update repository metadata and objects; the plugin does not force editor saves or run `jj commit`/`jj new` on working repositories. Snapshots are serialized by repository and scheduled by workspace after 15 seconds without relevant saves. Git-only repositories never receive automatic commits.
+
+Reproduce native checks from `plugin-src` with `node tools/prepare-jj-qa.mjs`, an isolated Obsidian profile on port 9237, `node tools/load-qa.mjs ../.npm-cache/jj-app-qa/manifest.json`, and `node tools/verify-jj-app.mjs`.

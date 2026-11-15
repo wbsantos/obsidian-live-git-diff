@@ -8,11 +8,12 @@ Use **Compare** in the note header, next to Obsidian's reading/editing controls,
 
 Use the adjacent **Git History** button to open the sidebar. The panel stays on that file when you switch notes. **Git History** is also available by right-clicking a Markdown file in the File Explorer, a note's tab/header, or its content in Live Preview and reading mode. Looking up history does not open the note.
 
-- Click a commit to select or deselect it. Up to two versions can be selected; clicking a third keeps the existing pair. Selection does not change the open comparison.
-- Selected rows show a compare icon on the right. With one version selected, it compares against that note's working tree, including unsaved edits. Double-click any commit to select only that version and compare it with the working tree immediately.
-- With two selected, either compare icon opens two read-only historical panes. A dashed line connects the icons when both rows are included in the filter. The earlier version starts on the left; **Swap sides** reverses them.
-- Right-click a commit to compare it with the worktree or any other selected commit, or choose **Clear Selections** to reset the draft without closing a review. Opening the menu preserves the current selection.
-- Enter/Space toggles a focused row; Ctrl/Cmd+Enter applies the selection while focus is inside the history panel.
+- **Workcopy** is listed first and selected by default. It represents the live note, including unsaved edits.
+- Click another version to prepare a comparison. Both selected rows show compare icons; either icon compares the pair. Double-click selects the target and opens the comparison when two targets are selected.
+- With Workcopy selected, clicking another historical version replaces the previous historical selection. Without Workcopy, at most two historical versions can be selected.
+- Right-click to compare with Workcopy, with another selected version, or clear selections. Enter/Space toggles selection; Ctrl/Cmd+Enter compares the pair.
+- In a **Jujutsu** workspace, change rows expand into older snapshots. The current Workcopy change starts expanded; only changes to this note's content are shown. Repeated content after a reversal remains in the timeline. Collapsing a change deselects its children.
+- JJ snapshots run **15 seconds** after relevant saves and immediately when opening/refreshing history or starting comparisons. Snapshots record saved workspace content; the live Workcopy comparison also reads unsaved editor text. The plugin uses `jj util snapshot`, preserving the current change instead of creating a new one.
 - Filter loaded commits, select **Load more**, or refresh the history. The footer shows Git loading progress and the time of the last successful synchronization.
 
 The selected versions and the active comparison are displayed separately. You can prepare a comparison for another file while the current review remains open. Closing a review preserves the prepared selection. Choosing **Git History** on another file changes the panel and clears the draft; choosing the same file preserves its selection, filter and scroll position.
@@ -54,3 +55,13 @@ The historical side uses Obsidian's Markdown renderer, rather than a second edit
 Native table presentation uses the registered public CodeMirror view and source positions, with guarded DOM mapping to Obsidian's table widgets. If a future renderer prevents reliable mapping, the panel reports the limitation. Other replacement widgets, including formulas, use margin indicators. Reading-mode section discovery retains a guarded compatibility fallback for already-rendered sections.
 
 Large documents are analyzed in a worker and rendered in batches. Their first historical render can still take several seconds; subsequent edits reuse the fixed historical content.
+
+### Jujutsu support
+
+Requires `jj` 0.47.1 or newer and a Git-backed workspace (colocated or not). The plugin queries JJ before falling back to Git and uses the underlying Git object store for immutable file contents and rename history. A nested Git repository is handled as Git even inside a JJ workspace. Snapshot commands are serialized by repository; automatic snapshots are limited to notes with a history panel or comparison open. Ignored files are not force-tracked and editor buffers are not forcibly saved.
+
+History refresh does not move the immutable side of an open comparison. The direct comparison default maps Git HEAD to JJ `@-` and HEAD~1 to `@--`; custom JJ references must resolve to one revision.
+
+The plugin does not edit note content directly. JJ snapshotting deliberately writes repository metadata and objects; this is an exception to the former description of all VCS commands as read-only. Production code still imports no filesystem module and cannot directly write note files.
+
+Screenshots from an isolated Obsidian vault: [JJ Workcopy evolution](docs/screenshots/history-jj/jj-workcopy-evolog-light.png), [selected snapshots](docs/screenshots/history-jj/jj-two-snapshots-dark.png), and [Git Workcopy](docs/screenshots/history-jj/git-workcopy-light.png).

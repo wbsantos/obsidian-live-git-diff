@@ -553,3 +553,9 @@ body.theme-dark {
 .lgd-swap { margin-top: 8px; }
 
 .lgd-compare-action, .lgd-history-action { flex-shrink: 0; }
+
+/* JJ evolution: change headers retain their place; snapshots are indented. */
+.lgd-history-row.is-snapshot { margin-inline-start:16px; width:calc(100% - 16px); }
+.lgd-history-row.is-workcopy { border-bottom:1px solid var(--background-modifier-border); margin-bottom:6px; }
+.lgd-history button.lgd-history-expand { position:absolute; top:8px; inset-inline-start:-12px; width:20px; height:20px; z-index:3; cursor:pointer; background:var(--background-primary); }
+.lgd-history-evolution-status { padding:6px 16px; color:var(--text-muted); font-size:var(--font-ui-smaller); }

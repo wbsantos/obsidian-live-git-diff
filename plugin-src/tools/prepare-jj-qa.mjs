@@ -1,0 +1,18 @@
+import fs from 'node:fs';import path from 'node:path';import {execFileSync} from 'node:child_process';
+const base=path.resolve('../.npm-cache/jj-app-qa'),vault=path.join(base,'vault');
+fs.mkdirSync(vault,{recursive:true});
+const jj=(...args)=>execFileSync('jj',['--config','user.name="History QA"','--config','user.email="qa@localhost"','--no-pager','-R',vault,...args],{windowsHide:true,encoding:'utf8'});
+if(!fs.existsSync(path.join(vault,'.jj')))execFileSync('jj',['git','init',vault],{windowsHide:true});
+const file=path.join(vault,'Review.md');
+const text=n=>`# A shared plan\n\n## Goals\n\n${n===1?'Capture the original proposal.':n===2?'Refine the proposal with concrete acceptance criteria.':'Review the latest draft and compare earlier snapshots.'}\n\n## Checklist\n\n- Keep the note editable\n- Inspect individual snapshots\n${n===3?'- Verify the final comparison\n':''}`;
+fs.writeFileSync(file,text(1));jj('describe','-m','Document the initial proposal');jj('new');
+fs.writeFileSync(file,text(2));jj('util','snapshot');jj('describe','-m','Refine review workflow');
+fs.writeFileSync(file,text(3));jj('util','snapshot');
+fs.mkdirSync(path.join(vault,'.obsidian/plugins/live-git-diff'),{recursive:true});
+for(const name of ['main.js','manifest.json','styles.css'])fs.copyFileSync(path.resolve('../plugin-dist',name),path.join(vault,'.obsidian/plugins/live-git-diff',name));
+fs.writeFileSync(path.join(vault,'.obsidian/community-plugins.json'),JSON.stringify(['live-git-diff']));
+fs.writeFileSync(path.join(vault,'.obsidian/app.json'),JSON.stringify({legacyEditor:false,livePreview:true}));
+const profile=path.join(base,'profile');fs.mkdirSync(path.join(profile,'obsidian'),{recursive:true});
+fs.writeFileSync(path.join(profile,'obsidian.json'),JSON.stringify({vaults:{'jj-history-qa':{path:vault,ts:Date.now(),open:true}},updateDisabled:true}));
+fs.writeFileSync(path.join(base,'manifest.json'),JSON.stringify({vault,profile,port:9237},null,2));
+console.log(JSON.stringify({vault,profile,port:9237}));

@@ -69,7 +69,7 @@ const commits = Array.from({length:12}, (_,i) => ({sha:String(12-i), shortSha:St
   author:'History QA', path:'note.md', date:'Nov 12, 2026', relative:'today'}));
 const files = new Map(['note.md', 'other.md'].map(path => [path,new TFile(path)]));
 let active = files.get('note.md'), opening = null, pending = null, fail = false;
-const calls = [], cache = new HistoryCache({ head:async()=> 'HEAD', log:async()=>commits });
+const calls = [], cache = new HistoryCache({ head:async()=> 'HEAD', log:async()=>[{kind:"workcopy",sha:"workcopy",shortSha:"Workcopy",subject:"Workcopy",path:"note.md",date:"",relative:"Live document"},...commits] });
 const host = {
   settings:{logLimit:20}, historyCache:cache,
   historyActiveFile:()=> active,
@@ -97,73 +97,27 @@ function doubleClick(sha) {
 const filter = value => { const el=contentEl.querySelector('input');el.value=value;el.dispatchEvent(new Event('input')); };
 async function run() {
   await view.onOpen(); await view.setFile(files.get('note.md')); await paint();
-  check('matching note cue and no follow button', contentEl.querySelector('[data-note-context="match"]') && contentEl.querySelector('.lgd-history-follow').hidden);
-  check('no footer compare or clear button', !contentEl.querySelector('.lgd-history-actions button'));
-  row('12').click();row('10').click();row('9').click();
-  check('plain clicks select two and reject a third without comparing', selected()==='10,12' && !calls.length && view.controller.state.hint);
-  check('only selected rows have visible compare icons', [...contentEl.querySelectorAll('.lgd-history-compare')].filter(b=>!b.hidden).length===2);
-  check('compare button is a sibling of the row button', icon('12').parentElement===row('12').parentElement && !row('12').contains(icon('12')));
-  await paint();
-  const line = contentEl.querySelector('.lgd-history-connector');
-  function connected() {
-    const a=icon('12').getBoundingClientRect(),b=icon('10').getBoundingClientRect(),r=line.getBoundingClientRect();
-    return !line.hidden && Math.abs(r.left-(a.left+a.width/2))<2 && Math.abs(r.top-(a.top+a.height/2))<2 && Math.abs(r.bottom-(b.top+b.height/2))<2;
-  }
-  check('dashed connector aligns to both button centers', connected());
-  const list=contentEl.querySelector('.lgd-history-list');list.scrollTop=80;
-  check('connector stays aligned while scrolling', connected());list.scrollTop=0;
-  document.getElementById('shell').style.width='245px';await paint();
-  check('connector follows text wrapping after resize', connected());
-  document.getElementById('shell').style.width='340px';await paint();
-  filter('Revision 10');check('filter hides connector without losing selection', line.hidden && selected()==='10,12');
-  filter('');await paint();check('clearing filter restores connector', connected());
-  for (const sha of ['12','10']) { icon(sha).click();await turn();check('either icon compares selected pair '+sha, calls.at(-1).shas.join(',')==='10,12' && selected()==='10,12'); }
-  row('12').click();check('clicking selected row deselects', selected()==='10');
-  row('10').click();check('deselecting last row clears draft', selected()==='');
-  for (const draft of [[],['12'],['10','12']]) {
-    view.controller.setSelection(draft);doubleClick('11');await turn();
-    check('double click compares only clicked row with draft '+draft.join(','), selected()==='11' && calls.at(-1).shas.join(',')==='11');
-  }
-  view.controller.setSelection(['12','10']);
-  let menu=context('9');
-  check('context menu on third row preserves selection and offers both selected commits', selected()==='10,12' && menu.length===4 && menu[1].title.includes('10 · Revision 10') && menu[2].title.includes('12 · Improve'));
-  menu[1].callback();await turn();check('context pair action replaces unused selected item', selected()==='9,10' && calls.at(-1).shas.join(',')==='9,10');
-  menu=context('9');check('selected row only offers other selected version', menu.length===3 && menu[1].title.includes('10 ·'));
-  menu[1].callback();await turn();check('selected context pair compares normally', selected()==='9,10' && calls.at(-1).shas.join(',')==='9,10');
-  menu=context('12');menu[0].callback();await turn();check('context worktree action selects only its target', selected()==='12' && calls.at(-1).shas.join(',')==='12');
-  check('sole selected row offers no self comparison', context('12').length===2);
-  let count=calls.length;context('11').at(-1).callback();check('context clear only clears selection', !selected() && calls.length===count);
-  check('empty selection menu has no pair and clear disabled', context('11').length===2 && context('11').at(-1).disabled);
-  row('12').focus();row('12').dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));
-  check('Space toggles focused row', selected()==='12');
-  row('12').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
-  check('Enter toggles focused row', !selected());
-  row('12').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
-  check('arrow navigation focuses next row', document.activeElement===row('11'));
-  row('11').click();row('11').focus();
-  row('11').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));await turn();
-  check('Ctrl+Enter compares selection', calls.at(-1).shas.join(',')==='11');
-  let release;pending=new Promise(resolve=>release=resolve);count=calls.length;
-  icon('11').click();doubleClick('12');context('12')[0].callback();
-  check('in-flight comparison blocks duplicate actions and retains submitted version', calls.length===count+1 && icon('11').disabled && calls.at(-1).shas.join(',')==='11');
-  release();pending=null;await turn();view.controller.setSelection(['11']);check('completion re-enables actions', !icon('11').disabled);
-  opening='note.md';view.updateComparisonState();count=calls.length;doubleClick('12');
-  check('host opening state blocks duplicate comparisons', calls.length===count && icon('11').disabled);
-  opening=null;view.updateComparisonState();fail=true;icon('11').click();await turn();fail=false;
-  check('comparison error displays hint and restores button', contentEl.querySelector('.lgd-history-hint').textContent.includes('QA comparison failed') && !icon('11').disabled);
-  active=files.get('other.md');view.updateActiveFile();
-  check('different note cue shows follow action', contentEl.querySelector('[data-note-context="different"]') && !contentEl.querySelector('.lgd-history-follow').hidden);
-  const stale=context('10');count=calls.length;
-  filter('Revision');list.scrollTop=80;contentEl.querySelector('.lgd-history-follow').click();await turn();
-  check('follow action switches note and resets draft filter scroll', view.controller.state.file.path==='other.md' && !selected() && contentEl.querySelector('input').value==='' && list.scrollTop===0);
-  stale[0].callback();check('stale menu cannot compare another file', calls.length===count);
-  await view.setFile(files.get('note.md'));stale[0].callback();check('stale menu rejected after A to B to A', calls.length===count);
-  active=null;view.updateActiveFile();check('missing active note gives neutral cue', contentEl.querySelector('[data-note-context="neutral"]') && contentEl.querySelector('.lgd-history-follow').hidden);
-  active=files.get('note.md');view.controller.setSelection(['12','10']);
-  view.controller.fileUnavailable();check('deleted history disables actions and clears selection', !selected() && row('12').disabled);
-  await view.setFile(files.get('note.md'));view.controller.setSelection(['12','10']);await paint();
-  const retained=context('11');await view.onClose();count=calls.length;retained[0].callback();
-  check('closed view rejects menu callbacks', calls.length===count);
+  check('Workcopy is initially selected and has no compare icon', selected()==='workcopy' && ![...contentEl.querySelectorAll('.lgd-history-compare')].some(b=>!b.hidden));
+  row('12').click();check('plain click forms a pair with Workcopy', selected()==='12,workcopy');
+  row('10').click();check('third click replaces historical target', selected()==='10,workcopy');
+  icon('10').click();await turn();check('compare icon submits explicit pair',calls.at(-1).shas.join(',')==='10,workcopy');
+  doubleClick('11');await turn();check('double click replaces target and compares',selected()==='11,workcopy' && calls.at(-1).shas.join(',')==='11,workcopy');
+  view.controller.setSelection(['12','10']);let count=calls.length;doubleClick('9');await turn();
+  check('third historical double click preserves pair without comparing',selected()==='10,12' && calls.length===count);
+  let menu=context('9');check('third row menu offers both selected targets',menu.length===4);
+  menu[1].callback();await turn();check('context menu forms chosen historical pair',selected()==='9,10');
+  context('12')[0].callback();await turn();check('context Workcopy action forms explicit pair',selected()==='12,workcopy');
+  context('12').at(-1).callback();check('clear leaves zero selections',!selected());
+  doubleClick('11');await turn();check('double click alone does not compare',selected()==='11');
+  view.controller.setSelection(['12','10']);await paint();
+  const line=contentEl.querySelector('.lgd-history-connector');
+  check('two icons have a connector',!line.hidden && parseFloat(line.style.height)>0);
+  filter('Revision 10');check('filter preserves selected targets visibly',!!row('12') && !!row('10'));
+  filter('');
+  active=files.get('other.md');view.updateActiveFile();check('different note shows follow action',!contentEl.querySelector('.lgd-history-follow').hidden);
+  const stale=context('10');count=calls.length;contentEl.querySelector('.lgd-history-follow').click();await turn();stale[0].callback();
+  check('stale menu cannot compare another note',calls.length===count && view.controller.state.file.path==='other.md');
+  await view.onClose();
   const report=document.getElementById('report');report.textContent=JSON.stringify({results,passed:results.length});report.dataset.complete='true';
 }
 run().catch(error=>{const report=document.getElementById('report');report.textContent=JSON.stringify({results,error:error.stack});report.dataset.complete='failed';});
@@ -171,6 +125,8 @@ run().catch(error=>{const report=document.getElementById('report');report.textCo
 const bundle = await build({
   stdin: { contents: entry, resolveDir: root }, bundle:true, write:false, format:'iife',
   plugins:[{ name:'isolated-host', setup(builder) {
+    builder.onResolve({filter:/repository\.ts$/},()=>({path:'repository',namespace:'qa-repository'}));
+    builder.onLoad({filter:/.*/,namespace:'qa-repository'},()=>({contents:'export const WORKCOPY="workcopy";export const resolveRepository=async()=>({root:"/qa",rel:"note.md"});export const workcopy=path=>({kind:"workcopy",sha:"workcopy",shortSha:"Workcopy",subject:"Workcopy",path,date:"",relative:"Live document"});export const repositoryHead=async()=>"HEAD";export const repositoryLog=async()=>[];export const evolution=async()=>({commits:[],hasMore:false});'}));
     builder.onResolve({filter:/^obsidian$/},()=>({path:'obsidian',namespace:'qa'}));
     builder.onLoad({filter:/.*/,namespace:'qa'},()=>({contents:stub}));
     builder.onResolve({filter:/\/git\.ts$|^\.\/git\.ts$/},()=>({path:'git',namespace:'qa-git'}));

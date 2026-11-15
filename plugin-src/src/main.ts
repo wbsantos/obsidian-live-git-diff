@@ -1,7 +1,7 @@
 import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, setIcon, setTooltip } from 'obsidian';
 import type { EditorView } from '@codemirror/view';
 import { GitBaseView, VIEW_TYPE } from './baseView.ts';
-import { GitError, commitInfoForAsync, fileLogAsync, readBaseAtAsync, resolveGitAsync, resolveRefAsync } from './git.ts';
+import { GitError, fileLogAsync } from './git.ts';
 import type { CommitInfo, GitContext } from './git.ts';
 import { GitHistoryView, HISTORY_VIEW_TYPE } from './historyView.ts';
 import type { HistoryReviewState } from './historyView.ts';
@@ -20,6 +20,7 @@ import type { NotePane } from './panes.ts';
 import { DEFAULT_SETTINGS, LiveGitDiffSettingTab, applyColors, clearColors, mergeSettings, persistSettings } from './settings.ts';
 import type { LiveGitDiffSettings } from './settings.ts';
 import * as log from './log.ts';
+import { resolveRepository, resolveRevision, revisionInfo, snapshotWorkspace, readRevision, SNAPSHOT_DELAY } from './repository.ts';
 
 /** All edits belong to Obsidian. Git reads and presentation have independent lifetimes. */
 export default class LiveGitDiffPlugin extends Plugin {
@@ -43,6 +44,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   private opening = 0;
   private openingFile: string | null = null;
   private historyOpening = 0;
+  private snapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private creating = false;
   private disposed = false;
   private layoutPending = false;
@@ -82,6 +84,9 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.registerEvent(this.app.workspace.on('file-open', () => this.scheduleLayout()));
     this.registerEvent(this.app.workspace.on('resize', () => this.sync.attach()));
     this.registerEvent(this.app.vault.on('modify', file => {
+      if(file instanceof TFile && (file.path===this.session?.filePath || file.path===this.historyView()?.controller.state.file?.path)) {
+        void this.scheduleSavedSnapshot(file);
+      }
       if (!this.isHistoricalPair() && file instanceof TFile && file.path === this.session?.filePath) void this.externalChange(file);
     }));
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
@@ -109,10 +114,32 @@ export default class LiveGitDiffPlugin extends Plugin {
     });
   }
   onunload(): void {
+    for(const timer of this.snapshotTimers.values()) clearTimeout(timer);this.snapshotTimers.clear();
     this.disposed = true; this.closeReview(); this.historyCache.dispose();
     this.app.workspace.detachLeavesOfType(HISTORY_VIEW_TYPE);
     for (const buttons of this.actions.values()) { buttons.compare.remove(); buttons.history.remove(); }
     this.actions.clear(); this.sync.dispose(); this.zones.dispose(); clearColors();
+  }
+  private async scheduleSavedSnapshot(file: TFile): Promise<void> {
+    try {
+      const ctx=await resolveRepository(this.app,file);
+      if(ctx.backend!=='jj' || this.disposed) return;
+      const key=ctx.workspaceRoot!;
+      clearTimeout(this.snapshotTimers.get(key));
+      this.snapshotTimers.set(key,setTimeout(()=>{this.snapshotTimers.delete(key);void this.snapshotSavedNote(file);},SNAPSHOT_DELAY));
+    } catch(error) { log.warn('Unable to schedule snapshot',error); }
+  }
+  private async snapshotSavedNote(file: TFile): Promise<void> {
+    if(this.disposed) return;
+    try {
+      const ctx=await resolveRepository(this.app,file);
+      if(ctx.backend!=='jj' || this.disposed) return;
+      await snapshotWorkspace(ctx);
+      if(!this.disposed && this.historyView()?.controller.state.entry?.context.workspaceRoot===ctx.workspaceRoot) await this.historyView()?.controller.refresh();
+    } catch(error) {
+      log.warn('Unable to snapshot saved note',error);
+      if(this.historyView()?.controller.state.file?.path===file.path) this.historyView()?.controller.reportError(`Unable to snapshot saved note: ${error}`);
+    }
   }
   async loadSettings(): Promise<void> {
     this.settings = mergeSettings(await this.loadData()); log.setDebug(this.settings.debug); applyColors(this.settings);
@@ -233,11 +260,13 @@ export default class LiveGitDiffPlugin extends Plugin {
   }
   async compareHistory(filePath: string, commits: readonly CommitInfo[]): Promise<void> {
     if (this.openingFile) return;
-    if (commits.length < 1 || commits.length > 2) throw new Error('Select one or two versions to compare.');
+    if (commits.length !== 2 || commits[0].sha===commits[1].sha) throw new Error('Select two distinct versions to compare.');
     const file = this.app.vault.getAbstractFileByPath(filePath);
     if (!(file instanceof TFile)) throw new Error('The note is no longer available.');
-    if (commits.length === 1) await this.openReview({ file, ref: commits[0].sha, label: commits[0].shortSha, commit: commits[0] });
-    else await this.openHistorical(file, commits[0], commits[1]);
+    const ctx=await resolveRepository(this.app,file);await snapshotWorkspace(ctx);
+    const historical=commits.filter(c=>c.kind!=='workcopy');
+    if(historical.length===1) await this.openReview({file,ref:historical[0].sha,label:historical[0].shortSha,commit:historical[0]});
+    else await this.openHistorical(file,commits[0],commits[1]);
   }
   swapSides(): void {
     const s = this.session;
@@ -357,7 +386,7 @@ export default class LiveGitDiffPlugin extends Plugin {
       return { sha: commits[1].sha, label: 'previous version' };
     }
     const ref = mode === 'custom' ? this.settings.baseRef : mode === 'head~1' ? 'HEAD~1' : 'HEAD';
-    return { sha: await resolveRefAsync(ctx.root, ref, signal), label: ref };
+    return { sha: await resolveRevision(ctx, ref, signal), label: ref };
   }
   private async noteLeaf(file: TFile, preferred?: WorkspaceLeaf): Promise<WorkspaceLeaf> {
     const active = preferred || this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
@@ -381,9 +410,10 @@ export default class LiveGitDiffPlugin extends Plugin {
       if (opening !== this.opening) return;
       this.participants.set(this.reviewLeaf, { type: 'markdown', path: file.path });
       this.creating = false; this.checkParticipants(); this.updateActions();
-      const ctx = await resolveGitAsync(this.app, file, signal);
-      const base = keep || (opts.ref ? { sha: await resolveRefAsync(ctx.root, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal));
-      const [read, commit, breaks] = await Promise.all([readBaseAtAsync(ctx.root, ctx.rel, base.sha, signal, opts.commit?.path), commitInfoForAsync(ctx.root, base.sha, signal), this.readBreaks()]);
+      const ctx = await resolveRepository(this.app, file, signal);
+      await snapshotWorkspace(ctx,signal);
+      const base = keep || (opts.ref ? { sha: await resolveRevision(ctx, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal));
+      const [read, commit, breaks] = await Promise.all([readRevision(ctx, {...(opts.commit || {shortSha:base.sha.slice(0,8),subject:'',relative:'',date:'',path:ctx.rel}),sha:base.sha}, signal), revisionInfo(ctx, base.sha, signal), this.readBreaks()]);
       if (opening !== this.opening) return;
       this.session = sessionFromRows(file, read.text, ctx, { ...base, commit, readAs: read.renamedFrom }, '', [], 0, breaks);
       this.session.status = 'updating';
@@ -398,8 +428,8 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.historyView()?.updateComparisonState();
     const signal = (this.gitJob = new AbortController()).signal;
     try {
-      const ctx = await resolveGitAsync(this.app, file, signal);
-      const [a, b, breaks] = await Promise.all([readBaseAtAsync(ctx.root, ctx.rel, left.sha, signal, left.path || undefined), readBaseAtAsync(ctx.root, ctx.rel, right.sha, signal, right.path || undefined), this.readBreaks()]);
+      const ctx = await resolveRepository(this.app, file, signal);
+      const [a, b, breaks] = await Promise.all([readRevision(ctx,left,signal), readRevision(ctx,right,signal), this.readBreaks()]);
       if (opening !== this.opening) return;
       this.session = sessionFromRows(file, a.text, ctx, { sha: left.sha, label: left.shortSha, commit: left, readAs: a.renamedFrom }, b.text, [], 0, breaks);
       this.session.endpoints[1] = { kind: 'commit', sha: right.sha, label: right.shortSha, path: b.path, commit: right };
