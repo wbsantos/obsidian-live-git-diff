@@ -17,6 +17,8 @@
  */
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type { Plugin } from 'obsidian';
+import { DEFAULT_AI, AI_MODELS, AI_PROMPTS, mergeAi } from './ai.ts';
+import type { AiSettings, AiPurpose, AiProvider } from './ai.ts';
 
 /**
  * The five diff colors.
@@ -68,6 +70,7 @@ export interface LiveGitDiffSettings {
   logLimit: number;
   /** Verbose console logging. Warnings and errors are always on regardless. */
   debug: boolean;
+  ai: AiSettings;
 }
 
 export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
@@ -76,6 +79,7 @@ export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
   baseRef: 'main',
   logLimit: 50,
   debug: false,
+  ai: mergeAi(DEFAULT_AI),
 };
 
 /** CSS custom property backing each color. Must match styles.css. */
@@ -158,6 +162,8 @@ export function clearColors(): void {
 export interface SettingsHost extends Plugin {
   settings: LiveGitDiffSettings;
   saveSettings(): Promise<void>;
+  repositoryCache?: { serialize(): unknown };
+  resetHistoryCache?(): Promise<void>;
 }
 
 /**
@@ -166,18 +172,26 @@ export interface SettingsHost extends Plugin {
  * (.obsidian/plugins/live-git-diff/data.json) — never a note.
  */
 export async function persistSettings(plugin: SettingsHost): Promise<void> {
-  await plugin.saveData(plugin.settings);
+  const previous = pendingSaves.get(plugin) || Promise.resolve();
+  const job = previous.catch(() => {}).then(async () => {
+    await plugin.saveData({ ...plugin.settings, repositoryHistoryCache: plugin.repositoryCache?.serialize() });
+  });
+  pendingSaves.set(plugin, job);
+  try { await job; } finally { if (pendingSaves.get(plugin) === job) pendingSaves.delete(plugin); }
 }
+const pendingSaves = new WeakMap<SettingsHost, Promise<void>>();
 
 /** Merge stored config over the defaults, tolerating a partial/older data.json. */
 export function mergeSettings(loaded: unknown): LiveGitDiffSettings {
   const l = (loaded || {}) as Partial<LiveGitDiffSettings>;
+  const { repositoryHistoryCache: _cache, ...config } = l as Partial<LiveGitDiffSettings> & { repositoryHistoryCache?: unknown };
   return {
     ...DEFAULT_SETTINGS,
-    ...l,
+    ...config,
     // Nested object: a spread alone would replace the whole colors block with a
     // partial one from an older data.json and leave the new keys undefined.
     colors: { ...DEFAULT_SETTINGS.colors, ...(l.colors || {}) },
+    ai: mergeAi(l.ai),
   };
 }
 
@@ -193,14 +207,38 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
+    new Setting(containerEl).setName('AI assistants').setHeading();
+    for (const purpose of ['description', 'explain'] as AiPurpose[]) {
+      const task = this.plugin.settings.ai[purpose];
+      new Setting(containerEl).setName(purpose === 'description' ? 'Change description' : 'Explain').setHeading();
+      new Setting(containerEl).setName('Agent').addDropdown(dropdown => dropdown
+        .addOptions({ copilot: 'GitHub Copilot', codex: 'OpenAI Codex', claude: 'Claude Code' }).setValue(task.provider)
+        .onChange(async value => { task.provider = value as AiProvider; task.model = ''; task.executable = ''; await this.plugin.saveSettings(); this.display(); }));
+      new Setting(containerEl).setName('CLI path').addText(text => text.setPlaceholder(task.provider).setValue(task.executable)
+        .onChange(async value => { task.executable = value.trim(); await this.plugin.saveSettings(); }));
+      new Setting(containerEl).setName('Model').addText(text => {
+        text.setPlaceholder('Agent default').setValue(task.model).onChange(async value => { task.model = value.trim(); await this.plugin.saveSettings(); });
+        const id = `change-review-model-${purpose}`;
+        text.inputEl.setAttribute('list', id);
+        const choices = containerEl.createEl('datalist', { attr: { id } });
+        for (const model of AI_MODELS[task.provider]) choices.createEl('option', { value: model });
+      });
+      new Setting(containerEl).setName('Prompt').addTextArea(text => {
+        text.inputEl.rows = 5; text.inputEl.addClass('lgd-ai-prompt');
+        text.setValue(task.prompt).onChange(async value => { task.prompt = value; await this.plugin.saveSettings(); });
+      }).addExtraButton(button => button.setIcon('reset').setTooltip('Reset prompt').onClick(async () => {
+        task.prompt = AI_PROMPTS[purpose]; await this.plugin.saveSettings(); this.display();
+      }));
+    }
+
     /* ---- base version ---------------------------------------------------- */
     new Setting(containerEl).setName('Base version').setHeading();
 
     const pickerNote = containerEl.createEl('p', { cls: 'lgd-settings-note' });
     pickerNote.setText(
       'To choose a version per review, use the command "Open review against a version…" — ' +
-      'the Git History sidebar stays on the chosen file. Select one or two versions, then choose Compare. These settings decide ' +
-      'what the note-header Compare action, Git Compare menu and plain "Open git diff review" command compare against.'
+      'the VCS History sidebar stays on the chosen file. Select one or two versions, then choose Compare. These settings decide ' +
+      'what the note-header Compare action, VCS Compare menu and plain "Open git diff review" command compare against.'
     );
 
     new Setting(containerEl)
@@ -328,6 +366,13 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
 
     /* ---- debug ----------------------------------------------------------- */
     new Setting(containerEl).setName('Advanced').setHeading();
+
+    if (this.plugin.resetHistoryCache) new Setting(containerEl).setName('History cache')
+      .addButton(button => button.setButtonText('Reset cache').onClick(async () => {
+        button.setDisabled(true);
+        try { await this.plugin.resetHistoryCache!(); }
+        finally { button.setDisabled(false); }
+      }));
 
     new Setting(containerEl)
       .setName('Debug logging')

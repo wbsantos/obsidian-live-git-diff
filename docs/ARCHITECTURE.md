@@ -1,5 +1,13 @@
 # Architecture
 
+## Repository management extension (0.5.0)
+
+The earlier design below describes the comparison engine. Repository management now adds `repositoryManager.ts` (literal CLI reads and serialized selected changes), `repositoryCache.ts` (bounded persistent metadata pages), `repositoryView.ts` (repository, folder, details and pending-work routes), and `navigation.ts` (one bounded trail shared with file history). `repository.ts` owns the shared mutation queue, including automatic JJ snapshots. Existing Markdown rendering and comparison geometry remain independent of repository browsing.
+
+`ai.ts` defines two independent AI configurations and bounded, cancellable CLI transport. Windows npm shims are resolved to their Node entry points; arguments and stdin are then passed directly without shell interpolation. `aiContext.ts` gathers only selected evidence and labels omissions. `explainView.ts` is a non-interactive reading panel. AI descriptions are drafts, not repository mutations. CLI calls run outside the repository with restricted tools, but authenticate and may retain logs according to the user's CLI/provider settings.
+
+The note-write gate is retained: production code imports no filesystem module and does not mutate vault/editor content. Repository creation/snapshot commands deliberately write VCS metadata. Git commits run normal Git hooks. Plugin settings and metadata cache share the single serialized `saveData` call in `settings.ts`. This supersedes older statements that *all* repository commands are read-only or that configuration is the only persisted data.
+
 > Why this plugin is built the way it is. Written for whoever touches it next — including future me.
 >
 > Everything here is **measured**, not argued. Where a number appears, it came from a real run against a real 767-line document, and the method is stated so you can re-run it. Where something is a guess, it says so.

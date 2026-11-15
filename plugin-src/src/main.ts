@@ -1,4 +1,15 @@
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, setIcon, setTooltip } from 'obsidian';
+import { MarkdownView, Notice, Plugin, TFile, TFolder, WorkspaceLeaf, setIcon, setTooltip } from 'obsidian';
+import type { TAbstractFile } from 'obsidian';
+import * as path from 'path';
+import { absPathOf } from './git.ts';
+import { RepositoryCache } from './repositoryCache.ts';
+import { GitRepositoryView, REPOSITORY_VIEW_TYPE } from './repositoryView.ts';
+import type { RepositoryRoute } from './repositoryView.ts';
+import { resolveRepositoryDirectory } from './repositoryManager.ts';
+import { NavigationTrail } from './navigation.ts';
+import { ExplainView, EXPLAIN_VIEW_TYPE } from './explainView.ts';
+import { runAi, boundedContext } from './ai.ts';
+import { repositoryAiContext, documentContext, comparisonContext } from './aiContext.ts';
 import type { EditorView } from '@codemirror/view';
 import { GitBaseView, VIEW_TYPE } from './baseView.ts';
 import { GitError, fileLogAsync } from './git.ts';
@@ -22,11 +33,20 @@ import type { LiveGitDiffSettings } from './settings.ts';
 import * as log from './log.ts';
 import { resolveRepository, resolveRevision, revisionInfo, snapshotWorkspace, readRevision, SNAPSHOT_DELAY } from './repository.ts';
 
+type NavigationRoute = RepositoryRoute | { kind: 'file'; filePath: string; context?: GitContext; revision?: string };
+
 /** All edits belong to Obsidian. Git reads and presentation have independent lifetimes. */
 export default class LiveGitDiffPlugin extends Plugin {
   settings: LiveGitDiffSettings = DEFAULT_SETTINGS;
   session: Session | null = null;
   historyCache = new HistoryCache();
+  repositoryCache = new RepositoryCache(() => this.scheduleCacheSave());
+  private navigation = new NavigationTrail<NavigationRoute>(route => JSON.stringify(route.kind === 'file'
+    ? [route.kind, route.filePath, route.revision] : [route.kind, route.context.root, route.kind === 'details' ? route.sha : route.kind === 'log' ? route.path : route.paths]));
+  private cacheSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private navigationRequest = 0;
+  private explainRequest = 0;
+  private historicalContext: GitContext | null = null;
   zones!: ViewZones;
   sync!: ScrollSync;
   private marks!: CharMarkLayer;
@@ -36,7 +56,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   private preferredEditor: EditorView | null = null;
   private reviewLeaf: WorkspaceLeaf | null = null;
   private participants = new Map<WorkspaceLeaf, { type: string; path?: string; side?: 'a' | 'b' }>();
-  private actions = new Map<MarkdownView, { compare: HTMLElement; history: HTMLElement }>();
+  private actions = new Map<MarkdownView, { compare: HTMLElement; history: HTMLElement; changes: HTMLElement }>();
   private tableIssues = new Map<EditorView, string>();
   private noteLines = new WeakMap<HTMLElement, { lineStart: number; lineEnd: number }>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -58,6 +78,8 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.registerEditorExtension(reviewExtension(this));
     this.registerView(VIEW_TYPE, leaf => new GitBaseView(leaf, this, this.participants.get(leaf)?.side));
     this.registerView(HISTORY_VIEW_TYPE, leaf => new GitHistoryView(leaf, this));
+    this.registerView(REPOSITORY_VIEW_TYPE, leaf => new GitRepositoryView(leaf, this));
+    this.registerView(EXPLAIN_VIEW_TYPE, leaf => new ExplainView(leaf));
     registerFileMenus(this, this);
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
     const command = (id: string, name: string, run: () => void, review = false): void => {
@@ -73,6 +95,9 @@ export default class LiveGitDiffPlugin extends Plugin {
     command('toggle-scroll-sync', 'Toggle scroll sync', () => this.toggleSync(), true);
     command('copy-alignment-report', 'Copy alignment report to clipboard', () => { void this.reportAlignment(); }, true);
     command('refresh-annotations', 'Refresh annotations in the note pane', () => this.rerenderPreviews(), true);
+    this.addCommand({ id: 'repository-history', name: 'Open repository history', callback: () => { void this.openRepository(); } });
+    this.addCommand({ id: 'repository-changes', name: 'Open pending changes', callback: () => { void this.openChanges(); } });
+    this.addRibbonIcon?.('git-branch', 'Repository history', () => { void this.openRepository(); });
     this.registerMarkdownPostProcessor((element, context) => {
       if (element.closest('.lgd-view') || context.sourcePath !== this.session?.filePath) return;
       const info = context.getSectionInfo(element); if (info) this.decorateNoteSection(element, info);
@@ -114,10 +139,13 @@ export default class LiveGitDiffPlugin extends Plugin {
     });
   }
   onunload(): void {
+    if (this.cacheSaveTimer) { clearTimeout(this.cacheSaveTimer); this.cacheSaveTimer = null; void persistSettings(this).catch(error => log.warn('Unable to save history cache', error)); }
     for(const timer of this.snapshotTimers.values()) clearTimeout(timer);this.snapshotTimers.clear();
     this.disposed = true; this.closeReview(); this.historyCache.dispose();
     this.app.workspace.detachLeavesOfType(HISTORY_VIEW_TYPE);
-    for (const buttons of this.actions.values()) { buttons.compare.remove(); buttons.history.remove(); }
+    this.app.workspace.detachLeavesOfType(REPOSITORY_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(EXPLAIN_VIEW_TYPE);
+    for (const buttons of this.actions.values()) { buttons.compare.remove(); buttons.history.remove(); buttons.changes.remove(); }
     this.actions.clear(); this.sync.dispose(); this.zones.dispose(); clearColors();
   }
   private async scheduleSavedSnapshot(file: TFile): Promise<void> {
@@ -142,7 +170,9 @@ export default class LiveGitDiffPlugin extends Plugin {
     }
   }
   async loadSettings(): Promise<void> {
-    this.settings = mergeSettings(await this.loadData()); log.setDebug(this.settings.debug); applyColors(this.settings);
+    const data = await this.loadData();
+    this.settings = mergeSettings(data); this.repositoryCache.hydrate(data?.repositoryHistoryCache);
+    log.setDebug(this.settings.debug); applyColors(this.settings);
   }
   async saveSettings(): Promise<void> {
     await persistSettings(this); log.setDebug(this.settings.debug); applyColors(this.settings);
@@ -184,18 +214,19 @@ export default class LiveGitDiffPlugin extends Plugin {
   private updateActions(): void {
     const views = new Set(this.app.workspace.getLeavesOfType('markdown').map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView));
     for (const [view, buttons] of this.actions) if (!views.has(view)) {
-      buttons.compare.remove(); buttons.history.remove(); this.actions.delete(view);
+      buttons.compare.remove(); buttons.history.remove(); buttons.changes.remove(); this.actions.delete(view);
     }
     for (const view of views) {
       let buttons = this.actions.get(view);
       if (!buttons || !view.containerEl.contains(buttons.compare)) {
-        buttons?.compare.remove(); buttons?.history.remove();
+        buttons?.compare.remove(); buttons?.history.remove(); buttons?.changes.remove();
         buttons = {
           compare: view.addAction('git-compare', 'Compare', () => {
             if (this.participants.has(view.leaf)) this.closeReview();
             else if (view.file) void this.openReview({ file: view.file, leaf: view.leaf });
           }),
-          history: view.addAction('history', 'Git History', () => { void this.openHistory(view.file); }),
+          history: view.addAction('history', 'VCS History', () => { void this.openHistory(view.file); }),
+          changes: view.addAction('git-commit-horizontal', 'Pending changes', () => { void this.openChanges(view.file || undefined); }),
         };
         buttons.compare.addClass('lgd-compare-action'); buttons.history.addClass('lgd-history-action'); this.actions.set(view, buttons);
       }
@@ -242,13 +273,163 @@ export default class LiveGitDiffPlugin extends Plugin {
     const view = this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)[0]?.view;
     return view instanceof GitHistoryView ? view : null;
   }
+  private repositoryView(): GitRepositoryView | null {
+    const view = this.app.workspace.getLeavesOfType(REPOSITORY_VIEW_TYPE)[0]?.view;
+    return view instanceof GitRepositoryView ? view : null;
+  }
+  navigationState(): { back: boolean; forward: boolean } { return this.navigation.state; }
+  navigationBack(): void { const route = this.navigation.back(); if (route) void this.showNavigation(route); }
+  navigationForward(): void { const route = this.navigation.forward(); if (route) void this.showNavigation(route); }
+  private updateNavigation(): void { this.historyView()?.updateNavigation?.(); this.repositoryView()?.updateNavigation(); }
+  private async showNavigation(route: NavigationRoute): Promise<void> {
+    const request = ++this.navigationRequest;
+    try {
+      if (route.kind === 'file') {
+        const file = this.app.vault.getAbstractFileByPath(route.filePath);
+        if (file instanceof TFile) await this.openHistory(file, false);
+        else if (route.context && route.revision) {
+          await this.openHistory(null, false);
+          if (request === this.navigationRequest) await this.historyView()?.setHistoricalFile(route.filePath, route.context, route.revision);
+        } else throw new Error('The file is no longer available.');
+      } else {
+        let view = this.repositoryView();
+        if (!view) {
+          const leaf = this.app.workspace.getRightLeaf(false); if (!leaf) return;
+          await leaf.setViewState({ type: REPOSITORY_VIEW_TYPE, active: true });
+          view = leaf.view instanceof GitRepositoryView ? leaf.view : null;
+        }
+        if (request !== this.navigationRequest || this.disposed || !view) return;
+        await this.app.workspace.revealLeaf(view.leaf);
+        if (request !== this.navigationRequest || this.disposed) return;
+        await view.setRoute(route);
+      }
+    } catch (error) { if (request === this.navigationRequest) new Notice(`Unable to navigate: ${(error as Error).message}`); }
+    if (request === this.navigationRequest) this.updateNavigation();
+  }
+  async navigateRepository(route: RepositoryRoute): Promise<void> {
+    this.navigation.push(route); await this.showNavigation(route);
+  }
+  private async contextRepository(target?: TAbstractFile | null): Promise<GitContext> {
+    if (target instanceof TFile) return resolveRepository(this.app, target);
+    if (target instanceof TFolder) return resolveRepositoryDirectory(this.app, target.path);
+    const current = this.navigation.current;
+    if (current && current.kind !== 'file') return current.context;
+    const file = this.contextFile();
+    return file ? resolveRepository(this.app, file) : resolveRepositoryDirectory(this.app, '');
+  }
+  async openRepository(target?: TAbstractFile): Promise<void> {
+    try {
+      const context = await this.contextRepository(target);
+      await this.navigateRepository({ kind: 'log', context, path: target instanceof TFolder ? context.rel || undefined : undefined });
+    } catch (error) { new Notice(`Unable to open repository history: ${(error as Error).message}`); }
+  }
+  async openChanges(target?: TAbstractFile): Promise<void> {
+    try {
+      const context = await this.contextRepository(target);
+      await this.navigateRepository({ kind: 'changes', context, paths: target && context.rel ? [context.rel] : undefined });
+    } catch (error) { new Notice(`Unable to open pending changes: ${(error as Error).message}`); }
+  }
+  async openChangeDetails(context: GitContext, sha: string): Promise<void> { await this.navigateRepository({ kind: 'details', context, sha }); }
+  async openRepositoryHistory(context: GitContext): Promise<void> { await this.navigateRepository({ kind: 'log', context }); }
+  private repositoryVaultPath(context: GitContext, relative: string): string {
+    // Reconstruct the logical root as well as the physical Git root, preserving vault junctions.
+    const root = path.resolve(context.abs, ...context.rel.split('/').filter(Boolean).map(() => '..'));
+    const vault = absPathOf(this.app, { path: '' } as TFile);
+    const result = path.relative(vault, path.resolve(root, relative)).replace(/\\/g, '/');
+    if (result === '..' || result.startsWith('../') || path.isAbsolute(result)) throw new Error('This file is outside the vault.');
+    return result;
+  }
+  async openRepositoryFile(context: GitContext, relative: string, revision?: string): Promise<void> {
+    try {
+      const filePath = this.repositoryVaultPath(context, relative);
+      const file = this.app.vault.getAbstractFileByPath(filePath);
+      const archivedContext = { ...context, rel: relative, abs: absPathOf(this.app, { path: filePath } as TFile) };
+      if (!(file instanceof TFile) && !revision) throw new Error('The file is no longer available. Open it from a change.');
+      const route: NavigationRoute = { kind: 'file', filePath, context: archivedContext, revision };
+      this.navigation.push(route); await this.showNavigation(route);
+    } catch (error) { new Notice((error as Error).message); }
+  }
+  async openRepositoryNote(context: GitContext, relative: string): Promise<void> {
+    try {
+      const file = this.app.vault.getAbstractFileByPath(this.repositoryVaultPath(context, relative));
+      if (!(file instanceof TFile)) throw new Error('The file is no longer available in the vault.');
+      await this.app.workspace.getLeaf('tab').openFile(file);
+    } catch (error) { new Notice((error as Error).message); }
+  }
+  loadRepositoryHistory(context: GitContext, folder: string | undefined, offset: number, limit: number, signal?: AbortSignal) {
+    return this.repositoryCache.load(context, folder, offset, limit, signal);
+  }
+  async repositoryChanged(context: GitContext): Promise<void> {
+    this.repositoryCache.invalidate(context.root);
+    const history = this.historyView();
+    if (history?.controller.state.entry?.context.root === context.root) await history.controller.refresh();
+  }
+  private scheduleCacheSave(): void {
+    if (this.disposed || this.cacheSaveTimer) return;
+    this.cacheSaveTimer = setTimeout(() => {
+      this.cacheSaveTimer = null;
+      void persistSettings(this).catch(error => log.warn('Unable to save history cache', error));
+    }, 1000);
+  }
+  async resetHistoryCache(): Promise<void> {
+    this.repositoryCache.clear();
+    await persistSettings(this);
+    await this.repositoryView()?.refresh();
+    await this.historyView()?.controller.refresh();
+  }
+  private async readRepositoryWorking(context: GitContext, relative: string): Promise<string> {
+    const file = this.app.vault.getAbstractFileByPath(this.repositoryVaultPath(context, relative));
+    if (!(file instanceof TFile)) throw new Error('The file is not available in this vault.');
+    if (file.stat.size > 1_048_576) return '[Large file content omitted.]';
+    return this.app.vault.read(file);
+  }
+  async generateDescription(context: GitContext, paths: string[], token: string, signal: AbortSignal): Promise<string> {
+    const settings = { ...this.settings.ai.description };
+    const evidence = await repositoryAiContext(context, { paths, token }, path => this.readRepositoryWorking(context, path), signal);
+    return runAi(settings, evidence, 'description', signal);
+  }
+  private async showExplain(title: string, prepare: (signal: AbortSignal) => Promise<string>): Promise<void> {
+    const request = ++this.explainRequest;
+    try {
+      let view = this.app.workspace.getLeavesOfType(EXPLAIN_VIEW_TYPE)[0]?.view;
+      if (!(view instanceof ExplainView)) {
+        const leaf = this.app.workspace.getRightLeaf(true); if (!leaf) return;
+        await leaf.setViewState({ type: EXPLAIN_VIEW_TYPE, active: true }); view = leaf.view;
+      }
+      if (!(view instanceof ExplainView) || this.disposed || request !== this.explainRequest) return;
+      await this.app.workspace.revealLeaf(view.leaf);
+      const settings = { ...this.settings.ai.explain };
+      await view.explain(title, async signal => runAi(settings, await prepare(signal), 'explain', signal));
+    } catch (error) { new Notice(`Unable to explain: ${(error as Error).message}`); }
+  }
+  async explainFile(file: TFile): Promise<void> {
+    await this.showExplain(file.path, async () => documentContext(file.path,
+      this.liveNoteText(file.path) ?? (file.stat.size > 1_048_576 ? '[Large file content omitted.]' : await this.app.vault.read(file))));
+  }
+  async explainRepository(context: GitContext, options: { sha?: string; paths?: string[]; token?: string }): Promise<void> {
+    await this.showExplain(options.paths?.length === 1 ? options.paths[0] : options.sha ? `Change ${options.sha.slice(0, 8)}` : 'Pending changes',
+      signal => repositoryAiContext(context, options, path => this.readRepositoryWorking(context, path), signal));
+  }
+  async explainHistory(filePath: string, context: GitContext, commits: readonly CommitInfo[]): Promise<void> {
+    const captured = commits.map(commit => ({ ...commit }));
+    await this.showExplain(captured.length === 2 ? `${filePath} · ${captured.map(c => c.shortSha).join(' → ')}` : filePath, async signal => {
+      const read = async (commit: CommitInfo): Promise<string> => commit.kind === 'workcopy'
+        ? this.liveNoteText(filePath) ?? await this.readRepositoryWorking(context, context.rel)
+        : (await readRevision(context, commit, signal)).text;
+      if (captured.length === 1) return documentContext(`${filePath} at ${captured[0].shortSha}`, boundedContext(await read(captured[0])));
+      const [before, after] = await Promise.all(captured.map(read));
+      return comparisonContext(filePath, before, after, captured[0].shortSha, captured[1].shortSha);
+    });
+  }
   historyReviewState(): HistoryReviewState {
     const s = this.session;
     return { openingFile: this.openingFile, error: s?.error || null,
       active: s?.sha && !s.error ? { filePath: s.filePath, left: s.sha.slice(0, 7),
         right: s.endpoints[1].kind === 'commit' ? s.endpoints[1].sha.slice(0, 7) : 'Working tree' } : null };
   }
-  async openHistory(file: TFile | null = this.contextFile()): Promise<void> {
+  async openHistory(file: TFile | null = this.contextFile(), record = true): Promise<void> {
+    const navigationRequest = record ? ++this.navigationRequest : this.navigationRequest;
+    if (record && file) this.navigation.push({ kind: 'file', filePath: file.path });
     const request = ++this.historyOpening;
     let view = this.historyView();
     if (!view) {
@@ -256,13 +437,19 @@ export default class LiveGitDiffPlugin extends Plugin {
       await leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
       view = this.historyView();
     }
-    if (view && !this.disposed && request === this.historyOpening) { void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); }
+    if (view && !this.disposed && request === this.historyOpening && navigationRequest === this.navigationRequest) { void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); this.updateNavigation(); }
   }
   async compareHistory(filePath: string, commits: readonly CommitInfo[]): Promise<void> {
     if (this.openingFile) return;
     if (commits.length !== 2 || commits[0].sha===commits[1].sha) throw new Error('Select two distinct versions to compare.');
     const file = this.app.vault.getAbstractFileByPath(filePath);
-    if (!(file instanceof TFile)) throw new Error('The note is no longer available.');
+    if (!filePath.toLowerCase().endsWith('.md')) throw new Error('Comparison is available for Markdown files.');
+    if (!(file instanceof TFile)) {
+      const history = this.historyView()?.controller.state;
+      if (history?.file?.path !== filePath || !history.file.historicalHead || !history.entry || commits.some(c => c.kind === 'workcopy')) throw new Error('The note is no longer available.');
+      await this.openHistorical({ path: filePath, name: history.file.name } as TFile, commits[0], commits[1], history.entry.context);
+      return;
+    }
     const ctx=await resolveRepository(this.app,file);await snapshotWorkspace(ctx);
     const historical=commits.filter(c=>c.kind!=='workcopy');
     if(historical.length===1) await this.openReview({file,ref:historical[0].sha,label:historical[0].shortSha,commit:historical[0]});
@@ -272,8 +459,16 @@ export default class LiveGitDiffPlugin extends Plugin {
     const s = this.session;
     const [left, right] = s?.endpoints || [];
     const file = s && this.app.vault.getAbstractFileByPath(s.filePath);
-    if (file instanceof TFile && left?.kind === 'commit' && right?.kind === 'commit' && left.commit && right.commit)
-      void this.openHistorical(file, right.commit, left.commit);
+    if (s && left?.kind === 'commit' && right?.kind === 'commit' && left.commit && right.commit) {
+      const historical = this.historicalContext;
+      if (file instanceof TFile || historical) void this.openHistorical(file instanceof TFile ? file : { path: s.filePath, name: s.fileName } as TFile, right.commit, left.commit, historical || undefined);
+    }
+  }
+  private liveNoteText(filePath: string): string | undefined {
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const view = active?.file?.path === filePath ? active : this.app.workspace.getLeavesOfType('markdown')
+      .map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file?.path === filePath && view.getMode() === 'source');
+    return view?.getMode() === 'source' ? view.editor.getValue() : undefined;
   }
   editorAttached(view: EditorView): void {
     this.editors.add(view);
@@ -358,8 +553,9 @@ export default class LiveGitDiffPlugin extends Plugin {
     const previous = this.session;
     if (!previous || !this.revisions.accepts(identity)) return;
     try {
-      const file = this.app.vault.getAbstractFileByPath(identity.filePath);
-      if (!(file instanceof TFile)) throw new Error('The note is no longer available.');
+      const available = this.app.vault.getAbstractFileByPath(identity.filePath);
+      if (!(available instanceof TFile) && !this.isHistoricalPair()) throw new Error('The note is no longer available.');
+      const file = available instanceof TFile ? available : { path: previous.filePath, name: previous.fileName } as TFile;
       const currentText = this.isHistoricalPair() ? previous.currentText : this.currentEditor(identity.filePath)?.state.doc.toString() ?? await this.app.vault.read(file);
       if (!this.revisions.accepts(identity)) return;
       const result = await this.worker.compare({ identity, baseText: previous.baseText, currentText, options: { breaks: previous.breaks } });
@@ -423,12 +619,13 @@ export default class LiveGitDiffPlugin extends Plugin {
     } catch (error) { await this.openingError(error, file, opening); }
     finally { if (opening === this.opening) { this.openingFile = null; this.creating = false; this.checkParticipants(); this.updateActions(); this.historyView()?.updateComparisonState(); } }
   }
-  private async openHistorical(file: TFile, left: CommitInfo, right: CommitInfo): Promise<void> {
+  private async openHistorical(file: TFile, left: CommitInfo, right: CommitInfo, context?: GitContext): Promise<void> {
     this.closeReview(); const opening = ++this.opening; this.creating = true; this.openingFile = file.path;
     this.historyView()?.updateComparisonState();
     const signal = (this.gitJob = new AbortController()).signal;
     try {
-      const ctx = await resolveRepository(this.app, file, signal);
+      const ctx = context || await resolveRepository(this.app, file, signal);
+      this.historicalContext = ctx;
       const [a, b, breaks] = await Promise.all([readRevision(ctx,left,signal), readRevision(ctx,right,signal), this.readBreaks()]);
       if (opening !== this.opening) return;
       this.session = sessionFromRows(file, a.text, ctx, { sha: left.sha, label: left.shortSha, commit: left, readAs: a.renamedFrom }, b.text, [], 0, breaks);
@@ -452,6 +649,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     for (const view of this.snapshotViews()) await view.render();
   }
   closeReview(closingLeaf?: WorkspaceLeaf): void {
+    this.historicalContext = null;
     this.opening++; this.openingFile = null; this.creating = false; this.gitJob?.abort(); this.gitJob = null; this.revisions.close(); this.worker.dispose();
     if (this.timer) clearTimeout(this.timer); this.timer = null;
     this.sync?.detach(); this.clearNoteDecorations();

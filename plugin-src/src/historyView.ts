@@ -1,6 +1,6 @@
 import { ItemView, Menu, Scope, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import { resolveRepository, WORKCOPY } from './repository.ts';
-import type { CommitInfo } from './git.ts';
+import type { CommitInfo, GitContext } from './git.ts';
 import { HistoryCache, HistoryController, historyStatus } from './history.ts';
 import type { HistoryState } from './history.ts';
 
@@ -17,6 +17,14 @@ export interface HistoryViewHost {
   historyReviewState(): HistoryReviewState;
   historyActiveFile(): TFile | null;
   historyViewClosed?(): void;
+  openChangeDetails?(context: GitContext, sha: string): Promise<void>;
+  openRepository?(): Promise<void>;
+  openRepositoryHistory?(context: GitContext): Promise<void>;
+  openHistory?(file: TFile): Promise<void>;
+  explainHistory?(filePath: string, context: GitContext, commits: readonly CommitInfo[]): Promise<void>;
+  navigationBack?(): void;
+  navigationForward?(): void;
+  navigationState?(): { back: boolean; forward: boolean };
 }
 
 /** A native sidebar. Git results are accepted by its controller, never by DOM callbacks. */
@@ -41,9 +49,13 @@ export class GitHistoryView extends ItemView {
   private activeReviewEl: HTMLElement | null = null;
   private renderedFile: string | null = null;
   private rows = new Map<string, HTMLElement>();
+  private historicalContext: GitContext | null = null;
+  private backEl: HTMLButtonElement | null = null;
+  private forwardEl: HTMLButtonElement | null = null;
   constructor(leaf: WorkspaceLeaf, host: HistoryViewHost) {
     super(leaf); this.host = host;
     this.controller = new HistoryController(host.historyCache, (file, signal) => {
+      if (file.historicalHead && this.historicalContext) return Promise.resolve(this.historicalContext);
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof TFile)) return Promise.reject(new Error('The note is no longer available.'));
       return resolveRepository(this.app, current, signal);
@@ -62,13 +74,28 @@ export class GitHistoryView extends ItemView {
     const root = this.contentEl; root.empty(); root.addClass('lgd-history');
     const heading = root.createDiv({ cls: 'lgd-history-heading' });
     this.headingEl = heading;
+    if (this.host.navigationState) {
+      this.backEl = heading.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': 'Back', title: 'Back' } });
+      setIcon(this.backEl, 'arrow-left'); this.backEl.onclick = () => this.host.navigationBack?.();
+      this.forwardEl = heading.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': 'Forward', title: 'Forward' } });
+      setIcon(this.forwardEl, 'arrow-right'); this.forwardEl.onclick = () => this.host.navigationForward?.();
+      this.updateNavigation();
+    }
     this.contextEl = heading.createSpan({ cls: 'lgd-history-context', attr: { role: 'status', 'aria-live': 'polite' } });
     this.fileTitleEl = heading.createDiv({ cls: 'lgd-history-file', text: 'File History' });
     this.refreshEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-refresh', attr: { type: 'button', 'aria-label': 'Refresh history', title: 'Refresh history' } });
     setIcon(this.refreshEl, 'refresh-cw'); this.refreshEl.onclick = () => { void this.controller.refresh(); };
+    if (this.host.openRepository) {
+      const repo = heading.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': 'Repository history', title: 'Repository history' } });
+      setIcon(repo, 'git-branch'); repo.onclick = () => {
+        const context = this.controller.state.entry?.context;
+        if (context && this.host.openRepositoryHistory) void this.host.openRepositoryHistory(context);
+        else void this.host.openRepository?.();
+      };
+    }
     this.followEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-follow', attr: { type: 'button', 'aria-label': 'Show history for active note', title: 'Show history for active note' } });
     setIcon(this.followEl, 'locate-fixed');
-    this.followEl.onclick = () => { const file = this.host.historyActiveFile(); if (file) void this.setFile(file); };
+    this.followEl.onclick = () => { const file = this.host.historyActiveFile(); if (file) void (this.host.openHistory ? this.host.openHistory(file) : this.setFile(file)); };
     this.queryEl = root.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: 'Filter loaded versions', attr: { 'aria-label': 'Filter loaded versions' } });
     this.queryEl.oninput = () => this.renderState(this.controller.state);
     this.hintEl = root.createDiv({ cls: 'lgd-history-hint', attr: { role: 'status', 'aria-live': 'polite' } });
@@ -90,7 +117,18 @@ export class GitHistoryView extends ItemView {
     this.renderState(this.controller.state);
   }
   async onClose(): Promise<void> { this.closed = true; this.resizeObserver?.disconnect(); this.controller.dispose(); this.host.historyViewClosed?.(); }
-  async setFile(file: TFile | null): Promise<void> { await this.controller.setFile(file ? { path: file.path, name: file.name } : null); }
+  async setFile(file: TFile | null): Promise<void> { this.historicalContext = null; await this.controller.setFile(file ? { path: file.path, name: file.name } : null); }
+  async setHistoricalFile(filePath: string, context: GitContext, head: string): Promise<void> {
+    this.historicalContext = context;
+    await this.controller.setFile({ path: filePath, name: filePath.split('/').pop()!, historicalHead: head });
+  }
+  updateNavigation(): void {
+    const state = this.host.navigationState?.();
+    if (this.backEl && this.forwardEl && state) {
+      this.backEl.hidden = this.forwardEl.hidden = !state.back && !state.forward;
+      this.backEl.disabled = !state.back; this.forwardEl.disabled = !state.forward;
+    }
+  }
   clearSelection(filePath?: string): void { this.controller.clearSelection(filePath); }
 
   private async applySelection(): Promise<void> {
@@ -117,15 +155,25 @@ export class GitHistoryView extends ItemView {
     // The file object identifies this visit, including A → B → A while a menu is open.
     const current = (): boolean => !this.closed && this.controller.state.file === file && !this.controller.state.unavailable;
     const menu = new Menu();
-    if (commit.kind!=='workcopy') menu.addItem(item => item.setTitle('Compare with Workcopy').setIcon('git-compare')
+    const markdown = file.path.toLowerCase().endsWith('.md');
+    if (markdown && commit.kind!=='workcopy' && !file.historicalHead) menu.addItem(item => item.setTitle('Compare with Workcopy').setIcon('git-compare')
       .setDisabled(this.applying || !!this.host.historyReviewState().openingFile)
       .onClick(() => { if (current()) this.compareCommits([WORKCOPY, commit.sha]); }));
-    for (const other of selected.filter(item => item.sha !== commit.sha)) {
+    for (const other of selected.filter(item => markdown && item.sha !== commit.sha)) {
       menu.addItem(item => item.setTitle(`Compare with Selected “${other.shortSha} · ${other.subject}”`).setIcon('git-compare')
         .setDisabled(this.applying || !!this.host.historyReviewState().openingFile)
         .onClick(() => { if (current()) this.compareCommits([commit.sha, other.sha]); }));
     }
     menu.addSeparator();
+    const context = this.controller.state.entry?.context;
+    const sha = commit.kind === 'workcopy' ? commit.currentSha : commit.sha;
+    if (context && this.host.explainHistory) {
+      const targets = selected.length === 2 && selected.some(item => item.sha === commit.sha) ? selected : [commit];
+      menu.addItem(item => item.setTitle(targets.length === 2 ? 'Explain selected versions' : 'Explain').setIcon('sparkles')
+        .onClick(() => { if (current()) void this.host.explainHistory?.(file.path, context, targets); }));
+    }
+    if (context && sha && this.host.openChangeDetails) menu.addItem(item => item.setTitle('Change details').setIcon('git-commit-horizontal')
+      .onClick(() => { if (current()) void this.host.openChangeDetails?.(context, sha); }));
     menu.addItem(item => item.setTitle('Clear Selections').setIcon('list-x').setDisabled(!selected.length)
       .onClick(() => { if (current()) this.controller.clearSelection(); }));
     menu.showAtMouseEvent(event);
@@ -245,7 +293,7 @@ export class GitHistoryView extends ItemView {
       row.querySelector<HTMLElement>('.lgd-history-date')!.setText(commit.kind==='workcopy' ? 'Live document' : `${commit.snapshot ? 'Snapshot · ' : ''}${commit.date} · ${commit.relative}`);
       content.disabled = state.unavailable;
       content.setAttr('aria-selected', String(selected)); row.toggleClass('is-selected', selected);
-      row.querySelector<HTMLButtonElement>('.lgd-history-compare')!.hidden = !selected || state.selected.length!==2;
+      row.querySelector<HTMLButtonElement>('.lgd-history-compare')!.hidden = !selected || state.selected.length!==2 || !state.file?.path.toLowerCase().endsWith('.md');
       row.toggleClass('is-snapshot', !!commit.snapshot);
       row.toggleClass('is-workcopy', commit.kind==='workcopy');
       content.setAttr('aria-level', commit.snapshot ? '2' : '1');
@@ -267,7 +315,7 @@ export class GitHistoryView extends ItemView {
       // Avoid moving existing rows: double-clicks and keyboard focus must survive selection renders.
       if (list.children[index + 1] !== row) list.insertBefore(row, list.children[index + 1] || null);
     }
-    if (!commits.length) list.createDiv({ cls: 'lgd-history-empty', text: !state.file ? 'Choose Git History on a Markdown file to view its versions.' :
+    if (!commits.length) list.createDiv({ cls: 'lgd-history-empty', text: !state.file ? 'Choose VCS History on a Markdown file to view its versions.' :
       state.loading && !state.entry ? 'Loading versions…' : query ? 'No loaded versions match.' : state.error && !state.entry ? 'Git history is unavailable.' : 'This file has no committed versions.' });
     if (anchor?.parentElement === list) list.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
     else list.scrollTop = scroll;

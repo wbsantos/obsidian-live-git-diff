@@ -1,9 +1,9 @@
 {
   "id": "live-git-diff",
-  "name": "Live Git Diff",
-  "version": "0.4.0",
+  "name": "Change Review",
+  "version": "0.5.0",
   "minAppVersion": "1.7.2",
-  "description": "Compare and edit notes in native Live Preview against a pinned Git version. Changes only the presentation; never writes note content.",
+  "description": "Review notes, browse Git and Jujutsu history, create selected changes, and summarize with your AI CLI.",
   "author": "Jessica Kosturko",
   "authorUrl": "https://github.com/jkosturko",
   "fundingUrl": "https://buymeacoffee.com/jkosturko",

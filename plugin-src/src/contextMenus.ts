@@ -1,9 +1,12 @@
-import { MarkdownView, Menu, Notice, TFile } from 'obsidian';
+import { MarkdownView, Menu, Notice, TFile, TFolder } from 'obsidian';
 import type { Plugin, TAbstractFile, WorkspaceLeaf } from 'obsidian';
 
 interface FileMenuHost {
   openHistory(file: TFile): Promise<void>;
   openReview(options: { file: TFile; leaf?: WorkspaceLeaf; repin: boolean }): Promise<void>;
+  openRepository(target?: TAbstractFile): Promise<void>;
+  openChanges(target?: TAbstractFile): Promise<void>;
+  explainFile(file: TFile): Promise<void>;
 }
 
 /** Menu targets come from the clicked file/view, never the globally active note. */
@@ -14,18 +17,23 @@ export function registerFileMenus(plugin: Plugin, host: FileMenuHost): void {
   let disposed = false, scheduled = false;
 
   function addActions(menu: Menu, file: TAbstractFile | null, leaf?: WorkspaceLeaf): void {
-    if (!(file instanceof TFile) || file.extension !== 'md' || decorated.has(menu)) return;
+    if (!(file instanceof TFile) && !(file instanceof TFolder) || decorated.has(menu)) return;
     decorated.add(menu);
     const run = async (compare: boolean): Promise<void> => {
       if (disposed) return;
       if (app.vault.getAbstractFileByPath(file.path) !== file) { new Notice('The file is no longer available.'); return; }
       try {
-        if (compare) await host.openReview({ file, leaf, repin: true });
-        else await host.openHistory(file);
+        if (compare && file instanceof TFile) await host.openReview({ file, leaf, repin: true });
+        else if (file instanceof TFolder) await host.openRepository(file);
+        else if (file instanceof TFile) await host.openHistory(file);
       } catch (error) { new Notice(`Unable to ${compare ? 'compare this file' : 'open Git history'}: ${(error as Error).message || error}`); }
     };
-    menu.addItem(item => item.setSection('action').setTitle('Git History').setIcon('history').onClick(() => run(false)));
-    menu.addItem(item => item.setSection('action').setTitle('Git Compare').setIcon('git-compare').onClick(() => run(true)));
+    menu.addItem(item => item.setSection('action').setTitle('VCS History').setIcon('history').onClick(() => run(false)));
+    if (file instanceof TFile && file.extension === 'md') menu.addItem(item => item.setSection('action').setTitle('VCS Compare').setIcon('git-compare').onClick(() => run(true)));
+    menu.addItem(item => item.setSection('action').setTitle('Pending changes').setIcon('git-commit-horizontal')
+      .onClick(() => { if (!disposed) void host.openChanges(file!); }));
+    if (file instanceof TFile && file.extension === 'md') menu.addItem(item => item.setSection('action').setTitle('VCS Explain').setIcon('sparkles')
+      .onClick(() => { if (!disposed) void host.explainFile(file); }));
   }
 
   plugin.registerEvent(app.workspace.on('file-menu', (menu, file, _source, leaf) => addActions(menu, file, leaf)));

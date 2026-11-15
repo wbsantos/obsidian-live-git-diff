@@ -173,7 +173,7 @@ try {
   await send('Emulation.setDeviceMetricsOverride',{width:1100,height:1050,deviceScaleFactor:1,mobile:false});
   await send('Page.bringToFront');
   for (const theme of ['light','dark']) {
-  const html = `<!doctype html><meta charset="utf-8"><style>${baseCss}\n${fs.readFileSync(path.join(root,'styles.css'),'utf8')}</style><body class="${theme}"><h2>Git History — isolated UI verification</h2><div id="shell"><div id="panel"></div></div><pre id="report">Running…</pre><script>${bundle.outputFiles[0].text}</script></body>`;
+  const html = `<!doctype html><meta charset="utf-8"><style>${baseCss}\n${fs.readFileSync(path.join(root,'styles.css'),'utf8')}</style><body class="${theme}"><h2>VCS History — isolated UI verification</h2><div id="shell"><div id="panel"></div></div><pre id="report">Running…</pre><script>${bundle.outputFiles[0].text}</script></body>`;
   const file = path.join(output, theme+'.html');fs.writeFileSync(file, html);
   await send('Page.navigate',{url:pathToFileURL(file).href});
   let complete;

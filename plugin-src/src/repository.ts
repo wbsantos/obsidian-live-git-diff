@@ -7,26 +7,31 @@ import type { GitContext, CommitInfo } from './git.ts';
 export const WORKCOPY = 'workcopy';
 export const SNAPSHOT_DELAY = 15_000;
 export const workcopy = (rel: string): CommitInfo => ({kind:'workcopy', sha:WORKCOPY, shortSha:'Workcopy', subject:'Workcopy', path:rel, date:'', relative:'Live document'});
-function jj(root: string, args: string[], signal?: AbortSignal, snapshot = false): Promise<string> {
-  return new Promise((resolve, reject) => execFile('jj', [...(snapshot ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never', '-R', root, ...args],
+function jj(root: string, args: string[], signal?: AbortSignal, snapshot = false, discover = false): Promise<string> {
+  return new Promise((resolve, reject) => execFile('jj', [...(snapshot ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never', ...(discover ? [] : ['-R', root]), ...args],
     {cwd:root, encoding:'utf8', windowsHide:true, timeout:30_000, maxBuffer:64*1024*1024, signal}, (error, out, err) => error ? reject(new Error(String(err || error.message))) : resolve(out)));
 }
-const queues = new Map<string, Promise<void>>();
+const queues = new Map<string, Promise<unknown>>();
+/** Serialize all plugin mutations, including background snapshots, per repository. */
+export async function withRepositoryMutation<T>(ctx: GitContext, run: () => Promise<T>): Promise<T> {
+  const previous = queues.get(ctx.root) || Promise.resolve();
+  const job = previous.catch(() => {}).then(run);
+  queues.set(ctx.root, job);
+  try { return await job; } finally { if (queues.get(ctx.root) === job) queues.delete(ctx.root); }
+}
 function gitRead(root:string,args:string[],signal?:AbortSignal):Promise<string> {
   return new Promise((resolve,reject)=>execFile('git',['-C',root,...args],{encoding:'utf8',windowsHide:true,timeout:30_000,maxBuffer:64*1024*1024,signal},(error,out,err)=>error?reject(new Error(String(err||error.message))):resolve(out)));
 }
 export async function snapshotWorkspace(ctx: GitContext, signal?: AbortSignal): Promise<void> {
   if (ctx.backend !== 'jj') return;
   const root = ctx.workspaceRoot!;
-  const previous = queues.get(ctx.root) || Promise.resolve();
-  const job = previous.catch(() => {}).then(async () => { if (signal?.aborted) throw new Error('Snapshot cancelled'); await jj(root, ['util','snapshot'], signal, true); });
-  queues.set(ctx.root, job);
-  try { await job; } finally { if (queues.get(ctx.root) === job) queues.delete(ctx.root); }
+  await withRepositoryMutation(ctx, async () => { if (signal?.aborted) throw new Error('Snapshot cancelled'); await jj(root, ['util','snapshot'], signal, true); });
 }
 export async function resolveRepository(app: App, file: TFile, signal?: AbortSignal): Promise<GitContext> {
   const abs = absPathOf(app, file), dir = path.dirname(abs);
   let workspaceRoot: string;
-  try { workspaceRoot = (await jj(dir, ['root'], signal)).trim(); }
+  // -R requires a workspace root; discovery must search upward from the file's folder.
+  try { workspaceRoot = (await jj(dir, ['root'], signal, false, true)).trim(); }
   catch (error) {
     if (signal?.aborted) throw error;
     if (!/no jj repo|not.*jj repo|ENOENT|not found/i.test(String(error))) throw error;

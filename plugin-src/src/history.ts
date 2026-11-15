@@ -1,7 +1,8 @@
 import { repositoryHead, repositoryLog, evolution, workcopy, WORKCOPY } from './repository.ts';
 import type { CommitInfo, GitContext } from './git.ts';
+import { fileLogAsync } from './git.ts';
 
-export interface HistoryFile { path: string; name: string }
+export interface HistoryFile { path: string; name: string; historicalHead?: string }
 export interface HistoryEntry {
   key: string;
   context: GitContext;
@@ -41,11 +42,12 @@ export class HistoryCache {
   nextRequest(): number { return ++this.counter; }
   forFile(filePath: string): HistoryEntry | undefined { return this.entries.get(this.aliases.get(filePath)?.key || ''); }
   forContext(context: GitContext): HistoryEntry | undefined { return this.entries.get(historyKey(context)); }
-  async read(filePath: string, context: GitContext, generation: number, limit: number, pinnedHead?: string): Promise<HistoryEntry> {
-    const key = historyKey(context), alias = this.aliases.get(filePath);
+  async read(filePath: string, context: GitContext, generation: number, limit: number, pinnedHead?: string, historical = false): Promise<HistoryEntry> {
+    const key = historyKey(context) + (historical ? `@${pinnedHead}` : ''), alias = this.aliases.get(filePath);
     if (!alias || generation >= alias.generation) this.aliases.set(filePath, { key, generation });
     const head = pinnedHead || await this.loader.head(context, this.signal);
-    const found = await this.loader.log(context, head, limit + 1, this.signal);
+    const found = historical ? await fileLogAsync(context.root, context.rel, limit + 1, { head, signal: this.signal })
+      : await this.loader.log(context, head, limit + 1, this.signal);
     const unique = found.filter((commit, index) => found.findIndex(other => other.sha === commit.sha) === index);
     const entry: HistoryEntry = { key, context, head, commits: unique.slice(0, limit), limit,
       hasMore: unique.length > limit, lastSyncedAt: this.now(), generation };
@@ -87,10 +89,10 @@ export class HistoryController {
     this.cache = cache; this.resolve = resolve; this.pageSize = pageSize; this.changed = changed;
   }
   async setFile(file: HistoryFile | null): Promise<void> {
-    if (this.closed || (!this.state.unavailable && (file?.path || null) === (this.state.file?.path || null))) return;
+    if (this.closed || (!this.state.unavailable && (file?.path || null) === (this.state.file?.path || null) && file?.historicalHead === this.state.file?.historicalHead)) return;
     this.epoch++;
-    this.state = { file, entry: file ? this.cache.forFile(file.path) : undefined,
-      loading: false, error: null, selected: file ? [workcopy(file.path)] : [], hint: null, unavailable: false, expanded: {} };
+    this.state = { file, entry: file && !file.historicalHead ? this.cache.forFile(file.path) : undefined,
+      loading: false, error: null, selected: file && !file.historicalHead ? [workcopy(file.path)] : [], hint: null, unavailable: false, expanded: {} };
     this.emit();
     if (file) await this.refresh();
   }
@@ -106,7 +108,8 @@ export class HistoryController {
     try {
       const context = more && previous ? previous.context : await this.resolve(file, this.cache.signal);
       // Continue even when the panel moved to another note: that original note still gets its cache.
-      const entry = await this.cache.read(file.path, context, request, limit, more ? previous?.head : undefined);
+      const entry = await this.cache.read(file.historicalHead ? `${file.path}@${file.historicalHead}` : file.path, context, request, limit,
+        file.historicalHead || (more ? previous?.head : undefined), !!file.historicalHead);
       if (!current()) return;
       const oldWorkcopy = this.state.entry?.commits.find(c=>c.kind==='workcopy');
       const newWorkcopy = entry.commits.find(c=>c.kind==='workcopy');
@@ -201,7 +204,7 @@ export class HistoryController {
     if (this.closed || !this.state.file) return;
     this.epoch++;
     this.state = { ...this.state, unavailable: true, loading: false, selected: [], hint: null,
-      error: 'The file is no longer available. Choose another file with Git History.' };
+      error: 'The file is no longer available. Choose another file with VCS History.' };
     this.emit();
   }
   clearSelection(filePath?: string): void {
@@ -220,5 +223,5 @@ export function historyStatus(state: HistoryState): string {
   if (state.unavailable) return ['File is no longer available', synced].filter(Boolean).join(' · ');
   if (state.loading) return ['Loading file history…', synced].filter(Boolean).join(' · ');
   if (state.error) return ['Unable to refresh file history', synced].filter(Boolean).join(' · ');
-  return synced || (state.file ? 'No file history loaded' : 'Choose a file with Git History');
+  return synced || (state.file ? 'No file history loaded' : 'Choose a file with VCS History');
 }

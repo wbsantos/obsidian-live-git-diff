@@ -36,6 +36,7 @@ interface HistoryView extends View {
   setFile(file: TFile | null): Promise<void>;
   updateActiveFile(): void;
   updateComparisonState(): void;
+  updateNavigation(): void;
 }
 interface TestPlugin {
   session: { filePath: string } | null;
@@ -125,6 +126,7 @@ function setup() {
   history.setFile = async file => { history.controller.state.file = file; };
   history.updateActiveFile = () => { updates.push(plugin.historyActiveFile()); };
   history.updateComparisonState = history.updateActiveFile;
+  history.updateNavigation = () => {};
   function snapshot(side: 'a' | 'b') {
     const view = Object.create(GitBaseView.prototype) as SnapshotView; view.side = side;
     const result = leaf(view); plugin.participants.set(result, { type: VIEW_TYPE, side });

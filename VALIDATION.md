@@ -1,4 +1,20 @@
-# Validation: 0.4.0
+# Validation: 0.5.0 — Change Review
+
+Validated on 2026-11-15, Windows, Node 24.13.0, Git 2.47.1.windows.2 and Jujutsu 0.47.1. Repository mutations used fresh temporary repositories and a separate Obsidian profile. The development repository and the user's vault were not used for test commits.
+
+- Full `npm run ci`: **218 tests passed**, no failures or skips; TypeScript, worker audit, bundle checks and note-write invariant passed. Final presentation/archived-comparison changes also passed the 47 affected unit/integration checks and a rebuilt 0.5.0 artifact.
+- Isolated Chromium UI checks: **28 repository assertions per theme**, including pagination after an external update, draft preservation, selected folder operations, stale results, duplicate submit protection, AI generation without committing, cancellation and Explain context. Existing file history: **15 assertions per theme** unchanged.
+- Native Obsidian: repository/folder history, change details, file navigation, Back/Forward, deleted-file history and two-version comparison (including Swap sides), selective JJ finalization and Git commit, description generation, Explain panel, and separate editable AI settings were exercised. Repository/file panels use sidebar tabs; Explain uses a separate lower pane.
+- Copilot CLI **1.0.108** completed synthetic CLI and native Obsidian description/Explain requests. Codex CLI **0.167.2** completed a synthetic request using the configured restricted invocation. Claude Code **2.1.81** accepted its flags but returned HTTP 401, invalid OAuth token; successful Claude generation could not be verified with this account. The plugin displays the provider's authentication error.
+- CLI transport tests cover Windows npm/native resolution, Unicode and shell-like source text on stdin, owned-process cancellation, event-output parsing and short-response limits. Git and JJ evidence tests ensure unselected files are excluded and stale status is rejected.
+
+Reproduce with `npm run ci`, then `node tools/verify-repository-ui.mjs <Chromium executable>` and `node tools/verify-history-ui.mjs <Chromium executable>`. `tools/prepare-repository-qa.mjs` creates a fresh scratch vault and profile; start Obsidian with its `--user-data-dir` and port 9238, then run `tools/verify-repository-app.mjs`. Native AI checks require an installed, authenticated Copilot CLI and may consume provider usage. Short scratch paths avoid Windows path limits in JJ's operation store.
+
+The cache persists metadata, never note bodies or AI output. It is invalidated after local changes and checked against current refs/JJ operation before reuse. The current first page is fetched again after a repository update; this is a bounded page cache, not an incremental database. Git uses `--skip`; JJ requests bounded prefixes. Filters cover loaded results only. Markdown comparisons retain their prior rendering and editor behavior; binary diffs, conflict resolution, staging hunks, remotes and history rewriting remain outside scope. Git commit hooks retain their normal behavior.
+
+Current screenshots, captured from the real application in an isolated vault: [repository history](docs/screenshots/repository/repository-history.png), [folder history](docs/screenshots/repository/folder-history.png), [change details](docs/screenshots/repository/change-details.png), [pending changes](docs/screenshots/repository/pending-changes.png), [generated description](docs/screenshots/repository/generated-description.png), [Explain in light mode](docs/screenshots/repository/explain-light.png), [Explain in dark mode](docs/screenshots/repository/explain-dark.png), and [AI settings](docs/screenshots/repository/ai-settings.png). After preparing the QA vault and opening Obsidian, `node tools/capture-repository-screenshots.mjs` regenerates this gallery; it uses two live AI requests and never creates a change. Pass `--history-only` to capture the three history/detail screens without AI requests.
+
+## Previous validation: 0.4.0
 
 Validated on 2026-11-07 with Node 24.13.0 and Obsidian 1.15.0 on Windows. Application checks used a separate vault/profile with the existing appearance settings, CSS snippets and community plugins. Original documents and their Git repository were not modified.
 

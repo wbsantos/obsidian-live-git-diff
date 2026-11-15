@@ -5,6 +5,16 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-15
+
+- Rename the displayed plugin to Change Review, preserving its installation ID and settings; use VCS prefixes in Obsidian menus.
+- Add repository/folder history, hierarchical change details, selected-file change creation, and shared navigation into existing file history.
+- Support selective Git commits without sweeping unrelated staging and Jujutsu finalization with remaining work carried forward; expose JJ snapshots separately.
+- Cache bounded repository-history pages persistently, with immutable anchors and a settings reset action.
+- Generate editable change descriptions through Copilot, Codex or Claude Code; add brief, non-interactive Explain readings through context menus.
+- Configure agents, CLI paths, models and resettable prompts independently for descriptions and Explain.
+- Preserve deleted-file history and historical comparisons; fix JJ discovery from nested folders.
+
 ## [0.1.1] - 2026-07-20
 
 ### Fixed
