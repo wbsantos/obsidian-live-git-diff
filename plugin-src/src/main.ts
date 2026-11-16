@@ -6,6 +6,9 @@ import { RepositoryCache } from './repositoryCache.ts';
 import { GitRepositoryView, REPOSITORY_VIEW_TYPE } from './repositoryView.ts';
 import type { RepositoryRoute } from './repositoryView.ts';
 import { resolveRepositoryDirectory } from './repositoryManager.ts';
+import { getRepositoryRemotes, pushRepository, pullRepository } from './repositoryRemote.ts';
+import type { RemoteTarget, RepositoryRemotes } from './repositoryRemote.ts';
+import { RemoteTargetModal } from './remoteModal.ts';
 import { NavigationTrail } from './navigation.ts';
 import { ExplainView, EXPLAIN_VIEW_TYPE } from './explainView.ts';
 import { runAi, boundedContext } from './ai.ts';
@@ -35,7 +38,7 @@ import { resolveRepository, resolveRevision, revisionInfo, snapshotWorkspace, re
 
 type NavigationRoute = RepositoryRoute | { kind: 'file'; filePath: string; context?: GitContext; revision?: string };
 
-/** All edits belong to Obsidian. Git reads and presentation have independent lifetimes. */
+/** Note editing belongs to Obsidian; explicit VCS actions have independent lifetimes. */
 export default class LiveGitDiffPlugin extends Plugin {
   settings: LiveGitDiffSettings = DEFAULT_SETTINGS;
   session: Session | null = null;
@@ -46,6 +49,8 @@ export default class LiveGitDiffPlugin extends Plugin {
   private cacheSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private navigationRequest = 0;
   private explainRequest = 0;
+  private remoteJobs = new Map<string, AbortController>();
+  private remoteModals = new Set<RemoteTargetModal>();
   private historicalContext: GitContext | null = null;
   zones!: ViewZones;
   sync!: ScrollSync;
@@ -97,6 +102,9 @@ export default class LiveGitDiffPlugin extends Plugin {
     command('refresh-annotations', 'Refresh annotations in the note pane', () => this.rerenderPreviews(), true);
     this.addCommand({ id: 'repository-history', name: 'Open repository history', callback: () => { void this.openRepository(); } });
     this.addCommand({ id: 'repository-changes', name: 'Open pending changes', callback: () => { void this.openChanges(); } });
+    for (const action of ['push', 'pull'] as const) this.addCommand({ id: `repository-${action}`,
+      name: action === 'push' ? 'Push to remote' : 'Pull from remote', callback: () => { void this.syncCurrentRepository(action); } });
+    this.addCommand({ id: 'repository-remote', name: 'Configure repository remote', callback: () => { void this.configureRemote(); } });
     this.addRibbonIcon?.('git-branch', 'Repository history', () => { void this.openRepository(); });
     this.registerMarkdownPostProcessor((element, context) => {
       if (element.closest('.lgd-view') || context.sourcePath !== this.session?.filePath) return;
@@ -139,6 +147,8 @@ export default class LiveGitDiffPlugin extends Plugin {
     });
   }
   onunload(): void {
+    for (const job of this.remoteJobs.values()) job.abort();
+    for (const modal of this.remoteModals) modal.close();
     if (this.cacheSaveTimer) { clearTimeout(this.cacheSaveTimer); this.cacheSaveTimer = null; void persistSettings(this).catch(error => log.warn('Unable to save history cache', error)); }
     for(const timer of this.snapshotTimers.values()) clearTimeout(timer);this.snapshotTimers.clear();
     this.disposed = true; this.closeReview(); this.historyCache.dispose();
@@ -363,6 +373,72 @@ export default class LiveGitDiffPlugin extends Plugin {
     this.repositoryCache.invalidate(context.root);
     const history = this.historyView();
     if (history?.controller.state.entry?.context.root === context.root) await history.controller.refresh();
+  }
+  private remoteKey(context: GitContext, options: RepositoryRemotes): string {
+    return JSON.stringify([context.backend || 'git', context.workspaceRoot || context.root,
+      context.backend === 'jj' ? '' : options.currentBranch || '']);
+  }
+  private chooseRemote(context: GitContext, options: RepositoryRemotes, action?: 'push' | 'pull'): Promise<RemoteTarget | null> {
+    if (!options.remotes.length) throw new Error('No remote configured. Add a remote in your VCS, then try again.');
+    const key = this.remoteKey(context, options);
+    const initial = this.settings.remoteTargets[key] || options.suggested;
+    return new Promise(resolve => {
+      const modal = new RemoteTargetModal(this.app, { ...options, initial,
+        title: action ? action === 'push' ? 'Push' : 'Pull' : 'Remote',
+        submitLabel: action ? action === 'push' ? 'Push' : 'Pull' : 'Save',
+        onSubmit: async target => {
+          this.settings.remoteTargets[key] = { ...target };
+          await persistSettings(this);
+          this.remoteModals.delete(modal);
+          resolve(target);
+        }, onCancel: () => { this.remoteModals.delete(modal); resolve(null); },
+      });
+      this.remoteModals.add(modal); modal.open();
+    });
+  }
+  private async remoteContext(): Promise<GitContext> {
+    const view = this.app.workspace.activeLeaf?.view;
+    if (view instanceof GitRepositoryView && view.currentRoute) return view.currentRoute.context;
+    if (view instanceof GitHistoryView && view.controller.state.entry) return view.controller.state.entry.context;
+    const file = this.app.workspace.getActiveFile();
+    return this.contextRepository(file || undefined);
+  }
+  async configureRemote(context?: GitContext): Promise<void> {
+    try {
+      const ctx = context || await this.remoteContext();
+      if (this.remoteJobs.has(ctx.root)) throw new Error('A remote operation is already running.');
+      const options = await getRepositoryRemotes(ctx);
+      if (!this.disposed) await this.chooseRemote(ctx, options);
+    } catch (error) { new Notice((error as Error).message); }
+  }
+  private async syncCurrentRepository(action: 'push' | 'pull'): Promise<void> {
+    try { await this.syncRepository(await this.remoteContext(), action); }
+    catch (error) { if (!this.disposed) new Notice((error as Error).message, 10_000); }
+  }
+  async syncRepository(context: GitContext, action: 'push' | 'pull'): Promise<void> {
+    if (this.remoteJobs.has(context.root)) throw new Error('A remote operation is already running.');
+    const job = new AbortController(); this.remoteJobs.set(context.root, job);
+    let progress: Notice | undefined, started = false;
+    try {
+      const options = await getRepositoryRemotes(context, job.signal);
+      if (job.signal.aborted || this.disposed) return;
+      const saved = this.settings.remoteTargets[this.remoteKey(context, options)];
+      const inferred = saved && options.remotes.includes(saved.remote) ? saved : options.suggested;
+      const target = inferred || await this.chooseRemote(context, options, action);
+      if (!target || job.signal.aborted || this.disposed) return;
+      progress = new Notice(`${action === 'push' ? 'Pushing to' : 'Pulling from'} ${target.remote}/${target.branch}…`, 0);
+      started = true;
+      const result = await (action === 'push' ? pushRepository : pullRepository)(context, target, job.signal);
+      if (!this.disposed) new Notice(result.message);
+    } finally {
+      progress?.hide(); this.remoteJobs.delete(context.root);
+      // Fetch can update refs even when integration is refused; refresh caches in both cases.
+      if (started && !this.disposed) {
+        await this.repositoryChanged(context).catch(error => log.warn('Unable to refresh after remote operation', error));
+        if (this.repositoryView()?.currentRoute?.context.root === context.root)
+          await this.repositoryView()?.refresh();
+      }
+    }
   }
   private scheduleCacheSave(): void {
     if (this.disposed || this.cacheSaveTimer) return;

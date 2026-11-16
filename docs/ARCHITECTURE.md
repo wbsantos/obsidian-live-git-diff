@@ -6,7 +6,9 @@ The earlier design below describes the comparison engine. Repository management 
 
 `ai.ts` defines two independent AI configurations and bounded, cancellable CLI transport. Windows npm shims are resolved to their Node entry points; arguments and stdin are then passed directly without shell interpolation. `aiContext.ts` gathers only selected evidence and labels omissions. `explainView.ts` is a non-interactive reading panel. AI descriptions are drafts, not repository mutations. CLI calls run outside the repository with restricted tools, but authenticate and may retain logs according to the user's CLI/provider settings.
 
-The note-write gate is retained: production code imports no filesystem module and does not mutate vault/editor content. Repository creation/snapshot commands deliberately write VCS metadata. Git commits run normal Git hooks. Plugin settings and metadata cache share the single serialized `saveData` call in `settings.ts`. This supersedes older statements that *all* repository commands are read-only or that configuration is the only persisted data.
+The direct note-write gate is retained: production code imports no filesystem module and does not mutate content through vault/editor APIs. Repository creation/snapshot commands deliberately write VCS metadata. Git commits run normal Git hooks. Plugin settings and metadata cache share the single serialized `saveData` call in `settings.ts`. This supersedes older statements that *all* repository commands are read-only or that configuration is the only persisted data.
+
+Remote synchronization adds `repositoryRemote.ts` behind the same mutation queue. Push publishes the selected branch, and Pull updates working files through Git or Jujutsu. Local Git/Jujutsu credentials remain owned by those CLIs. The direct note-write gate does not prove subprocesses are read-only; remote tests use disposable local repositories to verify preservation of pending changes, fast-forward restrictions and refusal to force-push. Remote targets are saved per repository in plugin settings, and `remoteModal.ts` provides explicit target selection when inference is ambiguous.
 
 > Why this plugin is built the way it is. Written for whoever touches it next — including future me.
 >
@@ -266,25 +268,25 @@ Be precise about *why* the amber was wrong, because the obvious explanation is n
 | --- | --- | --- |
 | `diff/mddiff.ts` | Block splitter, LCS pairer, similarity gate | ✅ pure, no DOM |
 | `charmarks.ts` | Word-range math (pure) + the stateful mark layer (DOM) | ✅ the pure half |
-| `git.ts` | The entire outside world: `show` / `rev-parse` / `log`. Read-only | ✅ against real temp repos |
+| `git.ts` | Git reads for the comparison engine: `show` / `rev-parse` / `log` | ✅ against real temp repos |
 | `refPicker.ts` | The version picker (`SuggestModal`) | — |
 | `session.ts` | The in-memory session; per-pane anchor index | ✅ pure |
 | `baseView.ts` | The read-only base pane `ItemView` | — |
 | `viewzones.ts` | Insertion spacers + deletion padding, and their convergence | — |
 | `sync.ts` | Anchor resolution, the two sync directions, the scroll lock | — |
-| `settings.ts` | Settings tab; **the only persistence call site in the codebase** | — |
+| `settings.ts` | Settings tab; **the only plugin-data persistence call site** | — |
 | `dom.ts` / `panes.ts` / `log.ts` | Geometry helpers; shared pane contracts; the debug-gated logger | — |
 
 `panes.ts` holds the structural interfaces (`PaneHost`, `BasePaneLike`) purely so the zone/sync/view modules can be separate files without importing the plugin class in a cycle.
 
-## Why the read-only gate is shaped the way it is
+## Why the direct note-write gate is shaped the way it is
 
 Two defects, both real, both from the spike:
 
 1. **NUL bytes made `grep` treat the bundle as binary**, so every invariant check "passed" *without reading a line*. A read-only grep that cannot read the file is theatre. The gate now reads the bytes itself and asserts UTF-8 + zero NULs **before** applying any pattern.
 2. **A check you pass by phrasing is not a check.** An earlier draft grepped for the filesystem *handle*; the code dodged it by destructuring the handle into a local. Green, unchanged. So the patterns match **write methods** — the thing that actually mutates — never a handle. Holding a reference to the vault isn't dangerous; calling `modify` on it is.
 
-Layered on top: the gate asserts the bundle **imports no filesystem module at all**. That's a *capability* check, and unlike a name grep it can't be dodged by rephrasing — you cannot write a file with a module you never imported.
+Layered on top: the gate asserts the bundle **imports no filesystem module at all**. This blocks direct filesystem access even when a method name is computed dynamically. Subprocesses remain an explicit capability: the gate does not inspect their runtime effects, so the VCS mutation boundary requires its own integration tests.
 
 And the patterns match `name(` — the **call**, not the mention — so a comment explaining the invariant doesn't fail the build for describing it. That's not a loophole; it's the difference between a gate that gets documented and one that gets silently deleted. (The gate's very first run failed on its own authors' comments. `test/invariant.test.ts` now pins the convention.)
 
@@ -309,4 +311,4 @@ One subtlety worth preserving: the report resolves the counterpart with **the sa
 - **Live Preview decorations.** Post-processors don't run there; it would need a parallel CodeMirror decoration implementation. VS Code has the same limitation.
 - **Line-grain diffing.** Would fix "list→paragraph reads as delete+add", but block pairing is what keeps the panes aligned and annotation anchors intact. Not obviously worth it.
 - **Collapsing deletions.** VS Code doesn't, and neither should we — reserving space on the short side is what keeps both sides readable at full size.
-- **Diffing non-markdown files**, merge/apply, and anything that writes. The last one is not a feature gap; it's the design.
+- **Rendered diffing of non-Markdown files** and applying individual diff hunks. Repository operations described above can update VCS state and working files; the comparison engine itself only decorates rendered content.

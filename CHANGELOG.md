@@ -5,6 +5,13 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-15
+
+- Add Push and Pull to repository headers, context menus and commands for both Git and Jujutsu.
+- Remember remote/branch choices, infer existing upstreams and expose remote configuration from settings.
+- Publish finalized changes without force pushes; pull only compatible fast-forward history while protecting pending work.
+- Refresh repository and file histories after remote operations, including fetched refs when integration cannot proceed.
+
 ## [0.5.0] - 2026-11-15
 
 - Rename the displayed plugin to Change Review, preserving its installation ID and settings; use VCS prefixes in Obsidian menus.

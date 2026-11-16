@@ -1,4 +1,18 @@
-# Validation: 0.5.0 — Change Review
+# Validation: 0.6.0 — Remote push and pull
+
+Validated on 2026-11-15 with Node 24.13.0, Git 2.47.1.windows.2, Jujutsu 0.47.1 and desktop Obsidian on Windows. All remote mutations used disposable local bare repositories; no hosted remote was contacted and no user repository was pushed or pulled.
+
+- Automated validation: the full suite ran **241 tests**, with 240 passing and one CSS identifier contract failure. The datalist ID was corrected and the release rebuilt; all **10 bundle checks** then passed. TypeScript, worker audit and both capability gates passed for the final build.
+- All **22 remote integration tests** passed, covering Git, colocated JJ and separate JJ storage: discovery, finalized-only push, fast-forward pull, preservation of disjoint pending work, divergence, and ignored-file protection. Additional cases cover targeted push despite mirror/follow-tags settings, invalid targets, detached Git HEAD, tracked-remote inference, pending renames, leading-space filenames, and retry after an overlap is resolved.
+- Repository UI verification passes **35 assertions per theme**, including busy controls, duplicate submission protection, retained drafts and inline errors. Both light and dark themes were checked.
+- Native Obsidian verification passed remote/branch selection and persistence, push of the finalized JJ parent, pull of a contributor's update, unchanged pending note content and working change ID, and refreshed history. The native tool creates only a local scratch remote.
+- Inspected real-app screenshots: [remote settings](docs/screenshots/repository/remote-settings.png) and [repository remote actions](docs/screenshots/repository/remote-actions.png). Both are included in the README.
+
+Reproduce with `npm run ci`, `node tools/verify-repository-ui.mjs <Chromium executable>` and, after installing the build in the isolated QA vault, `node tools/verify-remote-app.mjs`. The native tool verifies the vault path before mutation and also regenerates these two screenshots. HTTPS/SSH authentication against a hosted remote was not exercised; the plugin uses existing CLI credentials and reports errors without storing credentials.
+
+Pull explicitly delegates working-file updates to the VCS. The direct note-write gate still rejects filesystem imports and note/editor mutation APIs; it does not claim subprocesses cannot update files. Git pull disables automatic stashing and ignored-file overwrite. JJ pull snapshots saved work and checks for overlapping pending or untracked paths before moving the working change. Push uses an explicit non-forced Git refspec for both backends, without mirror, tags or recursive submodule publication. Pending work and JJ evolution/operation history remain local.
+
+## Previous validation: 0.5.0 — Change Review
 
 Validated on 2026-11-15, Windows, Node 24.13.0, Git 2.47.1.windows.2 and Jujutsu 0.47.1. Repository mutations used fresh temporary repositories and a separate Obsidian profile. The development repository and the user's vault were not used for test commits.
 

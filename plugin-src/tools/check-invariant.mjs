@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * check-invariant.mjs — prove the built bundle cannot write to a note.
+ * check-invariant.mjs — enforce the boundary against direct note writes.
  *
- * This is the plugin's core safety claim, so it is enforced mechanically rather than
- * promised in a README. It runs on `npm run build`, on `npm test`, and in CI.
+ * Direct vault/editor/filesystem writes are checked mechanically. Explicit VCS
+ * commands are a separate, reviewed mutation boundary: Pull updates working files.
+ * This gate runs on `npm run build`, on `npm test`, and in CI.
  *
  * ---------------------------------------------------------------------------
  * THE TWO DEFECTS THIS EXISTS BECAUSE OF — both real, both from the spike:
@@ -23,10 +24,11 @@
  *     Holding a reference to the vault is not dangerous. Calling `modify` on it is.
  * ---------------------------------------------------------------------------
  *
- * WHAT "READ-ONLY" MEANS HERE, PRECISELY: the plugin never writes to a NOTE, or to
- * anything else in the vault except its own config file. It is not a claim that the
- * process performs no I/O — it spawns `git` (to READ), and it persists its own settings
- * through Obsidian's plugin API. Both are declared and both are checked below.
+ * SCOPE: production code does not directly write note content through vault, editor,
+ * adapter or filesystem APIs. The single plugin-data call persists settings/cache.
+ * The plugin also spawns Git, Jujutsu and optional AI CLIs. This static gate does not
+ * prove subprocesses are read-only: selected changes, snapshots and remote operations
+ * deliberately mutate VCS state, and Pull can update files through the VCS.
  *
  * Exit 0 = clean. Exit 1 = a violation, with the offending line printed.
  */
@@ -65,7 +67,7 @@ const bad = (msg, detail) => {
   if (detail) console.log(detail.split('\n').map((l) => '        ' + l).join('\n'));
 };
 
-console.log('read-only invariant gate');
+console.log('direct note-write invariant gate');
 console.log('========================');
 console.log(`bundle: ${path.relative(process.cwd(), BUNDLE)}`);
 
@@ -196,10 +198,9 @@ if (violations.length) {
  * 3. NO FILESYSTEM MODULE may be imported — a capability check        *
  * ------------------------------------------------------------------ */
 /**
- * Stronger than the name-based grep above, and immune to rephrasing: you cannot write a
- * file with a module you never imported. `child_process` IS imported (that is how `git`
- * is read) and is allowed — but a subprocess that only ever runs `git show`/`rev-parse`
- * cannot write to a note either, and git.ts is the only module that builds those argv.
+ * This blocks direct filesystem access even if a write method is called by a dynamic
+ * name. `child_process` remains allowed for declared CLI operations. The gate does
+ * not inspect their runtime behavior; repository mutation tests cover that boundary.
  */
 const FS_IMPORTS = [
   "require(\"fs\")", "require('fs')",
@@ -213,7 +214,7 @@ const fsHits = FS_IMPORTS.filter((p) => text.includes(p));
 if (fsHits.length) {
   bad('bundle imports no filesystem module', `found: ${fsHits.join(', ')}`);
 } else {
-  ok('bundle imports no filesystem module (cannot write a file at all)');
+  ok('bundle imports no filesystem module (no direct filesystem access)');
 }
 
 /* ------------------------------------------------------------------ *
@@ -296,10 +297,10 @@ if (htmlHits.length) {
 console.log('');
 if (failures) {
   console.log(`RESULT: FAIL — ${failures} of ${checks} checks failed.`);
-  console.log('The read-only invariant is this plugin\'s core safety claim. Do not weaken');
-  console.log('this gate to make a change pass; change the code, or bring the exception to');
-  console.log('a human with an argument for why it is not a note write.');
+  console.log('Direct note writes are outside this plugin\'s mutation boundary.');
+  console.log('Keep the checks intact and implement repository mutations through');
+  console.log('the declared, serialized VCS operations.');
   process.exit(1);
 }
-console.log(`RESULT: PASS — ${checks}/${checks} checks. The bundle cannot write to a note.`);
+console.log(`RESULT: PASS — ${checks}/${checks} checks. No direct note-write APIs found; explicit VCS operations may update files.`);
 process.exit(0);

@@ -1,5 +1,5 @@
 /**
- * invariant.test.ts — does the read-only gate actually catch anything?
+ * invariant.test.ts — does the direct note-write gate actually catch anything?
  *
  * A GATE NOBODY HAS SEEN FAIL IS NOT KNOWN TO WORK. This is not a rhetorical point in
  * this repo: the spike's read-only check passed for its entire life WITHOUT EVER READING
@@ -58,7 +58,7 @@ test('gate: the real bundle passes', { skip: !built && 'run `npm run build` firs
   const r = runGate(BUNDLE);
   assert.equal(r.code, 0, `the gate should pass on the shipped bundle:\n${r.out}`);
   assert.match(r.out, /RESULT: PASS/);
-  assert.match(r.out, /cannot write to a note/);
+  assert.match(r.out, /No direct note-write APIs found/);
 });
 
 test('gate: a missing bundle is a failure, not a pass', () => {

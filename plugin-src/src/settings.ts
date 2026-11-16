@@ -8,9 +8,9 @@
  * uninstalled. It is NOT a note, and `persistSettings` below is the single call site in
  * the entire codebase — tools/check-invariant.mjs PINS that fact (exact file, exact
  * count) and fails the build if another one appears anywhere else. The read-only
- * invariant this plugin sells is "it cannot write to your NOTES"; keeping config
- * persistence to one declared, asserted line is how that claim stays checkable rather
- * than a promise. See README "Read-only invariant" for the full argument.
+ * invariant covers direct writes: the plugin cannot edit notes through filesystem or
+ * vault APIs. Explicit VCS operations such as Pull can update working files through
+ * Git or Jujutsu. Configuration persistence stays at one declared, asserted call.
  *
  * NOTE ON PHRASING: the gate matches CALLS (name + open paren), so prose here names the
  * method without parentheses on purpose. Do not "fix" that — see check-invariant.mjs.
@@ -19,6 +19,7 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import type { Plugin } from 'obsidian';
 import { DEFAULT_AI, AI_MODELS, AI_PROMPTS, mergeAi } from './ai.ts';
 import type { AiSettings, AiPurpose, AiProvider } from './ai.ts';
+import type { RemoteTarget } from './repositoryRemote.ts';
 
 /**
  * The five diff colors.
@@ -71,6 +72,7 @@ export interface LiveGitDiffSettings {
   /** Verbose console logging. Warnings and errors are always on regardless. */
   debug: boolean;
   ai: AiSettings;
+  remoteTargets: Record<string, RemoteTarget>;
 }
 
 export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
   logLimit: 50,
   debug: false,
   ai: mergeAi(DEFAULT_AI),
+  remoteTargets: {},
 };
 
 /** CSS custom property backing each color. Must match styles.css. */
@@ -164,6 +167,7 @@ export interface SettingsHost extends Plugin {
   saveSettings(): Promise<void>;
   repositoryCache?: { serialize(): unknown };
   resetHistoryCache?(): Promise<void>;
+  configureRemote?(): Promise<void>;
 }
 
 /**
@@ -192,6 +196,9 @@ export function mergeSettings(loaded: unknown): LiveGitDiffSettings {
     // partial one from an older data.json and leave the new keys undefined.
     colors: { ...DEFAULT_SETTINGS.colors, ...(l.colors || {}) },
     ai: mergeAi(l.ai),
+    remoteTargets: Object.fromEntries(Object.entries(l.remoteTargets && typeof l.remoteTargets === 'object' ? l.remoteTargets : {})
+      .filter(([, target]) => target && typeof target.remote === 'string' && typeof target.branch === 'string')
+      .map(([key, target]) => [key, { remote: target.remote, branch: target.branch }])),
   };
 }
 
@@ -206,6 +213,9 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+
+    if (this.plugin.configureRemote) new Setting(containerEl).setName('Remote').addButton(button => button
+      .setButtonText('Configure').onClick(() => this.plugin.configureRemote!()));
 
     new Setting(containerEl).setName('AI assistants').setHeading();
     for (const purpose of ['description', 'explain'] as AiPurpose[]) {

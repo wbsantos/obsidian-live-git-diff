@@ -40,7 +40,7 @@ bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external
 const module = { exports: {} };
 new Function('require', 'module', 'exports', source)((id: string) => id === 'obsidian'
   ? { Plugin: PluginStub, MarkdownView, TFile, TFolder, Component: class {}, ItemView: class {}, PluginSettingTab: class {},
-    Setting: class {}, Notice: class { constructor(message: string) { notices.push(message); } } } : require(id), module, module.exports);
+    Modal: class {}, Setting: class {}, Notice: class { constructor(message: string) { notices.push(message); } hide() {} } } : require(id), module, module.exports);
 const { Plugin, GitHistoryView, GitRepositoryView, persistSettings, mergeSettings } = module.exports as {
   Plugin: new (app: unknown) => TestPlugin;
   GitHistoryView: { prototype: HistoryView }; GitRepositoryView: { prototype: RepositoryView };
@@ -149,4 +149,11 @@ test('a failed cache/settings save cannot poison the next persistence request', 
     saveData: async () => { if (++writes === 1) throw new Error('disk full'); } };
   const failure = persistSettings(host), recovery = persistSettings(host);
   await assert.rejects(failure, /disk full/); await recovery; assert.equal(writes, 2);
+});
+
+test('remote settings retain valid targets and tolerate old or malformed data', () => {
+  assert.deepEqual(mergeSettings({}).remoteTargets, {});
+  assert.deepEqual(mergeSettings({ remoteTargets: { repo: { remote: 'origin', branch: 'main', extra: true },
+    empty: null, invalid: { remote: 42 }, text: 'bad' } }).remoteTargets,
+  { repo: { remote: 'origin', branch: 'main' } });
 });

@@ -65,7 +65,7 @@ const source = buildSync({
 const module = { exports: {} };
 const obsidian = {
   Plugin: PluginStub, MarkdownView, TFile, Component: class { }, ItemView: class { },
-  PluginSettingTab: class { }, Setting: class { }, Notice: class { },
+  PluginSettingTab: class { }, Modal: class { }, Setting: class { }, Notice: class { },
 };
 new Function('require', 'module', 'exports', source)(
   (id: string) => id === 'obsidian' ? obsidian : require(id), module, module.exports,

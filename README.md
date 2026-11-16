@@ -1,6 +1,6 @@
 # Change Review
 
-Review Markdown notes, explore repository history and save selected changes without leaving Obsidian. Change Review supports **Jujutsu** and **Git**, with an optional AI CLI for change descriptions and short explanations.
+Review Markdown notes, explore repository history, save selected changes and push them to a remote without leaving Obsidian. Change Review supports **Jujutsu** and **Git**, with an optional AI CLI for change descriptions and short explanations.
 
 It is designed for documentation work: draft a story, review its changes, keep snapshots while refining it, then finalize the reviewed files. The note stays editable in Obsidian's native Live Preview while historical versions appear alongside it.
 
@@ -13,6 +13,7 @@ Previously named **Live Git Diff**. The plugin ID and installation folder remain
 3. In Jujutsu, keep snapshots during the review without changing the current change ID.
 4. Open **Pending changes**, select the reviewed files and enter a description—or generate one with your AI CLI.
 5. Choose **Create change** to finalize the selection. Continue with the remaining files in the working copy.
+6. **Push** the reviewed changes to your remote branch. Use **Pull** to bring in changes from another computer or contributor.
 
 ## Compare and edit notes
 
@@ -80,6 +81,25 @@ The same action maps to each backend:
 
 Selections include whole files. Selecting a renamed file includes both its old and new paths. Editors are never forcibly saved: save the content you want to record before creating a change or taking a snapshot.
 
+## Push and pull
+
+Use **Push** and **Pull** in the repository panel header, or the commands **Push to remote** and **Pull from remote**. These actions apply to the repository, including when the panel shows a folder or a change. The panel shows progress, prevents repeated submissions, and refreshes history after the operation.
+
+![Push, Pull and remote settings in the repository context menu](docs/screenshots/repository/remote-actions.png)
+
+The plugin uses the current branch's upstream, a tracked bookmark, or the default remote (`origin` when present). When the destination is ambiguous, choose a **Remote** and **Branch** on first use. Right-click the repository heading or location and choose **Remote settings** to change the destination; it is also available from plugin settings and the **Configure repository remote** command. Choices are remembered per repository, and per local branch for Git. Existing remotes and credentials come from your Git/Jujutsu setup; the plugin does not store passwords or tokens.
+
+![Remote and branch selection](docs/screenshots/repository/remote-settings.png)
+
+| Action | Git | Jujutsu |
+| --- | --- | --- |
+| Push | Publishes the current branch's committed history to the selected remote branch. | Publishes the finalized parent of the working change and advances the selected bookmark when safe. |
+| Pull | Fetches the selected branch and fast-forwards the current branch. | Fetches the selected branch and moves the pending working change onto its newer history when safe. |
+
+Push never forces a remote update. Pull stops on divergent history or incompatible pending work instead of creating a merge or rewriting finalized changes. Resolve those cases in your VCS, then retry. Authentication failures and remote errors appear in the panel or a notice.
+
+For remote backup, create a change and then push it. Pending notes and Jujutsu's local snapshots, evolution log and operation history are not included in a Git remote push. Pull can update files in the vault through the VCS.
+
 ## AI descriptions and Explain
 
 AI is optional. In **Settings → AI assistants**, configure **Change description** and **Explain** independently. Each can use GitHub Copilot, OpenAI Codex or Claude Code, with its own CLI path, model and prompt. Model suggestions are editable; leave the model empty to use the agent's default. **Reset prompt** restores that feature's default instructions.
@@ -115,6 +135,8 @@ AI actions send the selected document or change evidence to the CLI's configured
 | Change details | Click a repository row; right-click a File History version |
 | Explain | Note, version, change and affected-file/folder context menus |
 | Generate a description | Sparkle button beside the Pending changes selection |
+| Push / Pull | Repository header, repository heading/location context menu, command palette |
+| Configure remote | Repository heading/location context menu, plugin settings, command palette |
 | Navigate previous/next visit | Back/Forward in the history panels |
 
 | Key | Action in the focused panel |
@@ -128,7 +150,7 @@ Note actions are available through Obsidian's file/tab/header menus, Live Previe
 
 ## Settings and performance
 
-Settings include the default comparison reference, versions per page, diff colors, independent AI configurations, cache reset and debug logging. Default diff colors follow Obsidian's light or dark theme; custom colors apply to both themes.
+Settings include the repository remote, default comparison reference, versions per page, diff colors, independent AI configurations, cache reset and debug logging. Default diff colors follow Obsidian's light or dark theme; custom colors apply to both themes.
 
 Histories load in pages, and filters search the entries already loaded. Repository history metadata persists in the plugin's `data.json`, bounded to **200 pages, 5,000 changes and approximately 8 MiB**. It is checked against the current repository state before reuse. File-history caching remains in memory. If history changes during repository paging, the list restarts against the new state to avoid skipped or duplicated entries.
 
@@ -161,10 +183,10 @@ The build writes the installable files to `plugin-dist`. See [VALIDATION.md](VAL
 
 ## Scope and limitations
 
-Change Review covers everyday documentation review and selective recording. It does not provide push, pull, branch management, rebase, reset or conflict-resolution controls. Resolve conflicts and finish Git merges outside the plugin. Standard Git hooks run when Git creates a commit.
+Change Review covers everyday documentation review, selective recording and remote push/pull. It does not provide general branch management, rebase, reset or conflict-resolution controls. Resolve conflicts and finish Git merges outside the plugin. Standard Git hooks run when Git creates a commit.
 
 Repository lists and selected changes support non-Markdown files, while rendered comparisons are Markdown-only. Files outside the current vault may appear in repository details but cannot be opened as vault notes. Ignored files are not force-tracked.
 
 Historical content uses Obsidian's Markdown renderer. Properties and unsupported syntax are compared conservatively, plugin-generated output does not define equality, and moved blocks have no special category. When detailed analysis reaches its budget, the panel identifies simplified results. Native table highlighting reports a limitation if Obsidian's renderer prevents reliable mapping.
 
-The plugin does not directly edit note content. Your edits stay under Obsidian's control; explicit Create change actions and Jujutsu snapshots write repository history and metadata. AI actions generate descriptions or explanations for review and do not apply document edits.
+The plugin does not directly edit note content through vault or filesystem APIs. Your edits stay under Obsidian's control; explicit Create change actions and Jujutsu snapshots write repository history and metadata, and Pull can update working files through the VCS. AI actions generate descriptions or explanations for review and do not apply document edits.

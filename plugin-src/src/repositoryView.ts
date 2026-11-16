@@ -22,6 +22,8 @@ export interface RepositoryViewHost {
   repositoryChanged(context: GitContext): Promise<void>;
   generateDescription?(context: GitContext, paths: string[], token: string, signal: AbortSignal): Promise<string>;
   explainRepository?(context: GitContext, options: { sha?: string; paths?: string[]; token?: string }): Promise<void>;
+  syncRepository?(context: GitContext, action: 'push' | 'pull'): Promise<void>;
+  configureRemote?(context: GitContext): Promise<void>;
 }
 
 interface VisitState {
@@ -53,6 +55,7 @@ export class GitRepositoryView extends ItemView {
   private closed = false;
   private loading = false;
   private mutating = false;
+  private remoteAction: 'push' | 'pull' | 'configure' | null = null;
   private error = '';
   private changes: RepositoryChange[] = [];
   private anchor: string | undefined;
@@ -190,9 +193,14 @@ export class GitRepositoryView extends ItemView {
       if (route.kind !== 'log' || route.path) this.actionButton(heading, 'history', 'Repository history', () => this.navigate({ kind: 'log', context: route.context }));
       if (route.kind !== 'changes') this.actionButton(heading, 'git-commit-horizontal', 'Pending changes', () => this.navigate({ kind: 'changes', context: route.context }));
       if (route.kind === 'changes' && route.context.backend === 'jj') this.actionButton(heading, 'camera', 'Snapshot working copy', () => { void this.snapshot(); });
+      if (this.host.syncRepository) {
+        this.actionButton(heading, 'download', 'Pull', () => { void this.remote('pull'); }).disabled = this.loading || this.mutating;
+        this.actionButton(heading, 'upload', 'Push', () => { void this.remote('push'); }).disabled = this.loading || this.mutating;
+      }
       const refresh = this.actionButton(heading, 'refresh-cw', 'Refresh', () => { void this.refresh(); }); refresh.disabled = this.loading || this.mutating;
       const context = route.kind === 'log' && route.path ? route.path : (route.context.workspaceRoot || route.context.root).replace(/\\/g, '/').split('/').pop() || 'Repository';
-      root.createDiv({ cls: 'lgd-repository-location', text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
+      const location = root.createDiv({ cls: 'lgd-repository-location', text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
+      heading.oncontextmenu = location.oncontextmenu = event => this.remoteMenu(event);
     }
     if (route?.kind === 'log' || route?.kind === 'changes') {
       this.query = root.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: route.kind === 'log' ? 'Filter loaded changes' : 'Filter files', attr: { 'aria-label': route.kind === 'log' ? 'Filter loaded changes' : 'Filter files' } });
@@ -376,7 +384,8 @@ export class GitRepositoryView extends ItemView {
   }
   private updateFooter(): void {
     const route = this.route;
-    const text = this.error || (this.aiJob ? 'Generating description…' : this.mutating ? 'Saving…' : this.loading ? 'Loading…' : route?.kind === 'log' ? `${this.changes.length} changes` : route?.kind === 'details' && this.details ? `${this.details.files.length} files` : '');
+    const remoteStatus = this.remoteAction === 'push' ? 'Pushing…' : this.remoteAction === 'pull' ? 'Pulling…' : this.remoteAction === 'configure' ? 'Remote settings…' : '';
+    const text = this.error || (remoteStatus || (this.aiJob ? 'Generating description…' : this.mutating ? 'Saving…' : this.loading ? 'Loading…' : route?.kind === 'log' ? `${this.changes.length} changes` : route?.kind === 'details' && this.details ? `${this.details.files.length} files` : ''));
     this.footer?.setText(text); this.footer?.toggleClass('lgd-error', !!this.error);
     this.body?.setAttr('aria-busy', String(this.loading || this.mutating));
     if (this.more) this.more.disabled = this.loading || this.mutating;
@@ -434,6 +443,42 @@ export class GitRepositoryView extends ItemView {
     finally {
       this.mutating = false;
       if (!this.closed) { if (this.route === route && !this.error) await this.loadRoute(false); else this.render(); }
+    }
+  }
+  private remoteMenu(event: MouseEvent): void {
+    if (!this.route || (!this.host.syncRepository && !this.host.configureRemote)) return;
+    event.preventDefault(); event.stopPropagation();
+    const menu = new Menu(), disabled = this.loading || this.mutating;
+    if (this.host.syncRepository) {
+      menu.addItem(item => item.setTitle('Pull').setIcon('download').setDisabled(disabled).onClick(() => this.remote('pull')));
+      menu.addItem(item => item.setTitle('Push').setIcon('upload').setDisabled(disabled).onClick(() => this.remote('push')));
+    }
+    if (this.host.configureRemote) {
+      if (this.host.syncRepository) menu.addSeparator();
+      menu.addItem(item => item.setTitle('Remote settings').setIcon('settings-2').setDisabled(disabled).onClick(() => this.remote('configure')));
+    }
+    menu.showAtMouseEvent(event);
+  }
+  private async remote(action: 'push' | 'pull' | 'configure'): Promise<void> {
+    const route = this.route;
+    if (this.closed || this.loading || this.mutating || !route) return;
+    if (action === 'configure' ? !this.host.configureRemote : !this.host.syncRepository) return;
+    this.rememberScroll(); this.mutating = true; this.remoteAction = action; this.error = ''; this.setMutationDisabled();
+    try {
+      if (action === 'configure') await this.host.configureRemote!(route.context);
+      else await this.host.syncRepository!(route.context, action);
+    } catch (error) {
+      if (!this.closed && this.route === route) this.error = String((error as Error).message || error);
+    } finally {
+      this.mutating = false; this.remoteAction = null;
+      if (!this.closed) {
+        if (this.route === route && action !== 'configure') {
+          const operationError = this.error;
+          await this.loadRoute(false);
+          if (operationError && this.route === route) { this.error = operationError; this.updateFooter(); }
+        }
+        else this.render();
+      }
     }
   }
   private moveFocus(event: KeyboardEvent): void {

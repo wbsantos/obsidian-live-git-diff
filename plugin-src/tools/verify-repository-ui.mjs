@@ -34,7 +34,7 @@ export class WorkspaceLeaf {}
 export class Notice { constructor(text){window.notices.push(text);} }
 export class Menu {
   static last; items=[];
-  addItem(configure){const item={title:'',setTitle(value){this.title=value;return this;},setIcon(){return this;},setDisabled(){return this;},onClick(value){this.callback=value;return this;}};configure(item);this.items.push(item);return this;}
+  addItem(configure){const item={title:'',setTitle(value){this.title=value;return this;},setIcon(){return this;},setDisabled(value){this.disabled=value;return this;},onClick(value){this.callback=value;return this;}};configure(item);this.items.push(item);return this;}
   addSeparator(){} showAtMouseEvent(){Menu.last=this;}
 }
 export function setIcon(el,name){el.textContent=({'arrow-left':'←','arrow-right':'→','refresh-cw':'↻','history':'◷','git-commit-horizontal':'⊙','camera':'▣','folder':'▱'})[name] || '•';}
@@ -59,7 +59,9 @@ const host={settings:{logLimit:10},
   openRepositoryNote:async(ctx,path)=>calls.push({kind:'note',path}),
   navigationBack:()=>calls.push({kind:'back'}),navigationForward:()=>calls.push({kind:'forward'}),navigationState:()=>({back:true,forward:false}),repositoryChanged:async()=>{},
   generateDescription:async(ctx,paths,token,signal)=>qa.generate ? qa.generate(signal) : 'Generated description',
-  explainRepository:async(ctx,options)=>calls.push({kind:'explain',...options})
+  explainRepository:async(ctx,options)=>calls.push({kind:'explain',...options}),
+  syncRepository:async(ctx,action)=>{calls.push({kind:'sync',action,context:ctx});if(qa.syncWait)await qa.syncWait;if(qa.syncError)throw new Error(qa.syncError);},
+  configureRemote:async ctx=>calls.push({kind:'remote-settings',context:ctx})
 };
 const panel=document.getElementById('panel');
 view=new GitRepositoryView({contentEl:panel,app:{scope:{}}},host);
@@ -117,6 +119,21 @@ async function run(){
   check('AI generation can be cancelled without creating a change',!get('[aria-label="Cancel generation"]').disabled && get('.mod-cta').disabled);
   get('[aria-label="Cancel generation"]').click();await turn();
   check('Cancellation preserves previous description',get('textarea').value==='Generated description' && qa.saves.length===saves);
+  check('Push and pull are available in the repository header',!!get('[aria-label="Push"]') && !!get('[aria-label="Pull"]'));
+  const remoteMenu=contextMenu(get('.lgd-repository-location'));
+  check('Repository context menu exposes remote controls',remoteMenu.filter(item=>['Push','Pull','Remote settings'].includes(item.title)).length===3);
+  remoteMenu.find(item=>item.title==='Remote settings').callback();await turn();
+  check('Remote settings receive the current repository',calls.at(-1).kind==='remote-settings' && calls.at(-1).context===context);
+  let finishSync;qa.syncWait=new Promise(resolve=>finishSync=resolve);
+  get('[aria-label="Push"]').click();await turn();
+  check('Push disables mutations and reports progress',get('.mod-cta').disabled && get('[aria-label="Pull"]').disabled && get('.lgd-history-footer').textContent==='Pushing…');
+  const pushCount=calls.filter(call=>call.kind==='sync').length;
+  remoteMenu.find(item=>item.title==='Push').callback();await turn();
+  check('Repeated remote action is ignored while busy',calls.filter(call=>call.kind==='sync').length===pushCount && contextMenu(get('.lgd-repository-heading')).find(item=>item.title==='Push').disabled);
+  finishSync();await turn();qa.syncWait=null;
+  check('Successful push preserves the pending review draft',get('textarea').value==='Generated description' && all('.lgd-repository-file input:checked').length===4 && !get('[aria-label="Pull"]').disabled);
+  qa.syncError='Remote branch diverged. Resolve it before pulling.';get('[aria-label="Pull"]').click();await turn();
+  check('Pull errors remain visible without clearing the draft',get('.lgd-error').textContent.includes('Remote branch diverged') && get('textarea').value==='Generated description' && !get('[aria-label="Push"]').disabled);
   const report=document.getElementById('report');report.textContent=JSON.stringify({results,passed:results.length});report.dataset.complete='true';
 }
 run().catch(error=>{const report=document.getElementById('report');report.textContent=JSON.stringify({results,error:error.stack});report.dataset.complete='failed';});

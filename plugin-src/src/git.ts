@@ -1,10 +1,10 @@
 /**
- * git.ts — the only place this plugin talks to the outside world.
+ * git.ts — Git reads used by the comparison engine.
  *
- * Everything here READS. `git show` and `git rev-parse` are the entire surface; no
- * command that can alter a repository is reachable from this module, and nothing in
- * the plugin imports a filesystem module at all (tools/check-invariant.mjs asserts
- * that as a capability check, which is stronger than grepping for method names).
+ * Commands in this module read repository data. Selected changes, snapshots and
+ * remote synchronization live in the repository modules behind their mutation queue.
+ * Production code imports no filesystem module; the invariant gate checks direct
+ * note-write APIs separately from the explicit VCS operations that can update files.
  */
 import { execFile, execFileSync } from 'child_process';
 import * as path from 'path';
@@ -126,7 +126,7 @@ function git(args: string[]): string {
 /**
  * Absolute on-disk path of a vault file.
  *
- * Written in the plain form on purpose. The read-only invariant is enforced by
+ * Written in the plain form on purpose. The direct note-write invariant is enforced by
  * grepping for WRITE methods, not for this handle — a check you pass by phrasing is
  * not a check. An earlier draft dodged a handle-shaped grep by destructuring, which
  * made the check pass by rephrasing rather than by fact; the check was narrowed

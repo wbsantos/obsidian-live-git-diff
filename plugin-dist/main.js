@@ -49,7 +49,7 @@ __export(main_exports, {
   default: () => LiveGitDiffPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 var path4 = __toESM(require("path"), 1);
 
 // src/git.ts
@@ -271,9 +271,9 @@ async function resolveRepository(app, file, signal) {
   const root = (await jj(workspaceRoot, ["git", "root"], signal)).trim();
   let rel = path2.relative(workspaceRoot, abs).replace(/\\/g, "/");
   try {
-    const git2 = await resolveGitAsync(app, file, signal);
-    if (path2.resolve(git2.root).toLowerCase() !== path2.resolve(workspaceRoot).toLowerCase() && path2.resolve(git2.root).toLowerCase().startsWith(path2.resolve(workspaceRoot).toLowerCase() + path2.sep)) return { ...git2, backend: "git" };
-    rel = git2.rel;
+    const git3 = await resolveGitAsync(app, file, signal);
+    if (path2.resolve(git3.root).toLowerCase() !== path2.resolve(workspaceRoot).toLowerCase() && path2.resolve(git3.root).toLowerCase().startsWith(path2.resolve(workspaceRoot).toLowerCase() + path2.sep)) return { ...git3, backend: "git" };
+    rel = git3.rel;
   } catch (e) {
   }
   if (rel.startsWith("../") || path2.isAbsolute(rel)) throw new Error("Note resolves outside the JJ workspace.");
@@ -839,6 +839,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     this.closed = false;
     this.loading = false;
     this.mutating = false;
+    this.remoteAction = null;
     this.error = "";
     this.changes = [];
     this.hasMore = false;
@@ -1035,12 +1036,21 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       if (route.kind === "changes" && route.context.backend === "jj") this.actionButton(heading, "camera", "Snapshot working copy", () => {
         void this.snapshot();
       });
+      if (this.host.syncRepository) {
+        this.actionButton(heading, "download", "Pull", () => {
+          void this.remote("pull");
+        }).disabled = this.loading || this.mutating;
+        this.actionButton(heading, "upload", "Push", () => {
+          void this.remote("push");
+        }).disabled = this.loading || this.mutating;
+      }
       const refresh = this.actionButton(heading, "refresh-cw", "Refresh", () => {
         void this.refresh();
       });
       refresh.disabled = this.loading || this.mutating;
       const context = route.kind === "log" && route.path ? route.path : (route.context.workspaceRoot || route.context.root).replace(/\\/g, "/").split("/").pop() || "Repository";
-      root.createDiv({ cls: "lgd-repository-location", text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
+      const location = root.createDiv({ cls: "lgd-repository-location", text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
+      heading.oncontextmenu = location.oncontextmenu = (event) => this.remoteMenu(event);
     }
     if ((route == null ? void 0 : route.kind) === "log" || (route == null ? void 0 : route.kind) === "changes") {
       this.query = root.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: route.kind === "log" ? "Filter loaded changes" : "Filter files", attr: { "aria-label": route.kind === "log" ? "Filter loaded changes" : "Filter files" } });
@@ -1291,7 +1301,8 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
   updateFooter() {
     var _a, _b, _c;
     const route = this.route;
-    const text = this.error || (this.aiJob ? "Generating description\u2026" : this.mutating ? "Saving\u2026" : this.loading ? "Loading\u2026" : (route == null ? void 0 : route.kind) === "log" ? `${this.changes.length} changes` : (route == null ? void 0 : route.kind) === "details" && this.details ? `${this.details.files.length} files` : "");
+    const remoteStatus = this.remoteAction === "push" ? "Pushing\u2026" : this.remoteAction === "pull" ? "Pulling\u2026" : this.remoteAction === "configure" ? "Remote settings\u2026" : "";
+    const text = this.error || (remoteStatus || (this.aiJob ? "Generating description\u2026" : this.mutating ? "Saving\u2026" : this.loading ? "Loading\u2026" : (route == null ? void 0 : route.kind) === "log" ? `${this.changes.length} changes` : (route == null ? void 0 : route.kind) === "details" && this.details ? `${this.details.files.length} files` : ""));
     (_a = this.footer) == null ? void 0 : _a.setText(text);
     (_b = this.footer) == null ? void 0 : _b.toggleClass("lgd-error", !!this.error);
     (_c = this.body) == null ? void 0 : _c.setAttr("aria-busy", String(this.loading || this.mutating));
@@ -1376,6 +1387,50 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       }
     }
   }
+  remoteMenu(event) {
+    if (!this.route || !this.host.syncRepository && !this.host.configureRemote) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = new import_obsidian.Menu(), disabled = this.loading || this.mutating;
+    if (this.host.syncRepository) {
+      menu.addItem((item) => item.setTitle("Pull").setIcon("download").setDisabled(disabled).onClick(() => this.remote("pull")));
+      menu.addItem((item) => item.setTitle("Push").setIcon("upload").setDisabled(disabled).onClick(() => this.remote("push")));
+    }
+    if (this.host.configureRemote) {
+      if (this.host.syncRepository) menu.addSeparator();
+      menu.addItem((item) => item.setTitle("Remote settings").setIcon("settings-2").setDisabled(disabled).onClick(() => this.remote("configure")));
+    }
+    menu.showAtMouseEvent(event);
+  }
+  async remote(action) {
+    const route = this.route;
+    if (this.closed || this.loading || this.mutating || !route) return;
+    if (action === "configure" ? !this.host.configureRemote : !this.host.syncRepository) return;
+    this.rememberScroll();
+    this.mutating = true;
+    this.remoteAction = action;
+    this.error = "";
+    this.setMutationDisabled();
+    try {
+      if (action === "configure") await this.host.configureRemote(route.context);
+      else await this.host.syncRepository(route.context, action);
+    } catch (error2) {
+      if (!this.closed && this.route === route) this.error = String(error2.message || error2);
+    } finally {
+      this.mutating = false;
+      this.remoteAction = null;
+      if (!this.closed) {
+        if (this.route === route && action !== "configure") {
+          const operationError = this.error;
+          await this.loadRoute(false);
+          if (operationError && this.route === route) {
+            this.error = operationError;
+            this.updateFooter();
+          }
+        } else this.render();
+      }
+    }
+  }
   moveFocus(event) {
     var _a;
     if (event.isComposing || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -1386,6 +1441,338 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       event.preventDefault();
       controls[destination].focus();
     }
+  }
+};
+
+// src/repositoryRemote.ts
+var import_child_process4 = require("child_process");
+var CommandError = class extends Error {
+  constructor(message, code) {
+    super(message);
+    this.code = code;
+  }
+};
+function command2(tool, cwd, args, signal) {
+  return new Promise((resolve3, reject) => {
+    var _a, _b;
+    const child = (0, import_child_process4.execFile)(tool, args, {
+      cwd,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 12e4,
+      maxBuffer: 8 * 1024 * 1024,
+      signal,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_MERGE_AUTOEDIT: "no", SSH_ASKPASS_REQUIRE: "never" }
+    }, (error2, out, err) => {
+      var _a2;
+      return error2 ? reject(new CommandError(String(err || error2.message).trim(), (_a2 = error2.code) != null ? _a2 : void 0)) : resolve3(out);
+    });
+    (_a = child.stdin) == null ? void 0 : _a.on("error", () => {
+    });
+    (_b = child.stdin) == null ? void 0 : _b.end();
+  });
+}
+var git2 = (ctx, args, signal, raw = false) => command2("git", ctx.root, ["-C", ctx.root, ...args], signal).then((value) => raw ? value : value.trim());
+var jj3 = (ctx, args, signal, mutate = false) => command2("jj", ctx.workspaceRoot, [
+  ...mutate ? [] : ["--ignore-working-copy"],
+  "--no-pager",
+  "--color=never",
+  "--config",
+  "git.abandon-unreachable-commits=false",
+  "-R",
+  ctx.workspaceRoot,
+  ...args
+], signal).then((value) => value.trim());
+async function optional(run) {
+  try {
+    return await run;
+  } catch (error2) {
+    if (error2 instanceof CommandError && error2.code === 1) return "";
+    throw error2;
+  }
+}
+var lines = (value) => value.split(/\r?\n/).filter(Boolean);
+var exact = (value) => `exact:${value}`;
+var quote = (value) => JSON.stringify(value);
+var remoteRev = (target) => `remote_bookmarks(exact:${quote(target.branch)}, exact:${quote(target.remote)})`;
+var divergent = () => new Error("Local and remote changes have diverged. Resolve the history with your VCS before syncing.");
+async function bookmarks(ctx, signal) {
+  const template = 'json({"name" => name, "remote" => remote, "sha" => if(!conflict && present, normal_target.commit_id(), ""), "conflict" => conflict, "tracked" => tracked}) ++ "\\n"';
+  return lines(await jj3(ctx, ["bookmark", "list", "--all-remotes", "-T", template], signal)).map((line) => JSON.parse(line));
+}
+async function getRepositoryRemotes(ctx, signal) {
+  var _a;
+  const remotes = lines(await git2(ctx, ["remote"], signal));
+  const preferred = remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0] : void 0;
+  if (ctx.backend === "jj") {
+    const refs2 = await bookmarks(ctx, signal);
+    const branches2 = [...new Set(refs2.filter((ref) => ref.remote !== "git").map((ref) => ref.name))].sort();
+    const ancestors = new Set(lines(await jj3(ctx, ["log", "-G", "-r", "heads((bookmarks() | remote_bookmarks()) & ancestors(@-))", "-T", 'commit_id ++ "\\n"'], signal)));
+    const nearby = refs2.filter((ref) => !ref.conflict && ref.sha && ancestors.has(ref.sha) && ref.remote !== "git");
+    const names = new Set(nearby.map((ref) => ref.name));
+    const tracked = refs2.filter((ref) => names.has(ref.name) && !ref.conflict && ref.remote && ref.tracked && remotes.includes(ref.remote));
+    const choices = tracked.length ? tracked : nearby.filter((ref) => !ref.remote).map((ref) => ({ ...ref, remote: preferred }));
+    const unique = [...new Map(choices.filter((ref) => ref.remote).map((ref) => [`${ref.remote}\0${ref.name}`, { remote: ref.remote, branch: ref.name }])).values()];
+    return { remotes, branches: branches2, suggested: unique.length === 1 ? unique[0] : void 0 };
+  }
+  const currentBranch = await optional(git2(ctx, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal));
+  const refs = lines(await git2(ctx, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], signal));
+  const branches = [...new Set(refs.flatMap((ref) => {
+    if (ref.startsWith("refs/heads/")) return [ref.slice(11)];
+    const remote = remotes.find((name2) => ref.startsWith(`refs/remotes/${name2}/`));
+    const name = remote ? ref.slice(`refs/remotes/${remote}/`.length) : "";
+    return name && name !== "HEAD" ? [name] : [];
+  }))].sort();
+  let suggested;
+  if (currentBranch) {
+    const upstream = (await git2(ctx, ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", `refs/heads/${currentBranch}`], signal)).split("\0");
+    if (remotes.includes(upstream[0]) && ((_a = upstream[1]) == null ? void 0 : _a.startsWith("refs/heads/"))) suggested = { remote: upstream[0], branch: upstream[1].slice(11) };
+    else if (preferred) suggested = { remote: preferred, branch: currentBranch };
+    if (!branches.includes(currentBranch)) branches.push(currentBranch);
+  }
+  return { remotes, branches, currentBranch: currentBranch || void 0, suggested };
+}
+async function validateTarget(ctx, target, signal) {
+  if (!target.remote || target.remote.startsWith("-") || /[\0\r\n]/.test(target.remote) || !(await git2(ctx, ["remote"], signal)).split(/\r?\n/).includes(target.remote)) throw new Error("Choose a configured remote.");
+  if (!target.branch || target.branch.startsWith("-") || /[\0\r\n]/.test(target.branch)) throw new Error("Enter a valid remote branch.");
+  try {
+    await git2(ctx, ["check-ref-format", `refs/heads/${target.branch}`], signal);
+  } catch (error2) {
+    if (signal == null ? void 0 : signal.aborted) throw error2;
+    throw new Error("Enter a valid remote branch.");
+  }
+}
+async function gitHead(ctx, signal) {
+  return optional(git2(ctx, ["rev-parse", "--verify", "--quiet", "HEAD"], signal));
+}
+async function isAncestor(ctx, before, after, signal) {
+  if (before === after || /^0+$/.test(before)) return true;
+  try {
+    await git2(ctx, ["merge-base", "--is-ancestor", before, after], signal);
+    return true;
+  } catch (error2) {
+    if (error2 instanceof CommandError && error2.code === 1) return false;
+    throw error2;
+  }
+}
+async function workingParent(ctx, signal) {
+  const parents = lines(await jj3(ctx, ["log", "-G", "-r", "@-", "-T", 'commit_id ++ "\\n"'], signal));
+  if (parents.length !== 1) throw new Error("Finish the current merge before syncing.");
+  return parents[0];
+}
+async function gitBranch(ctx, signal) {
+  const branch = await optional(git2(ctx, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal));
+  if (!branch) throw new Error("Switch to a local branch before syncing.");
+  return branch;
+}
+var overlaps = (left, right) => {
+  if (process.platform === "win32") {
+    left = left.toLocaleLowerCase();
+    right = right.toLocaleLowerCase();
+  }
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+};
+async function protectUntrackedJjFiles(ctx, affected, signal) {
+  if (!affected.length) return;
+  const tracked = new Set(lines(await jj3(ctx, ["file", "list", "-r", "@", "-T", 'json(path) ++ "\\n"'], signal)).map((line) => JSON.parse(line)));
+  const scopes = [...new Set(affected.map((file) => file.split("/")[0]))];
+  for (let offset = 0; offset < scopes.length; offset += 40) {
+    const existing = (await git2(ctx, [
+      "-C",
+      ctx.workspaceRoot,
+      `--git-dir=${ctx.root}`,
+      "--literal-pathspecs",
+      `--work-tree=${ctx.workspaceRoot}`,
+      "ls-files",
+      "--others",
+      "-z",
+      "--",
+      ...scopes.slice(offset, offset + 40)
+    ], signal, true)).split("\0").filter(Boolean);
+    if (existing.some((file) => !tracked.has(file) && affected.some((changed) => overlaps(file, changed))))
+      throw new Error("Incoming changes overlap untracked or ignored files. Move or record those files before pulling.");
+  }
+}
+async function pushRepository(ctx, target, signal) {
+  return withRepositoryMutation(ctx, async () => {
+    await validateTarget(ctx, target, signal);
+    let sha;
+    if (ctx.backend === "jj") {
+      await jj3(ctx, ["util", "snapshot"], signal, true);
+      sha = await workingParent(ctx, signal);
+      if (/^0+$/.test(sha)) throw new Error("Create a change before pushing.");
+      const local = (await bookmarks(ctx, signal)).find((ref) => ref.name === target.branch && !ref.remote);
+      if (local == null ? void 0 : local.conflict) throw divergent();
+      if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, sha, signal)) throw new Error("The selected branch is not an ancestor of the latest finalized change.");
+      const conflicts = await jj3(ctx, ["log", "-G", "-r", `ancestors(${sha}) & conflicts()`, "-n", "1", "-T", "commit_id"], signal);
+      if (conflicts) throw new Error("Resolve conflicts before pushing.");
+    } else {
+      await gitBranch(ctx, signal);
+      sha = await gitHead(ctx, signal);
+      if (!sha) throw new Error("Create a change before pushing.");
+    }
+    await git2(ctx, [
+      "-c",
+      `remote.${target.remote}.mirror=false`,
+      "push",
+      "--porcelain",
+      "--no-force",
+      "--no-follow-tags",
+      "--recurse-submodules=no",
+      "--",
+      target.remote,
+      `${sha}:refs/heads/${target.branch}`
+    ], signal);
+    if (ctx.backend === "jj") {
+      try {
+        await jj3(ctx, ["git", "import"]);
+        await jj3(ctx, ["bookmark", "set", target.branch, "-r", sha], void 0, true);
+        const refs = await bookmarks(ctx);
+        if (refs.some((ref) => ref.name === target.branch && ref.remote === target.remote))
+          await jj3(ctx, ["bookmark", "track", exact(target.branch), "--remote", exact(target.remote)], void 0, true);
+      } catch (error2) {
+        throw new Error(`Push succeeded, but local branch tracking needs attention: ${String(error2.message)}`);
+      }
+    }
+    return { message: `Pushed to ${target.remote}/${target.branch}.` };
+  });
+}
+async function pullRepository(ctx, target, signal) {
+  return withRepositoryMutation(ctx, async () => {
+    await validateTarget(ctx, target, signal);
+    if (ctx.backend !== "jj") {
+      await gitBranch(ctx, signal);
+      const before2 = await gitHead(ctx, signal);
+      if (await optional(git2(ctx, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], signal))) throw new Error("Finish the current merge before pulling.");
+      await git2(ctx, ["fetch", "--no-tags", "--no-recurse-submodules", "--", target.remote, `refs/heads/${target.branch}`], signal);
+      const incoming2 = await git2(ctx, ["rev-parse", "--verify", "FETCH_HEAD"], signal);
+      if (before2 && !await isAncestor(ctx, before2, incoming2, signal)) {
+        if (await isAncestor(ctx, incoming2, before2, signal)) return { message: `Already up to date with ${target.remote}/${target.branch}.` };
+        throw divergent();
+      }
+      await git2(ctx, ["-c", "merge.autoStash=false", "merge", "--ff-only", "--no-edit", "--no-autostash", "--no-overwrite-ignore", incoming2], signal);
+      return { message: before2 === incoming2 ? `Already up to date with ${target.remote}/${target.branch}.` : `Pulled from ${target.remote}/${target.branch}.` };
+    }
+    await jj3(ctx, ["util", "snapshot"], signal, true);
+    const before = await workingParent(ctx, signal);
+    const initialRefs = await bookmarks(ctx, signal);
+    if (initialRefs.some((ref) => ref.name === target.branch && ref.conflict)) throw divergent();
+    const local = initialRefs.find((ref) => ref.name === target.branch && !ref.remote);
+    if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, before, signal) && !await isAncestor(ctx, before, local.sha, signal))
+      throw new Error("The selected branch is not an ancestor of the working change.");
+    if (await jj3(ctx, ["log", "-G", "-r", "(@:: ~ @) | (@ & conflicts())", "-n", "1", "-T", "commit_id"], signal))
+      throw new Error("Finish the current change or resolve its conflicts before pulling.");
+    await jj3(ctx, ["git", "fetch", "--remote", exact(target.remote), "--branch", exact(target.branch)], signal, true);
+    const incoming = await jj3(ctx, ["log", "-G", "-r", remoteRev(target), "-T", "commit_id"], signal);
+    if (!incoming) throw new Error("The remote branch was not found.");
+    if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, incoming, signal) && !await isAncestor(ctx, local.sha, before, signal))
+      throw new Error("The selected branch has finalized changes beyond the working change.");
+    if (!await isAncestor(ctx, before, incoming, signal)) {
+      if (await isAncestor(ctx, incoming, before, signal)) return { message: `Already up to date with ${target.remote}/${target.branch}.` };
+      throw divergent();
+    }
+    if (before !== incoming) {
+      const pending = lines(await jj3(ctx, ["diff", "-r", "@", "-T", 'json({"path" => path, "source" => source.path()}) ++ "\\n"'], signal)).flatMap((line) => {
+        const entry = JSON.parse(line);
+        return [entry.path, entry.source];
+      });
+      const affected = /^0+$/.test(before) ? (await git2(ctx, ["ls-tree", "-r", "--name-only", "-z", incoming], signal, true)).split("\0").filter(Boolean) : (await git2(ctx, ["diff", "--name-only", "-z", "--no-renames", before, incoming, "--"], signal, true)).split("\0").filter(Boolean);
+      if (pending.some((file) => affected.some((changed) => overlaps(file, changed))))
+        throw new Error("Incoming changes overlap pending files. Create a change or finish reviewing those files before pulling.");
+      await protectUntrackedJjFiles(ctx, affected, signal);
+      await jj3(ctx, ["rebase", "-r", "@", "-o", incoming], signal, true);
+    }
+    await jj3(ctx, ["bookmark", "set", target.branch, "-r", incoming], signal, true);
+    await jj3(ctx, ["bookmark", "track", exact(target.branch), "--remote", exact(target.remote)], signal, true);
+    return { message: before === incoming ? `Already up to date with ${target.remote}/${target.branch}.` : `Pulled from ${target.remote}/${target.branch}.` };
+  });
+}
+
+// src/remoteModal.ts
+var import_obsidian2 = require("obsidian");
+var RemoteTargetModal = class extends import_obsidian2.Modal {
+  constructor(app, options) {
+    super(app);
+    this.saving = false;
+    this.completed = false;
+    this.options = options;
+  }
+  onOpen() {
+    var _a, _b;
+    this.titleEl.setText(this.options.title || "Remote settings");
+    const { contentEl } = this, options = this.options;
+    let remote = options.remotes.includes(((_a = options.initial) == null ? void 0 : _a.remote) || "") ? options.initial.remote : options.remotes[0] || "";
+    let branch = ((_b = options.initial) == null ? void 0 : _b.branch) || "";
+    new import_obsidian2.Setting(contentEl).setName("Remote").addDropdown((dropdown) => {
+      if (!options.remotes.length) dropdown.addOption("", "No remotes");
+      for (const name of options.remotes) dropdown.addOption(name, name);
+      dropdown.setValue(remote).setDisabled(!options.remotes.length).onChange((value) => {
+        remote = value;
+        update();
+      });
+      dropdown.selectEl.setAttribute("aria-label", "Remote");
+    });
+    const listId = `change-review-branches-${Math.random().toString(36).slice(2)}`;
+    const suggestions = contentEl.createEl("datalist", { attr: { id: listId } });
+    for (const name of [...new Set(options.branches)]) suggestions.createEl("option", { attr: { value: name } });
+    let branchInput;
+    new import_obsidian2.Setting(contentEl).setName("Branch").addText((text) => {
+      branchInput = text.inputEl;
+      text.setValue(branch).onChange((value) => {
+        branch = value;
+        update();
+      });
+      text.inputEl.setAttribute("list", listId);
+      text.inputEl.setAttribute("aria-label", "Branch");
+      text.inputEl.spellcheck = false;
+    });
+    const error2 = contentEl.createDiv({ cls: "lgd-error", attr: { role: "alert" } });
+    error2.hidden = options.remotes.length > 0;
+    if (!options.remotes.length) error2.setText("Configure a remote in this repository first.");
+    const actions = new import_obsidian2.Setting(contentEl);
+    actions.addButton((button) => {
+      button.setButtonText("Cancel").onClick(() => this.close());
+    });
+    let save;
+    const update = () => {
+      if (save) save.disabled = this.saving || !remote || !branch.trim();
+    };
+    const submit = async () => {
+      if (this.saving || !remote || !branch.trim()) return;
+      this.saving = true;
+      error2.setText("");
+      error2.hidden = true;
+      for (const control of Array.from(contentEl.querySelectorAll("input,select,button"))) control.disabled = true;
+      try {
+        await options.onSubmit({ remote, branch: branch.trim() });
+        this.completed = true;
+        this.close();
+      } catch (failure) {
+        error2.setText(String(failure.message || failure));
+        error2.hidden = false;
+        for (const control of Array.from(contentEl.querySelectorAll("input,select,button"))) control.disabled = false;
+      } finally {
+        this.saving = false;
+        update();
+      }
+    };
+    actions.addButton((button) => {
+      save = button.buttonEl;
+      button.setButtonText(options.submitLabel || "Save").setCta().onClick(submit);
+    });
+    branchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        void submit();
+      }
+    });
+    update();
+    branchInput.focus();
+  }
+  onClose() {
+    var _a, _b;
+    if (!this.completed) (_b = (_a = this.options).onCancel) == null ? void 0 : _b.call(_a);
+    this.contentEl.empty();
   }
 };
 
@@ -1422,9 +1809,9 @@ var NavigationTrail = class {
 };
 
 // src/explainView.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 var EXPLAIN_VIEW_TYPE = "live-git-diff-explain";
-var ExplainView = class extends import_obsidian2.ItemView {
+var ExplainView = class extends import_obsidian3.ItemView {
   constructor() {
     super(...arguments);
     this.job = null;
@@ -1460,7 +1847,7 @@ var ExplainView = class extends import_obsidian2.ItemView {
     const header = root.createDiv({ cls: "lgd-explain-heading" });
     header.createDiv({ cls: "lgd-explain-title", text: title });
     const cancel = header.createEl("button", { cls: "clickable-icon", attr: { title: "Cancel", "aria-label": "Cancel" } });
-    (0, import_obsidian2.setIcon)(cancel, "x");
+    (0, import_obsidian3.setIcon)(cancel, "x");
     cancel.onclick = () => job.abort();
     const body = root.createDiv({ cls: "lgd-explain-text", text: "Preparing explanation\u2026", attr: { role: "status", "aria-live": "polite" } });
     try {
@@ -1470,7 +1857,7 @@ var ExplainView = class extends import_obsidian2.ItemView {
       cancel.remove();
       root.oncontextmenu = (event) => {
         event.preventDefault();
-        const menu = new import_obsidian2.Menu();
+        const menu = new import_obsidian3.Menu();
         menu.addItem((item) => item.setTitle("Copy explanation").setIcon("copy").onClick(() => root.ownerDocument.defaultView.navigator.clipboard.writeText(result)));
         menu.addItem((item) => item.setTitle("Explain again").setIcon("sparkles").onClick(() => this.explain(title, load)));
         menu.showAtMouseEvent(event);
@@ -1485,7 +1872,7 @@ var ExplainView = class extends import_obsidian2.ItemView {
 };
 
 // src/ai.ts
-var import_child_process4 = require("child_process");
+var import_child_process5 = require("child_process");
 var import_os = require("os");
 var AI_PROMPTS = {
   description: "Write a concise commit/change description for the selected changes. Start with one imperative subject line, at most 72 characters. Add a short body only when useful. Focus on the business intent and resulting behavior. Return only the description, without a code fence or preamble. Use the language of the source documents.",
@@ -1563,7 +1950,7 @@ async function resolveAiExecutable(executable, provider, signal) {
   if (process.platform !== "win32") return { executable, prefix: [] };
   const resolver = '$ErrorActionPreference="Stop"; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $spec=ConvertFrom-Json $env:CHANGE_REVIEW_CLI; $cmd=Get-Command -Name $spec.executable -ErrorAction Stop | Select-Object -First 1; $target=$cmd.Source; if ($target -match "\\.(cmd|bat|ps1)$") { $base=Split-Path -Parent $target; $package=Join-Path $base ("node_modules/"+$spec.package+"/package.json"); $meta=Get-Content -Raw -LiteralPath $package | ConvertFrom-Json; $bin=$meta.bin; if ($bin -isnot [string]) { $bin=$bin.($spec.provider) }; if (-not $bin) { throw "Unsupported CLI shim. Set the native executable path." }; $entry=Join-Path (Split-Path -Parent $package) $bin; $node=Join-Path $base "node.exe"; if (-not (Test-Path -LiteralPath $node)) { $node=(Get-Command node.exe -ErrorAction Stop).Source }; @{executable=$node;prefix=@($entry)} | ConvertTo-Json -Compress } elseif ($target -match "\\.(cjs|mjs|js)$") { @{executable=(Get-Command node.exe -ErrorAction Stop).Source;prefix=@($target)} | ConvertTo-Json -Compress } elseif ($target -match "\\.exe$") { @{executable=$target;prefix=@()} | ConvertTo-Json -Compress } else { throw "Set a native executable or a supported npm CLI shim." }';
   const packages = { copilot: "@github/copilot", codex: "@openai/codex", claude: "@anthropic-ai/claude-code" };
-  return new Promise((resolve3, reject) => (0, import_child_process4.execFile)(
+  return new Promise((resolve3, reject) => (0, import_child_process5.execFile)(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", resolver],
     { cwd: (0, import_os.tmpdir)(), encoding: "utf8", windowsHide: true, timeout: 1e4, signal, env: { ...process.env, CHANGE_REVIEW_CLI: JSON.stringify({ executable, provider, package: packages[provider] }) } },
@@ -1588,7 +1975,7 @@ async function runAi(settings, context, purpose, signal) {
   const resolved = await resolveAiExecutable(executable, settings.provider, signal);
   if (signal == null ? void 0 : signal.aborted) throw Object.assign(new Error("Cancelled."), { name: "AbortError" });
   const stdout = await new Promise((resolve3, reject) => {
-    const child = (0, import_child_process4.spawn)(
+    const child = (0, import_child_process5.spawn)(
       resolved.executable,
       [...resolved.prefix, ...args],
       {
@@ -1602,7 +1989,7 @@ async function runAi(settings, context, purpose, signal) {
     let out = "", err = "", settled = false;
     const stop = () => {
       if (!child.pid) return;
-      if (windows) (0, import_child_process4.execFile)("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {
+      if (windows) (0, import_child_process5.execFile)("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {
       });
       else {
         try {
@@ -1996,16 +2383,16 @@ function structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, ne
       return;
     }
     diff.push({ value: "", lines: [] });
-    function contextLines(lines) {
-      return lines.map(function(entry) {
+    function contextLines(lines2) {
+      return lines2.map(function(entry) {
         return " " + entry;
       });
     }
     const hunks = [];
     let oldRangeStart = 0, newRangeStart = 0, curRange = [], oldLine = 1, newLine = 1;
     for (let i = 0; i < diff.length; i++) {
-      const current = diff[i], lines = current.lines || splitLines(current.value);
-      current.lines = lines;
+      const current = diff[i], lines2 = current.lines || splitLines(current.value);
+      current.lines = lines2;
       if (current.added || current.removed) {
         if (!oldRangeStart) {
           const prev = diff[i - 1];
@@ -2017,23 +2404,23 @@ function structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, ne
             newRangeStart -= curRange.length;
           }
         }
-        for (const line of lines) {
+        for (const line of lines2) {
           curRange.push((current.added ? "+" : "-") + line);
         }
         if (current.added) {
-          newLine += lines.length;
+          newLine += lines2.length;
         } else {
-          oldLine += lines.length;
+          oldLine += lines2.length;
         }
       } else {
         if (oldRangeStart) {
-          if (lines.length <= context * 2 && i < diff.length - 2) {
-            for (const line of contextLines(lines)) {
+          if (lines2.length <= context * 2 && i < diff.length - 2) {
+            for (const line of contextLines(lines2)) {
               curRange.push(line);
             }
           } else {
-            const contextSize = Math.min(lines.length, context);
-            for (const line of contextLines(lines.slice(0, contextSize))) {
+            const contextSize = Math.min(lines2.length, context);
+            for (const line of contextLines(lines2.slice(0, contextSize))) {
               curRange.push(line);
             }
             const hunk = {
@@ -2049,8 +2436,8 @@ function structuredPatch(oldFileName, newFileName, oldStr, newStr, oldHeader, ne
             curRange = [];
           }
         }
-        oldLine += lines.length;
-        newLine += lines.length;
+        oldLine += lines2.length;
+        newLine += lines2.length;
       }
     }
     for (const hunk of hunks) {
@@ -2235,7 +2622,7 @@ ${await readWorking(file.path)}` : "Added binary or unsupported file; content om
 }
 
 // src/baseView.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/panes.ts
 var CLS = {
@@ -2702,7 +3089,7 @@ var CharMarkLayer = class {
 
 // src/baseView.ts
 var VIEW_TYPE = "live-git-diff-base";
-var GitBaseView = class extends import_obsidian3.ItemView {
+var GitBaseView = class extends import_obsidian4.ItemView {
   constructor(leaf, host, side = "a") {
     super(leaf);
     this.side = "a";
@@ -2772,7 +3159,7 @@ var GitBaseView = class extends import_obsidian3.ItemView {
     if (this.renderKey !== key || !this.bodyEl) {
       this.renderKey = key;
       (_a = this.component) == null ? void 0 : _a.unload();
-      this.component = new import_obsidian3.Component();
+      this.component = new import_obsidian4.Component();
       this.component.load();
       const root = this.contentEl;
       root.empty();
@@ -2822,7 +3209,7 @@ var GitBaseView = class extends import_obsidian3.ItemView {
         if (block.type === "properties" || block.type === "reference" || ((_b = block.conservative) == null ? void 0 : _b.startsWith("Plugin-generated content"))) {
           content.createEl("pre").createEl("code", { text: block.text });
         } else {
-          entry.rendered = import_obsidian3.MarkdownRenderer.render(this.app, block.text + (references ? "\n\n" + references : ""), content, sourcePath, this.component);
+          entry.rendered = import_obsidian4.MarkdownRenderer.render(this.app, block.text + (references ? "\n\n" + references : ""), content, sourcePath, this.component);
         }
       }
       await entry.rendered;
@@ -2872,7 +3259,7 @@ var GitBaseView = class extends import_obsidian3.ItemView {
 };
 
 // src/historyView.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/history.ts
 var defaultLoader2 = {
@@ -3129,7 +3516,7 @@ function historyStatus(state) {
 
 // src/historyView.ts
 var HISTORY_VIEW_TYPE = "live-git-diff-history";
-var GitHistoryView = class extends import_obsidian4.ItemView {
+var GitHistoryView = class extends import_obsidian5.ItemView {
   constructor(leaf, host) {
     super(leaf);
     this.fileTitleEl = null;
@@ -3157,10 +3544,10 @@ var GitHistoryView = class extends import_obsidian4.ItemView {
     this.controller = new HistoryController(host.historyCache, (file, signal) => {
       if (file.historicalHead && this.historicalContext) return Promise.resolve(this.historicalContext);
       const current = this.app.vault.getAbstractFileByPath(file.path);
-      if (!(current instanceof import_obsidian4.TFile)) return Promise.reject(new Error("The note is no longer available."));
+      if (!(current instanceof import_obsidian5.TFile)) return Promise.reject(new Error("The note is no longer available."));
       return resolveRepository(this.app, current, signal);
     }, () => host.settings.logLimit, (state) => this.renderState(state));
-    this.scope = new import_obsidian4.Scope(this.app.scope);
+    this.scope = new import_obsidian5.Scope(this.app.scope);
     this.scope.register(["Mod"], "Enter", (event) => {
       if (!this.contentEl.contains(this.contentEl.ownerDocument.activeElement) || event.isComposing) return;
       if (!event.repeat) void this.applySelection();
@@ -3185,13 +3572,13 @@ var GitHistoryView = class extends import_obsidian4.ItemView {
     this.headingEl = heading;
     if (this.host.navigationState) {
       this.backEl = heading.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Back", title: "Back" } });
-      (0, import_obsidian4.setIcon)(this.backEl, "arrow-left");
+      (0, import_obsidian5.setIcon)(this.backEl, "arrow-left");
       this.backEl.onclick = () => {
         var _a2, _b;
         return (_b = (_a2 = this.host).navigationBack) == null ? void 0 : _b.call(_a2);
       };
       this.forwardEl = heading.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Forward", title: "Forward" } });
-      (0, import_obsidian4.setIcon)(this.forwardEl, "arrow-right");
+      (0, import_obsidian5.setIcon)(this.forwardEl, "arrow-right");
       this.forwardEl.onclick = () => {
         var _a2, _b;
         return (_b = (_a2 = this.host).navigationForward) == null ? void 0 : _b.call(_a2);
@@ -3201,13 +3588,13 @@ var GitHistoryView = class extends import_obsidian4.ItemView {
     this.contextEl = heading.createSpan({ cls: "lgd-history-context", attr: { role: "status", "aria-live": "polite" } });
     this.fileTitleEl = heading.createDiv({ cls: "lgd-history-file", text: "File History" });
     this.refreshEl = heading.createEl("button", { cls: "clickable-icon lgd-history-refresh", attr: { type: "button", "aria-label": "Refresh history", title: "Refresh history" } });
-    (0, import_obsidian4.setIcon)(this.refreshEl, "refresh-cw");
+    (0, import_obsidian5.setIcon)(this.refreshEl, "refresh-cw");
     this.refreshEl.onclick = () => {
       void this.controller.refresh();
     };
     if (this.host.openRepository) {
       const repo = heading.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Repository history", title: "Repository history" } });
-      (0, import_obsidian4.setIcon)(repo, "git-branch");
+      (0, import_obsidian5.setIcon)(repo, "git-branch");
       repo.onclick = () => {
         var _a2, _b, _c;
         const context = (_a2 = this.controller.state.entry) == null ? void 0 : _a2.context;
@@ -3216,7 +3603,7 @@ var GitHistoryView = class extends import_obsidian4.ItemView {
       };
     }
     this.followEl = heading.createEl("button", { cls: "clickable-icon lgd-history-follow", attr: { type: "button", "aria-label": "Show history for active note", title: "Show history for active note" } });
-    (0, import_obsidian4.setIcon)(this.followEl, "locate-fixed");
+    (0, import_obsidian5.setIcon)(this.followEl, "locate-fixed");
     this.followEl.onclick = () => {
       const file = this.host.historyActiveFile();
       if (file) void (this.host.openHistory ? this.host.openHistory(file) : this.setFile(file));
@@ -3297,7 +3684,7 @@ var GitHistoryView = class extends import_obsidian4.ItemView {
     const { file, selected, unavailable } = this.controller.state;
     if (!file || unavailable || this.closed) return;
     const current = () => !this.closed && this.controller.state.file === file && !this.controller.state.unavailable;
-    const menu = new import_obsidian4.Menu();
+    const menu = new import_obsidian5.Menu();
     const markdown = file.path.toLowerCase().endsWith(".md");
     if (markdown && commit.kind !== "workcopy" && !file.historicalHead) menu.addItem((item) => item.setTitle("Compare with Workcopy").setIcon("git-compare").setDisabled(this.applying || !!this.host.historyReviewState().openingFile).onClick(() => {
       if (current()) this.compareCommits([WORKCOPY, commit.sha]);
@@ -3454,7 +3841,7 @@ ${active.left} \u2194 ${active.right}` : "No comparison open.");
         content2.createDiv({ cls: "lgd-history-meta", text: commit.kind === "workcopy" ? commit.changeId ? `@ \xB7 ${commit.changeId.slice(0, 8)} \xB7 ${commit.subject}` : "Live document" : `${commit.changeId ? commit.changeId.slice(0, 8) + " \xB7 " : ""}${commit.shortSha} \xB7 ${commit.author || "Unknown author"}` });
         content2.createDiv({ cls: "lgd-history-date", text: `${commit.date} \xB7 ${commit.relative}` });
         const compare = row.createEl("button", { cls: "clickable-icon lgd-history-compare", attr: { type: "button" } });
-        (0, import_obsidian4.setIcon)(compare, "git-compare");
+        (0, import_obsidian5.setIcon)(compare, "git-compare");
         compare.onclick = (event) => {
           event.stopPropagation();
           void this.applySelection();
@@ -3482,7 +3869,7 @@ ${active.left} \u2194 ${active.right}` : "No comparison open.");
         let expand = row.querySelector(".lgd-history-expand");
         if (!expand) expand = row.createEl("button", { cls: "clickable-icon lgd-history-expand", attr: { type: "button", "aria-label": "Toggle snapshots" } });
         const group = (_p = state.expanded) == null ? void 0 : _p[commit.sha];
-        (0, import_obsidian4.setIcon)(expand, group ? "chevron-down" : "chevron-right");
+        (0, import_obsidian5.setIcon)(expand, group ? "chevron-down" : "chevron-right");
         content.setAttr("aria-expanded", String(!!group));
         expand.onclick = (event) => {
           event.stopPropagation();
@@ -3528,45 +3915,45 @@ ${commit.path}`);
 };
 
 // src/contextMenus.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 function registerFileMenus(plugin, host) {
   const { app } = plugin;
   const decorated = /* @__PURE__ */ new WeakSet();
   const bindings = /* @__PURE__ */ new Map();
   let disposed = false, scheduled = false;
   function addActions(menu, file, leaf) {
-    if (!(file instanceof import_obsidian5.TFile) && !(file instanceof import_obsidian5.TFolder) || decorated.has(menu)) return;
+    if (!(file instanceof import_obsidian6.TFile) && !(file instanceof import_obsidian6.TFolder) || decorated.has(menu)) return;
     decorated.add(menu);
     const run = async (compare) => {
       if (disposed) return;
       if (app.vault.getAbstractFileByPath(file.path) !== file) {
-        new import_obsidian5.Notice("The file is no longer available.");
+        new import_obsidian6.Notice("The file is no longer available.");
         return;
       }
       try {
-        if (compare && file instanceof import_obsidian5.TFile) await host.openReview({ file, leaf, repin: true });
-        else if (file instanceof import_obsidian5.TFolder) await host.openRepository(file);
-        else if (file instanceof import_obsidian5.TFile) await host.openHistory(file);
+        if (compare && file instanceof import_obsidian6.TFile) await host.openReview({ file, leaf, repin: true });
+        else if (file instanceof import_obsidian6.TFolder) await host.openRepository(file);
+        else if (file instanceof import_obsidian6.TFile) await host.openHistory(file);
       } catch (error2) {
-        new import_obsidian5.Notice(`Unable to ${compare ? "compare this file" : "open Git history"}: ${error2.message || error2}`);
+        new import_obsidian6.Notice(`Unable to ${compare ? "compare this file" : "open Git history"}: ${error2.message || error2}`);
       }
     };
     menu.addItem((item) => item.setSection("action").setTitle("VCS History").setIcon("history").onClick(() => run(false)));
-    if (file instanceof import_obsidian5.TFile && file.extension === "md") menu.addItem((item) => item.setSection("action").setTitle("VCS Compare").setIcon("git-compare").onClick(() => run(true)));
+    if (file instanceof import_obsidian6.TFile && file.extension === "md") menu.addItem((item) => item.setSection("action").setTitle("VCS Compare").setIcon("git-compare").onClick(() => run(true)));
     menu.addItem((item) => item.setSection("action").setTitle("Pending changes").setIcon("git-commit-horizontal").onClick(() => {
       if (!disposed) void host.openChanges(file);
     }));
-    if (file instanceof import_obsidian5.TFile && file.extension === "md") menu.addItem((item) => item.setSection("action").setTitle("VCS Explain").setIcon("sparkles").onClick(() => {
+    if (file instanceof import_obsidian6.TFile && file.extension === "md") menu.addItem((item) => item.setSection("action").setTitle("VCS Explain").setIcon("sparkles").onClick(() => {
       if (!disposed) void host.explainFile(file);
     }));
   }
   plugin.registerEvent(app.workspace.on("file-menu", (menu, file, _source, leaf) => addActions(menu, file, leaf)));
   plugin.registerEvent(app.workspace.on("editor-menu", (menu, _editor, info) => {
-    addActions(menu, info.file, info instanceof import_obsidian5.MarkdownView ? info.leaf : void 0);
+    addActions(menu, info.file, info instanceof import_obsidian6.MarkdownView ? info.leaf : void 0);
   }));
   function attach() {
     if (disposed) return;
-    const views = new Set(app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian5.MarkdownView));
+    const views = new Set(app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian6.MarkdownView));
     for (const [view, remove] of bindings) if (!views.has(view)) {
       remove();
       bindings.delete(view);
@@ -3582,12 +3969,12 @@ function registerFileMenus(plugin, host) {
         if (!reading && !table && !header) return;
         if (reading && target.closest('[contenteditable="true"]')) return;
         const alreadyHandled = event.defaultPrevented;
-        const menu = import_obsidian5.Menu.forEvent(event);
+        const menu = import_obsidian6.Menu.forEvent(event);
         if (reading && !alreadyHandled) {
           const selection = view.containerEl.ownerDocument.getSelection();
           const text = selection && view.containerEl.contains(selection.anchorNode) && view.containerEl.contains(selection.focusNode) ? selection.toString() : "";
           if (text) menu.addItem((item) => item.setSection("clipboard").setTitle("Copy").setIcon("copy").onClick(() => view.containerEl.ownerDocument.defaultView.navigator.clipboard.writeText(text).catch(() => {
-            new import_obsidian5.Notice("Unable to copy the selected text.");
+            new import_obsidian6.Notice("Unable to copy the selected text.");
           })));
         }
         addActions(menu, view.file, view.leaf);
@@ -3826,7 +4213,7 @@ var ComparisonWorker = class {
 // src/editor.ts
 var import_state = require("@codemirror/state");
 var import_view = require("@codemirror/view");
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 var presentReview = import_state.StateEffect.define();
 var ChangeMarker = class extends import_view.GutterMarker {
   constructor(kind, message) {
@@ -3851,7 +4238,7 @@ var reviewMarks = import_state.StateField.define({
   update(value, transaction) {
     var _a, _b;
     if (transaction.docChanged) return empty();
-    const info = transaction.state.field(import_obsidian6.editorInfoField, false);
+    const info = transaction.state.field(import_obsidian7.editorInfoField, false);
     for (const effect of transaction.effects) if (effect.is(presentReview)) {
       const data = effect.value;
       if (!data || data.filePath !== ((_a = info == null ? void 0 : info.file) == null ? void 0 : _a.path) || data.text !== transaction.state.doc.toString()) return empty();
@@ -3894,7 +4281,7 @@ function reviewExtension(host) {
         var _a, _b;
         const marks = update.state.field(reviewMarks);
         this.tables.update(marks.rows, marks.revision);
-        const path5 = (_b = (_a = update.state.field(import_obsidian6.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+        const path5 = (_b = (_a = update.state.field(import_obsidian7.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
         if (update.docChanged && path5) host.editorChanged(update.view, path5);
         if (update.geometryChanged || update.viewportChanged) host.editorGeometryChanged();
       }
@@ -3907,7 +4294,7 @@ function reviewExtension(host) {
 }
 function editorPath(view) {
   var _a, _b;
-  return (_b = (_a = view.state.field(import_obsidian6.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  return (_b = (_a = view.state.field(import_obsidian7.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
 }
 function publish(view, value, reviewing = !!value) {
   const effects = [presentReview.of(value)];
@@ -4640,14 +5027,15 @@ var ViewZones = class {
 };
 
 // src/settings.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 var DEFAULT_SETTINGS = {
   colors: { insBg: "", delBg: "", insRail: "", delRail: "" },
   baseRefMode: "head",
   baseRef: "main",
   logLimit: 50,
   debug: false,
-  ai: mergeAi(DEFAULT_AI)
+  ai: mergeAi(DEFAULT_AI),
+  remoteTargets: {}
 };
 var CSS_VAR = {
   insBg: "--lgd-ins-bg",
@@ -4717,10 +5105,11 @@ function mergeSettings(loaded) {
     // Nested object: a spread alone would replace the whole colors block with a
     // partial one from an older data.json and leave the new keys undefined.
     colors: { ...DEFAULT_SETTINGS.colors, ...l.colors || {} },
-    ai: mergeAi(l.ai)
+    ai: mergeAi(l.ai),
+    remoteTargets: Object.fromEntries(Object.entries(l.remoteTargets && typeof l.remoteTargets === "object" ? l.remoteTargets : {}).filter(([, target]) => target && typeof target.remote === "string" && typeof target.branch === "string").map(([key, target]) => [key, { remote: target.remote, branch: target.branch }]))
   };
 }
-var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
+var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -4728,22 +5117,23 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian7.Setting(containerEl).setName("AI assistants").setHeading();
+    if (this.plugin.configureRemote) new import_obsidian8.Setting(containerEl).setName("Remote").addButton((button) => button.setButtonText("Configure").onClick(() => this.plugin.configureRemote()));
+    new import_obsidian8.Setting(containerEl).setName("AI assistants").setHeading();
     for (const purpose of ["description", "explain"]) {
       const task = this.plugin.settings.ai[purpose];
-      new import_obsidian7.Setting(containerEl).setName(purpose === "description" ? "Change description" : "Explain").setHeading();
-      new import_obsidian7.Setting(containerEl).setName("Agent").addDropdown((dropdown) => dropdown.addOptions({ copilot: "GitHub Copilot", codex: "OpenAI Codex", claude: "Claude Code" }).setValue(task.provider).onChange(async (value) => {
+      new import_obsidian8.Setting(containerEl).setName(purpose === "description" ? "Change description" : "Explain").setHeading();
+      new import_obsidian8.Setting(containerEl).setName("Agent").addDropdown((dropdown) => dropdown.addOptions({ copilot: "GitHub Copilot", codex: "OpenAI Codex", claude: "Claude Code" }).setValue(task.provider).onChange(async (value) => {
         task.provider = value;
         task.model = "";
         task.executable = "";
         await this.plugin.saveSettings();
         this.display();
       }));
-      new import_obsidian7.Setting(containerEl).setName("CLI path").addText((text) => text.setPlaceholder(task.provider).setValue(task.executable).onChange(async (value) => {
+      new import_obsidian8.Setting(containerEl).setName("CLI path").addText((text) => text.setPlaceholder(task.provider).setValue(task.executable).onChange(async (value) => {
         task.executable = value.trim();
         await this.plugin.saveSettings();
       }));
-      new import_obsidian7.Setting(containerEl).setName("Model").addText((text) => {
+      new import_obsidian8.Setting(containerEl).setName("Model").addText((text) => {
         text.setPlaceholder("Agent default").setValue(task.model).onChange(async (value) => {
           task.model = value.trim();
           await this.plugin.saveSettings();
@@ -4753,7 +5143,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
         const choices = containerEl.createEl("datalist", { attr: { id } });
         for (const model of AI_MODELS[task.provider]) choices.createEl("option", { value: model });
       });
-      new import_obsidian7.Setting(containerEl).setName("Prompt").addTextArea((text) => {
+      new import_obsidian8.Setting(containerEl).setName("Prompt").addTextArea((text) => {
         text.inputEl.rows = 5;
         text.inputEl.addClass("lgd-ai-prompt");
         text.setValue(task.prompt).onChange(async (value) => {
@@ -4766,12 +5156,12 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
         this.display();
       }));
     }
-    new import_obsidian7.Setting(containerEl).setName("Base version").setHeading();
+    new import_obsidian8.Setting(containerEl).setName("Base version").setHeading();
     const pickerNote = containerEl.createEl("p", { cls: "lgd-settings-note" });
     pickerNote.setText(
       'To choose a version per review, use the command "Open review against a version\u2026" \u2014 the VCS History sidebar stays on the chosen file. Select one or two versions, then choose Compare. These settings decide what the note-header Compare action, VCS Compare menu and plain "Open git diff review" command compare against.'
     );
-    new import_obsidian7.Setting(containerEl).setName("Compare against by default").setDesc(
+    new import_obsidian8.Setting(containerEl).setName("Compare against by default").setDesc(
       "Whichever you pick is resolved to a commit when the review opens, and that commit is then pinned for the session \u2014 so the diff cannot shrink while something else commits to the repo mid-review."
     ).addDropdown(
       (d) => d.addOption("head", "The latest commit (HEAD)").addOption("head~1", "One commit before HEAD (HEAD~1)").addOption("file-prev", "This file's previous version").addOption("custom", "A specific ref\u2026").setValue(this.plugin.settings.baseRefMode).onChange(async (v) => {
@@ -4793,7 +5183,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
       );
     }
     if (this.plugin.settings.baseRefMode === "custom") {
-      new import_obsidian7.Setting(containerEl).setName("Ref").setDesc(
+      new import_obsidian8.Setting(containerEl).setName("Ref").setDesc(
         "Anything git resolves: main, origin/main, v1.2, HEAD~5, a sha, main@{yesterday}."
       ).addText(
         (t) => t.setPlaceholder("main").setValue(this.plugin.settings.baseRef).onChange(async (v) => {
@@ -4802,13 +5192,13 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
         })
       );
     }
-    new import_obsidian7.Setting(containerEl).setName("Versions to list").setDesc("How many commits to load per page in the Git history sidebar.").addSlider(
+    new import_obsidian8.Setting(containerEl).setName("Versions to list").setDesc("How many commits to load per page in the Git history sidebar.").addSlider(
       (s) => s.setLimits(10, 200, 10).setValue(this.plugin.settings.logLimit).setDynamicTooltip().onChange(async (v) => {
         this.plugin.settings.logLimit = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian7.Setting(containerEl).setName("Colors").setHeading();
+    new import_obsidian8.Setting(containerEl).setName("Colors").setHeading();
     const note = containerEl.createEl("p", { cls: "lgd-settings-note" });
     note.setText(
       "Defaults are GitHub's diff palette and follow your light/dark theme. Any CSS color works \u2014 including alpha, which matters: these are washes that sit behind text, and the defaults are translucent on purpose. Leave a field empty to use the default. An override applies to both themes."
@@ -4816,7 +5206,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
     Object.keys(CSS_VAR).forEach((key) => {
       const label = FIELD_LABEL[key];
       let swatch = null;
-      const setting = new import_obsidian7.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
+      const setting = new import_obsidian8.Setting(containerEl).setName(label.name).setDesc(label.desc).addText((t) => {
         t.setPlaceholder(LIGHT_DEFAULT[key]).setValue(this.plugin.settings.colors[key]).onChange(async (v) => {
           const val = v.trim();
           const ok = isValidColor(val);
@@ -4832,15 +5222,15 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
       swatch = setting.controlEl.createDiv({ cls: "lgd-swatch", text: "abc" });
       swatch.style.background = this.plugin.settings.colors[key] || LIGHT_DEFAULT[key];
     });
-    new import_obsidian7.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
+    new import_obsidian8.Setting(containerEl).setName("Reset colors").setDesc("Clear all five overrides and go back to the theme-aware defaults.").addButton(
       (b) => b.setButtonText("Reset").onClick(async () => {
         this.plugin.settings.colors = { ...DEFAULT_SETTINGS.colors };
         await this.plugin.saveSettings();
         this.display();
       })
     );
-    new import_obsidian7.Setting(containerEl).setName("Advanced").setHeading();
-    if (this.plugin.resetHistoryCache) new import_obsidian7.Setting(containerEl).setName("History cache").addButton((button) => button.setButtonText("Reset cache").onClick(async () => {
+    new import_obsidian8.Setting(containerEl).setName("Advanced").setHeading();
+    if (this.plugin.resetHistoryCache) new import_obsidian8.Setting(containerEl).setName("History cache").addButton((button) => button.setButtonText("Reset cache").onClick(async () => {
       button.setDisabled(true);
       try {
         await this.plugin.resetHistoryCache();
@@ -4848,7 +5238,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
         button.setDisabled(false);
       }
     }));
-    new import_obsidian7.Setting(containerEl).setName("Debug logging").setDesc(
+    new import_obsidian8.Setting(containerEl).setName("Debug logging").setDesc(
       "Verbose console output, and extra detail in the alignment report. Warnings and errors are logged regardless of this setting."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.debug).onChange(async (v) => {
@@ -4860,7 +5250,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian7.PluginSettingTab {
 };
 
 // src/main.ts
-var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
+var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
@@ -4871,6 +5261,8 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     this.cacheSaveTimer = null;
     this.navigationRequest = 0;
     this.explainRequest = 0;
+    this.remoteJobs = /* @__PURE__ */ new Map();
+    this.remoteModals = /* @__PURE__ */ new Set();
     this.historicalContext = null;
     this.worker = new ComparisonWorker();
     this.revisions = new RevisionGate();
@@ -4910,33 +5302,43 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     this.registerView(EXPLAIN_VIEW_TYPE, (leaf) => new ExplainView(leaf));
     registerFileMenus(this, this);
     this.addSettingTab(new LiveGitDiffSettingTab(this.app, this));
-    const command2 = (id, name, run, review = false) => {
+    const command3 = (id, name, run, review = false) => {
       this.addCommand({ id, name, checkCallback: (checking) => {
         const allowed = review ? !!this.session : !!this.contextFile();
         if (allowed && !checking) run();
         return allowed;
       } });
     };
-    command2("open-review", "Open git diff review for this file", () => {
+    command3("open-review", "Open git diff review for this file", () => {
       void this.openReview();
     });
-    command2("open-review-against-ref", "Open review against a version\u2026", () => {
+    command3("open-review-against-ref", "Open review against a version\u2026", () => {
       void this.openHistory();
     });
-    command2("refresh-review", "Refresh review (re-pin the base version)", () => {
+    command3("refresh-review", "Refresh review (re-pin the base version)", () => {
       void this.openReview({ repin: true });
     });
-    command2("close-review", "Close review", () => this.closeReview(), true);
-    command2("toggle-scroll-sync", "Toggle scroll sync", () => this.toggleSync(), true);
-    command2("copy-alignment-report", "Copy alignment report to clipboard", () => {
+    command3("close-review", "Close review", () => this.closeReview(), true);
+    command3("toggle-scroll-sync", "Toggle scroll sync", () => this.toggleSync(), true);
+    command3("copy-alignment-report", "Copy alignment report to clipboard", () => {
       void this.reportAlignment();
     }, true);
-    command2("refresh-annotations", "Refresh annotations in the note pane", () => this.rerenderPreviews(), true);
+    command3("refresh-annotations", "Refresh annotations in the note pane", () => this.rerenderPreviews(), true);
     this.addCommand({ id: "repository-history", name: "Open repository history", callback: () => {
       void this.openRepository();
     } });
     this.addCommand({ id: "repository-changes", name: "Open pending changes", callback: () => {
       void this.openChanges();
+    } });
+    for (const action of ["push", "pull"]) this.addCommand({
+      id: `repository-${action}`,
+      name: action === "push" ? "Push to remote" : "Pull from remote",
+      callback: () => {
+        void this.syncCurrentRepository(action);
+      }
+    });
+    this.addCommand({ id: "repository-remote", name: "Configure repository remote", callback: () => {
+      void this.configureRemote();
     } });
     (_a = this.addRibbonIcon) == null ? void 0 : _a.call(this, "git-branch", "Repository history", () => {
       void this.openRepository();
@@ -4954,10 +5356,10 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     this.registerEvent(this.app.workspace.on("resize", () => this.sync.attach()));
     this.registerEvent(this.app.vault.on("modify", (file) => {
       var _a2, _b, _c, _d;
-      if (file instanceof import_obsidian8.TFile && (file.path === ((_a2 = this.session) == null ? void 0 : _a2.filePath) || file.path === ((_c = (_b = this.historyView()) == null ? void 0 : _b.controller.state.file) == null ? void 0 : _c.path))) {
+      if (file instanceof import_obsidian9.TFile && (file.path === ((_a2 = this.session) == null ? void 0 : _a2.filePath) || file.path === ((_c = (_b = this.historyView()) == null ? void 0 : _b.controller.state.file) == null ? void 0 : _c.path))) {
         void this.scheduleSavedSnapshot(file);
       }
-      if (!this.isHistoricalPair() && file instanceof import_obsidian8.TFile && file.path === ((_d = this.session) == null ? void 0 : _d.filePath)) void this.externalChange(file);
+      if (!this.isHistoricalPair() && file instanceof import_obsidian9.TFile && file.path === ((_d = this.session) == null ? void 0 : _d.filePath)) void this.externalChange(file);
     }));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
       var _a2, _b;
@@ -4966,7 +5368,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
       const view = this.historyView(), path5 = (_b = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b.path;
       if (path5 && contains(path5)) {
         const renamed = this.app.vault.getAbstractFileByPath(file.path + path5.slice(oldPath.length));
-        if (renamed instanceof import_obsidian8.TFile) void view.setFile(renamed);
+        if (renamed instanceof import_obsidian9.TFile) void view.setFile(renamed);
       }
       this.scheduleLayout();
     }));
@@ -4986,6 +5388,8 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     });
   }
   onunload() {
+    for (const job of this.remoteJobs.values()) job.abort();
+    for (const modal of this.remoteModals) modal.close();
     if (this.cacheSaveTimer) {
       clearTimeout(this.cacheSaveTimer);
       this.cacheSaveTimer = null;
@@ -5054,12 +5458,12 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   }
   contextFile() {
     var _a, _b, _c, _d;
-    const active = (_a = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView)) == null ? void 0 : _a.file;
+    const active = (_a = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _a.file;
     if ((active == null ? void 0 : active.extension) === "md") return active;
     const leaf = this.app.workspace.activeLeaf;
     const path5 = (leaf == null ? void 0 : leaf.view) instanceof GitBaseView ? (_b = this.session) == null ? void 0 : _b.filePath : (_d = (_c = this.historyView()) == null ? void 0 : _c.controller.state.file) == null ? void 0 : _d.path;
     const file = path5 ? this.app.vault.getAbstractFileByPath(path5) : this.app.workspace.getActiveFile();
-    return file instanceof import_obsidian8.TFile && file.extension === "md" ? file : null;
+    return file instanceof import_obsidian9.TFile && file.extension === "md" ? file : null;
   }
   historyActiveFile() {
     const leaf = this.app.workspace.getMostRecentLeaf();
@@ -5070,8 +5474,8 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     });
     if (!alive) return null;
     const view = leaf.view, participant = this.participants.get(leaf);
-    const file = view instanceof import_obsidian8.MarkdownView ? view.file : view instanceof GitBaseView && (participant == null ? void 0 : participant.type) === VIEW_TYPE && participant.side === view.side && this.session ? this.app.vault.getAbstractFileByPath(this.session.filePath) : null;
-    return file instanceof import_obsidian8.TFile && file.extension === "md" && this.app.vault.getAbstractFileByPath(file.path) === file ? file : null;
+    const file = view instanceof import_obsidian9.MarkdownView ? view.file : view instanceof GitBaseView && (participant == null ? void 0 : participant.type) === VIEW_TYPE && participant.side === view.side && this.session ? this.app.vault.getAbstractFileByPath(this.session.filePath) : null;
+    return file instanceof import_obsidian9.TFile && file.extension === "md" && this.app.vault.getAbstractFileByPath(file.path) === file ? file : null;
   }
   scheduleLayout() {
     if (this.disposed) return;
@@ -5092,7 +5496,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     });
   }
   updateActions() {
-    const views = new Set(this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian8.MarkdownView));
+    const views = new Set(this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((view) => view instanceof import_obsidian9.MarkdownView));
     for (const [view, buttons] of this.actions) if (!views.has(view)) {
       buttons.compare.remove();
       buttons.history.remove();
@@ -5122,8 +5526,8 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
         this.actions.set(view, buttons);
       }
       const closing = this.participants.has(view.leaf);
-      (0, import_obsidian8.setIcon)(buttons.compare, closing ? "x" : "git-compare");
-      (0, import_obsidian8.setTooltip)(buttons.compare, closing ? "Close comparison" : "Compare");
+      (0, import_obsidian9.setIcon)(buttons.compare, closing ? "x" : "git-compare");
+      (0, import_obsidian9.setTooltip)(buttons.compare, closing ? "Close comparison" : "Compare");
       buttons.compare.setAttr("aria-label", closing ? "Close comparison" : "Compare");
     }
   }
@@ -5140,7 +5544,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   watchReadingPane() {
     var _a, _b, _c;
     const view = (_a = this.reviewLeaf) == null ? void 0 : _a.view;
-    const root = !this.isHistoricalPair() && ((_b = this.session) == null ? void 0 : _b.status) === "ready" && view instanceof import_obsidian8.MarkdownView && view.getMode() === "preview" ? view.containerEl : null;
+    const root = !this.isHistoricalPair() && ((_b = this.session) == null ? void 0 : _b.status) === "ready" && view instanceof import_obsidian9.MarkdownView && view.getMode() === "preview" ? view.containerEl : null;
     if (root === this.previewRoot) return;
     (_c = this.previewObserver) == null ? void 0 : _c.disconnect();
     this.previewObserver = null;
@@ -5160,7 +5564,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
       alive.add(leaf);
     });
     for (const [leaf, expected] of this.participants) {
-      if (!alive.has(leaf) || leaf.view.getViewType() !== expected.type || expected.path && (!(leaf.view instanceof import_obsidian8.MarkdownView) || ((_a = leaf.view.file) == null ? void 0 : _a.path) !== expected.path) || expected.side && (!(leaf.view instanceof GitBaseView) || leaf.view.side !== expected.side)) {
+      if (!alive.has(leaf) || leaf.view.getViewType() !== expected.type || expected.path && (!(leaf.view instanceof import_obsidian9.MarkdownView) || ((_a = leaf.view.file) == null ? void 0 : _a.path) !== expected.path) || expected.side && (!(leaf.view instanceof GitBaseView) || leaf.view.side !== expected.side)) {
         this.closeReview();
         return;
       }
@@ -5201,7 +5605,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     try {
       if (route.kind === "file") {
         const file = this.app.vault.getAbstractFileByPath(route.filePath);
-        if (file instanceof import_obsidian8.TFile) await this.openHistory(file, false);
+        if (file instanceof import_obsidian9.TFile) await this.openHistory(file, false);
         else if (route.context && route.revision) {
           await this.openHistory(null, false);
           if (request === this.navigationRequest) await ((_a = this.historyView()) == null ? void 0 : _a.setHistoricalFile(route.filePath, route.context, route.revision));
@@ -5220,7 +5624,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
         await view.setRoute(route);
       }
     } catch (error2) {
-      if (request === this.navigationRequest) new import_obsidian8.Notice(`Unable to navigate: ${error2.message}`);
+      if (request === this.navigationRequest) new import_obsidian9.Notice(`Unable to navigate: ${error2.message}`);
     }
     if (request === this.navigationRequest) this.updateNavigation();
   }
@@ -5229,8 +5633,8 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     await this.showNavigation(route);
   }
   async contextRepository(target) {
-    if (target instanceof import_obsidian8.TFile) return resolveRepository(this.app, target);
-    if (target instanceof import_obsidian8.TFolder) return resolveRepositoryDirectory(this.app, target.path);
+    if (target instanceof import_obsidian9.TFile) return resolveRepository(this.app, target);
+    if (target instanceof import_obsidian9.TFolder) return resolveRepositoryDirectory(this.app, target.path);
     const current = this.navigation.current;
     if (current && current.kind !== "file") return current.context;
     const file = this.contextFile();
@@ -5239,9 +5643,9 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   async openRepository(target) {
     try {
       const context = await this.contextRepository(target);
-      await this.navigateRepository({ kind: "log", context, path: target instanceof import_obsidian8.TFolder ? context.rel || void 0 : void 0 });
+      await this.navigateRepository({ kind: "log", context, path: target instanceof import_obsidian9.TFolder ? context.rel || void 0 : void 0 });
     } catch (error2) {
-      new import_obsidian8.Notice(`Unable to open repository history: ${error2.message}`);
+      new import_obsidian9.Notice(`Unable to open repository history: ${error2.message}`);
     }
   }
   async openChanges(target) {
@@ -5249,7 +5653,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
       const context = await this.contextRepository(target);
       await this.navigateRepository({ kind: "changes", context, paths: target && context.rel ? [context.rel] : void 0 });
     } catch (error2) {
-      new import_obsidian8.Notice(`Unable to open pending changes: ${error2.message}`);
+      new import_obsidian9.Notice(`Unable to open pending changes: ${error2.message}`);
     }
   }
   async openChangeDetails(context, sha) {
@@ -5270,21 +5674,21 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
       const filePath = this.repositoryVaultPath(context, relative3);
       const file = this.app.vault.getAbstractFileByPath(filePath);
       const archivedContext = { ...context, rel: relative3, abs: absPathOf(this.app, { path: filePath }) };
-      if (!(file instanceof import_obsidian8.TFile) && !revision) throw new Error("The file is no longer available. Open it from a change.");
+      if (!(file instanceof import_obsidian9.TFile) && !revision) throw new Error("The file is no longer available. Open it from a change.");
       const route = { kind: "file", filePath, context: archivedContext, revision };
       this.navigation.push(route);
       await this.showNavigation(route);
     } catch (error2) {
-      new import_obsidian8.Notice(error2.message);
+      new import_obsidian9.Notice(error2.message);
     }
   }
   async openRepositoryNote(context, relative3) {
     try {
       const file = this.app.vault.getAbstractFileByPath(this.repositoryVaultPath(context, relative3));
-      if (!(file instanceof import_obsidian8.TFile)) throw new Error("The file is no longer available in the vault.");
+      if (!(file instanceof import_obsidian9.TFile)) throw new Error("The file is no longer available in the vault.");
       await this.app.workspace.getLeaf("tab").openFile(file);
     } catch (error2) {
-      new import_obsidian8.Notice(error2.message);
+      new import_obsidian9.Notice(error2.message);
     }
   }
   loadRepositoryHistory(context, folder, offset, limit, signal) {
@@ -5295,6 +5699,90 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     this.repositoryCache.invalidate(context.root);
     const history = this.historyView();
     if (((_a = history == null ? void 0 : history.controller.state.entry) == null ? void 0 : _a.context.root) === context.root) await history.controller.refresh();
+  }
+  remoteKey(context, options) {
+    return JSON.stringify([
+      context.backend || "git",
+      context.workspaceRoot || context.root,
+      context.backend === "jj" ? "" : options.currentBranch || ""
+    ]);
+  }
+  chooseRemote(context, options, action) {
+    if (!options.remotes.length) throw new Error("No remote configured. Add a remote in your VCS, then try again.");
+    const key = this.remoteKey(context, options);
+    const initial = this.settings.remoteTargets[key] || options.suggested;
+    return new Promise((resolve3) => {
+      const modal = new RemoteTargetModal(this.app, {
+        ...options,
+        initial,
+        title: action ? action === "push" ? "Push" : "Pull" : "Remote",
+        submitLabel: action ? action === "push" ? "Push" : "Pull" : "Save",
+        onSubmit: async (target) => {
+          this.settings.remoteTargets[key] = { ...target };
+          await persistSettings(this);
+          this.remoteModals.delete(modal);
+          resolve3(target);
+        },
+        onCancel: () => {
+          this.remoteModals.delete(modal);
+          resolve3(null);
+        }
+      });
+      this.remoteModals.add(modal);
+      modal.open();
+    });
+  }
+  async remoteContext() {
+    var _a;
+    const view = (_a = this.app.workspace.activeLeaf) == null ? void 0 : _a.view;
+    if (view instanceof GitRepositoryView && view.currentRoute) return view.currentRoute.context;
+    if (view instanceof GitHistoryView && view.controller.state.entry) return view.controller.state.entry.context;
+    const file = this.app.workspace.getActiveFile();
+    return this.contextRepository(file || void 0);
+  }
+  async configureRemote(context) {
+    try {
+      const ctx = context || await this.remoteContext();
+      if (this.remoteJobs.has(ctx.root)) throw new Error("A remote operation is already running.");
+      const options = await getRepositoryRemotes(ctx);
+      if (!this.disposed) await this.chooseRemote(ctx, options);
+    } catch (error2) {
+      new import_obsidian9.Notice(error2.message);
+    }
+  }
+  async syncCurrentRepository(action) {
+    try {
+      await this.syncRepository(await this.remoteContext(), action);
+    } catch (error2) {
+      if (!this.disposed) new import_obsidian9.Notice(error2.message, 1e4);
+    }
+  }
+  async syncRepository(context, action) {
+    var _a, _b, _c;
+    if (this.remoteJobs.has(context.root)) throw new Error("A remote operation is already running.");
+    const job = new AbortController();
+    this.remoteJobs.set(context.root, job);
+    let progress, started = false;
+    try {
+      const options = await getRepositoryRemotes(context, job.signal);
+      if (job.signal.aborted || this.disposed) return;
+      const saved = this.settings.remoteTargets[this.remoteKey(context, options)];
+      const inferred = saved && options.remotes.includes(saved.remote) ? saved : options.suggested;
+      const target = inferred || await this.chooseRemote(context, options, action);
+      if (!target || job.signal.aborted || this.disposed) return;
+      progress = new import_obsidian9.Notice(`${action === "push" ? "Pushing to" : "Pulling from"} ${target.remote}/${target.branch}\u2026`, 0);
+      started = true;
+      const result = await (action === "push" ? pushRepository : pullRepository)(context, target, job.signal);
+      if (!this.disposed) new import_obsidian9.Notice(result.message);
+    } finally {
+      progress == null ? void 0 : progress.hide();
+      this.remoteJobs.delete(context.root);
+      if (started && !this.disposed) {
+        await this.repositoryChanged(context).catch((error2) => warn("Unable to refresh after remote operation", error2));
+        if (((_b = (_a = this.repositoryView()) == null ? void 0 : _a.currentRoute) == null ? void 0 : _b.context.root) === context.root)
+          await ((_c = this.repositoryView()) == null ? void 0 : _c.refresh());
+      }
+    }
   }
   scheduleCacheSave() {
     if (this.disposed || this.cacheSaveTimer) return;
@@ -5312,7 +5800,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   }
   async readRepositoryWorking(context, relative3) {
     const file = this.app.vault.getAbstractFileByPath(this.repositoryVaultPath(context, relative3));
-    if (!(file instanceof import_obsidian8.TFile)) throw new Error("The file is not available in this vault.");
+    if (!(file instanceof import_obsidian9.TFile)) throw new Error("The file is not available in this vault.");
     if (file.stat.size > 1048576) return "[Large file content omitted.]";
     return this.app.vault.read(file);
   }
@@ -5337,7 +5825,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
       const settings = { ...this.settings.ai.explain };
       await view.explain(title, async (signal) => runAi(settings, await prepare(signal), "explain", signal));
     } catch (error2) {
-      new import_obsidian8.Notice(`Unable to explain: ${error2.message}`);
+      new import_obsidian9.Notice(`Unable to explain: ${error2.message}`);
     }
   }
   async explainFile(file) {
@@ -5403,7 +5891,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     if (commits.length !== 2 || commits[0].sha === commits[1].sha) throw new Error("Select two distinct versions to compare.");
     const file = this.app.vault.getAbstractFileByPath(filePath);
     if (!filePath.toLowerCase().endsWith(".md")) throw new Error("Comparison is available for Markdown files.");
-    if (!(file instanceof import_obsidian8.TFile)) {
+    if (!(file instanceof import_obsidian9.TFile)) {
       const history = (_a = this.historyView()) == null ? void 0 : _a.controller.state;
       if (((_b = history == null ? void 0 : history.file) == null ? void 0 : _b.path) !== filePath || !history.file.historicalHead || !history.entry || commits.some((c) => c.kind === "workcopy")) throw new Error("The note is no longer available.");
       await this.openHistorical({ path: filePath, name: history.file.name }, commits[0], commits[1], history.entry.context);
@@ -5421,15 +5909,15 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     const file = s && this.app.vault.getAbstractFileByPath(s.filePath);
     if (s && (left == null ? void 0 : left.kind) === "commit" && (right == null ? void 0 : right.kind) === "commit" && left.commit && right.commit) {
       const historical = this.historicalContext;
-      if (file instanceof import_obsidian8.TFile || historical) void this.openHistorical(file instanceof import_obsidian8.TFile ? file : { path: s.filePath, name: s.fileName }, right.commit, left.commit, historical || void 0);
+      if (file instanceof import_obsidian9.TFile || historical) void this.openHistorical(file instanceof import_obsidian9.TFile ? file : { path: s.filePath, name: s.fileName }, right.commit, left.commit, historical || void 0);
     }
   }
   liveNoteText(filePath) {
     var _a;
-    const active = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+    const active = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
     const view = ((_a = active == null ? void 0 : active.file) == null ? void 0 : _a.path) === filePath ? active : this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).find((view2) => {
       var _a2;
-      return view2 instanceof import_obsidian8.MarkdownView && ((_a2 = view2.file) == null ? void 0 : _a2.path) === filePath && view2.getMode() === "source";
+      return view2 instanceof import_obsidian9.MarkdownView && ((_a2 = view2.file) == null ? void 0 : _a2.path) === filePath && view2.getMode() === "source";
     });
     return (view == null ? void 0 : view.getMode()) === "source" ? view.editor.getValue() : void 0;
   }
@@ -5472,7 +5960,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   }
   currentEditor(path5 = ((_a) => (_a = this.session) == null ? void 0 : _a.filePath)()) {
     var _a2;
-    if (this.isHistoricalPair() || !(((_a2 = this.reviewLeaf) == null ? void 0 : _a2.view) instanceof import_obsidian8.MarkdownView) || this.reviewLeaf.view.getMode() !== "source") return null;
+    if (this.isHistoricalPair() || !(((_a2 = this.reviewLeaf) == null ? void 0 : _a2.view) instanceof import_obsidian9.MarkdownView) || this.reviewLeaf.view.getMode() !== "source") return null;
     const candidates = [...this.editors].filter((view) => editorPath(view) === path5 && this.isReviewEditor(view));
     return this.preferredEditor && candidates.includes(this.preferredEditor) ? this.preferredEditor : candidates[0] || null;
   }
@@ -5552,8 +6040,8 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     if (!previous || !this.revisions.accepts(identity2)) return;
     try {
       const available = this.app.vault.getAbstractFileByPath(identity2.filePath);
-      if (!(available instanceof import_obsidian8.TFile) && !this.isHistoricalPair()) throw new Error("The note is no longer available.");
-      const file = available instanceof import_obsidian8.TFile ? available : { path: previous.filePath, name: previous.fileName };
+      if (!(available instanceof import_obsidian9.TFile) && !this.isHistoricalPair()) throw new Error("The note is no longer available.");
+      const file = available instanceof import_obsidian9.TFile ? available : { path: previous.filePath, name: previous.fileName };
       const currentText = this.isHistoricalPair() ? previous.currentText : (_b = (_a = this.currentEditor(identity2.filePath)) == null ? void 0 : _a.state.doc.toString()) != null ? _b : await this.app.vault.read(file);
       if (!this.revisions.accepts(identity2)) return;
       const result = await this.worker.compare({ identity: identity2, baseText: previous.baseText, currentText, options: { breaks: previous.breaks } });
@@ -5600,11 +6088,11 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   }
   async noteLeaf(file, preferred) {
     var _a, _b;
-    const active = preferred || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView)) == null ? void 0 : _a.leaf);
-    if ((active == null ? void 0 : active.view) instanceof import_obsidian8.MarkdownView && ((_b = active.view.file) == null ? void 0 : _b.path) === file.path) return active;
+    const active = preferred || ((_a = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView)) == null ? void 0 : _a.leaf);
+    if ((active == null ? void 0 : active.view) instanceof import_obsidian9.MarkdownView && ((_b = active.view.file) == null ? void 0 : _b.path) === file.path) return active;
     const existing = this.app.workspace.getLeavesOfType("markdown").find((leaf2) => {
       var _a2;
-      return leaf2.view instanceof import_obsidian8.MarkdownView && ((_a2 = leaf2.view.file) == null ? void 0 : _a2.path) === file.path;
+      return leaf2.view instanceof import_obsidian9.MarkdownView && ((_a2 = leaf2.view.file) == null ? void 0 : _a2.path) === file.path;
     });
     if (existing) return existing;
     const leaf = this.app.workspace.getLeaf("tab");
@@ -5615,7 +6103,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     var _a, _b, _c;
     const file = opts.file || this.contextFile();
     if (!file || file.extension !== "md") {
-      new import_obsidian8.Notice("Open a Markdown note.");
+      new import_obsidian9.Notice("Open a Markdown note.");
       return;
     }
     const keep = !opts.repin && !opts.ref && !this.isHistoricalPair() && ((_a = this.session) == null ? void 0 : _a.filePath) === file.path && this.session.sha ? { sha: this.session.sha, label: this.session.baseRefLabel } : null;
@@ -5704,7 +6192,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
   async openingError(error2, file, opening) {
     if (opening !== this.opening || error2.name === "AbortError") return;
     const message = error2.message;
-    new import_obsidian8.Notice(message);
+    new import_obsidian9.Notice(message);
     this.session = errorSession(file, message);
     this.publishEditorMarks();
     if (!this.baseView()) {
@@ -5761,7 +6249,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
       return (view2 == null ? void 0 : view2.bodyEl) ? { view: {}, scroller: view2.bodyEl, scrollToLine: (line) => view2.scrollToLine(line) } : null;
     }
     const view = (_a = this.reviewLeaf) == null ? void 0 : _a.view;
-    if (!(view instanceof import_obsidian8.MarkdownView) || ((_b = view.file) == null ? void 0 : _b.path) !== session.filePath) return null;
+    if (!(view instanceof import_obsidian9.MarkdownView) || ((_b = view.file) == null ? void 0 : _b.path) !== session.filePath) return null;
     const cm = this.currentEditor();
     if (cm && view.getMode() === "source" && cm.dom.isConnected) return { view, scroller: cm.scrollDOM, editorView: cm };
     if (view.getMode() === "preview") {
@@ -5821,7 +6309,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     var _a, _b;
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (!this.isHistoricalPair() && leaf === this.reviewLeaf && view instanceof import_obsidian8.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath) && view.getMode() === "preview") {
+      if (!this.isHistoricalPair() && leaf === this.reviewLeaf && view instanceof import_obsidian9.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath) && view.getMode() === "preview") {
         for (const section of this.readingSections(view)) this.decorateNoteSection(section.el, section.info);
       }
     }
@@ -5832,7 +6320,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     (_b = this.zones) == null ? void 0 : _b.reset();
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (!(view instanceof import_obsidian8.MarkdownView)) continue;
+      if (!(view instanceof import_obsidian9.MarkdownView)) continue;
       const elements = /* @__PURE__ */ new Set([...this.readingSections(view).map((s) => s.el), ...Array.from(view.containerEl.querySelectorAll(`.${CLS.nblock}`))]);
       for (const el of elements) if (el.hasClass(CLS.nblock)) {
         unwrapCharMarks(el);
@@ -5850,7 +6338,7 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     var _a, _b;
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian8.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath)) view.previewMode.rerender(true);
+      if (view instanceof import_obsidian9.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === ((_b = this.session) == null ? void 0 : _b.filePath)) view.previewMode.rerender(true);
     }
   }
   async reportAlignment() {
@@ -5870,10 +6358,10 @@ var LiveGitDiffPlugin = class extends import_obsidian8.Plugin {
     };
     try {
       await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
-      new import_obsidian8.Notice("Alignment report copied.");
+      new import_obsidian9.Notice("Alignment report copied.");
     } catch (e) {
       warn("Clipboard unavailable", report);
-      new import_obsidian8.Notice("Alignment report is available in the console.");
+      new import_obsidian9.Notice("Alignment report is available in the console.");
     }
   }
 };
