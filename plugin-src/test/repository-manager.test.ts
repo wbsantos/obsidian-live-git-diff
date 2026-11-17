@@ -8,6 +8,7 @@ import type { App } from 'obsidian';
 import type { GitContext } from '../src/git.ts';
 import { createChange, getChangeDetails, getRepositoryStatus, listRepositoryHistory, repositoryAnchor, resolveRepositoryDirectory } from '../src/repositoryManager.ts';
 import { repositoryAiContext } from '../src/aiContext.ts';
+import { previousReviewBase, snapshotWorkspace } from '../src/repository.ts';
 
 function fixture(backend: 'git' | 'jj' = 'git', colocate = true) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lgd-manager-'));
@@ -33,14 +34,26 @@ for (const backend of ['git', 'jj'] as const) test(`AI evidence includes only se
     f.write('private.md', 'Unrelated content that must not be sent.');
     if (backend === 'git') { f.git('add','story.md'); f.write('story.md','# Story\n\nReviewed acceptance criterion.\n\nEdited after staging.\n'); }
     const status = await getRepositoryStatus(f.ctx);
-    const evidence = await repositoryAiContext(f.ctx, {paths:['story.md'],token:status.token}, async file => fs.readFileSync(path.join(f.dir,file),'utf8'));
+    const evidence = await repositoryAiContext(f.ctx, {paths:['story.md'],token:status.token});
     assert.match(evidence, /Reviewed acceptance criterion/); assert.doesNotMatch(evidence, /private.md|Unrelated content/);
     if (backend === 'git') assert.match(evidence,/Edited after staging/);
     await createChange(f.ctx, ['story.md'], 'Reviewed story', status.token);
     const sha = backend === 'jj' ? f.jj('log','-G','-r','@-','-T','commit_id') : f.git('rev-parse','HEAD');
-    const committed = await repositoryAiContext(f.ctx, {sha}, async () => { throw new Error('A committed explanation must not read working files.'); });
+    const committed = await repositoryAiContext(f.ctx, {sha});
     assert.match(committed,/Reviewed acceptance criterion/); assert.doesNotMatch(committed,/Unrelated content/);
-    await assert.rejects(repositoryAiContext(f.ctx, {paths:['private.md'],token:status.token}, async () => ''), /Files changed/);
+    await assert.rejects(repositoryAiContext(f.ctx, {paths:['private.md'],token:status.token}), /Files changed/);
+  } finally { f.clean(); }
+});
+
+test('Git AI evidence and selected commits include hidden additions outside an Obsidian vault', async () => {
+  const f = fixture();
+  try {
+    f.write('.github/types/external.d.ts', 'export interface External { id: string }\n');
+    const status = await getRepositoryStatus(f.ctx);
+    const evidence = await repositoryAiContext(f.ctx, { paths: ['.github/types/external.d.ts'], token: status.token });
+    assert.match(evidence, /export interface External/);
+    await createChange(f.ctx, ['.github/types/external.d.ts'], 'Add external type', status.token);
+    assert.equal(f.git('show', 'HEAD:.github/types/external.d.ts'), 'export interface External { id: string }');
   } finally { f.clean(); }
 });
 
@@ -92,9 +105,10 @@ test('failed Git commit restores temporary intent-to-add entries and preserves o
   try {
     f.write('a.md', 'one'); f.git('add', '.'); f.git('commit', '-m', 'initial');
     f.write('a.md', 'two'); f.git('add', 'a.md'); f.write('new.md', 'new');
-    f.write('.git/hooks/pre-commit', '#!/bin/sh\nexit 1\n');
+    // Hooks often print their rejection on stdout, which must reach the panel.
+    f.write('.git/hooks/pre-commit', '#!/bin/sh\necho "Hook rejected: include a ticket reference"\nexit 1\n');
     const before = f.git('status', '--porcelain');
-    await assert.rejects(createChange(f.ctx, ['new.md'], 'Rejected', (await getRepositoryStatus(f.ctx)).token));
+    await assert.rejects(createChange(f.ctx, ['new.md'], 'Rejected', (await getRepositoryStatus(f.ctx)).token), /Hook rejected: include a ticket reference/);
     assert.equal(f.git('status', '--porcelain'), before);
     assert.equal(f.git('show', ':a.md'), 'two');
   } finally { f.clean(); }
@@ -143,7 +157,7 @@ for (const colocate of [true, false]) test(`JJ selected changes preserve working
     assert.deepEqual(details.files.map(file => [file.path, file.status]), [['folder/[story].md', 'A']]);
     const anchor = await repositoryAnchor(f.ctx);
     const history = await listRepositoryHistory(f.ctx, { offset: 0, limit: 1, anchor });
-    assert.equal(history.hasMore, true);
+    assert.equal(history.hasMore, false, 'the uncommitted JJ working change belongs to the pending row, not committed history');
     f.write('other.md', 'changed while browsing'); f.jj('util', 'snapshot');
     const same = await listRepositoryHistory(f.ctx, { offset: 0, limit: 1, anchor });
     assert.deepEqual(history.changes, same.changes);
@@ -152,5 +166,34 @@ for (const colocate of [true, false]) test(`JJ selected changes preserve working
     await assert.rejects(createChange(f.ctx, ['other.md'], 'Stale', remaining.token), /Files changed/);
     const app = { vault: { adapter: { getFullPath: (value: string) => path.join(f.dir, value) } } } as unknown as App;
     const folder = await resolveRepositoryDirectory(app, 'folder'); assert.equal(folder.backend, 'jj'); assert.equal(folder.rel, 'folder');
+  } finally { f.clean(); }
+});
+
+for (const backend of ['git', 'jj'] as const) test(`previous-version default chooses HEAD for this dirty note and HEAD's immediate parent when clean (${backend})`, async () => {
+  const f = fixture(backend);
+  try {
+    f.write('note.md', 'one\n');
+    if (backend === 'git') { f.git('add','.'); f.git('commit','-m','First'); }
+    else f.jj('commit','-m','First');
+    f.write('note.md', 'two\n');
+    if (backend === 'git') f.git('commit','-am','Second');
+    else f.jj('commit','-m','Second');
+    const second = backend === 'git' ? f.git('rev-parse','HEAD') : f.jj('log','-G','-r','@-','-T','commit_id');
+    f.write('other.md', 'unrelated commit\n');
+    if (backend === 'git') { f.git('add','.'); f.git('commit','-m','Unrelated third commit'); }
+    else f.jj('commit','-m','Unrelated third commit');
+    const head = backend === 'git' ? f.git('rev-parse','HEAD') : f.jj('log','-G','-r','@-','-T','commit_id');
+    const ctx = {...f.ctx, rel:'note.md', abs:path.join(f.dir,'note.md')};
+    assert.deepEqual(await previousReviewBase(ctx), {sha:second,label:'HEAD~1'});
+    f.write('other.md','unrelated pending edit\n');await snapshotWorkspace(ctx);
+    assert.equal((await previousReviewBase(ctx)).sha, second, 'only this note determines dirty/clean');
+    assert.deepEqual(await previousReviewBase(ctx,undefined,'unsaved note\n'), {sha:head,label:'HEAD'});
+    assert.equal((await previousReviewBase(ctx,undefined,'two\r\n')).sha, second, 'editor line ending normalization is not a content change');
+    f.write('note.md','local edit\n');await snapshotWorkspace(ctx);
+    assert.deepEqual(await previousReviewBase(ctx), {sha:head,label:'HEAD'});
+    if (backend === 'git') {
+      f.git('add','note.md');f.write('note.md','two\n');
+      assert.equal((await previousReviewBase(ctx)).sha,head,'staged changes also select HEAD');
+    }
   } finally { f.clean(); }
 });

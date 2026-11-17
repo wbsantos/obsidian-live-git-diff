@@ -11,13 +11,13 @@ Previously named **Live Git Diff**. The plugin ID and installation folder remain
 1. Open **VCS History** for a note and select a version alongside **Workcopy**.
 2. Compare the pair, review the highlighted changes and edit the note normally.
 3. In Jujutsu, keep snapshots during the review without changing the current change ID.
-4. Open **Pending changes**, select the reviewed files and enter a description—or generate one with your AI CLI.
+4. Open **VCS Pending Changes**, select the reviewed files and enter a description—or generate one with your AI CLI.
 5. Choose **Create change** to finalize the selection. Continue with the remaining files in the working copy.
 6. **Push** the reviewed changes to your remote branch. Use **Pull** to bring in changes from another computer or contributor.
 
 ## Compare and edit notes
 
-Use **Compare** in the note header to compare the current document with the configured base version. **VCS Compare** in a note's context menu opens the same review. Choose a default base in settings: the latest commit, one commit earlier, this file's previous version, or a custom reference.
+Use **Compare** in the note header to compare the current document with the configured base version. **VCS Compare** in a note's context menu opens the same review. The default **This file's previous version** compares with HEAD when this note has uncommitted changes, or HEAD's direct parent (HEAD~1) when it is clean. Settings also offer a fixed HEAD, HEAD~1, or custom reference. The note header has separate file-history (clock) and repository-history (branch) actions.
 
 The historical version is read-only; the current note retains Obsidian's editing, selection, undo, redo and saving. Comparisons update as you type and also work in Reading view. The chosen historical revision stays pinned even if another tool changes the repository during your review. **Refresh review (re-pin the base version)** explicitly chooses a new base.
 
@@ -36,11 +36,17 @@ The historical version is read-only; the current note retains Obsidian's editing
 
 **Workcopy** appears first and is selected by default. Click another version, then use either selected row's compare icon or **Ctrl/Cmd+Enter** to compare the pair. Double-clicking a version also opens the comparison when two versions are selected. With Workcopy selected, choosing another historical version replaces the previous historical selection; without Workcopy, you can select two historical versions.
 
+When the file matches HEAD, **Workcopy · HEAD** combines the live version and the latest committed version of that file in one row, retaining the commit details. Editing the file restores separate versions.
+
 Right-click a version to compare it with Workcopy or another selected version, open its **Change details**, request an **Explain**, or clear selections. Preparing a pair does not replace an existing comparison until you apply it. Reopening the same file history retains its selection, filter and scroll position.
 
 In a Jujutsu workspace, expand a change to see its earlier snapshots. The current Workcopy change starts expanded. The timeline filters out snapshots that did not alter this note's content; a later return to earlier content still appears as another event. Collapsing a change clears any selected snapshots beneath it.
 
-Automatic Jujutsu snapshots run after **15 seconds** without relevant saves, and when history or comparisons need a current repository state. They record saved workspace content while preserving the change ID. Automatic save monitoring applies to notes with a history panel or comparison open. The explicit **Snapshot working copy** action is also available in Pending changes. Git repositories do not receive automatic commits.
+Automatic Jujutsu snapshots run after **15 seconds** without relevant saves, when history or comparisons need a current repository state, and during normal Obsidian shutdown. Closing waits for the snapshot, even with no note or review open. Automatic save monitoring applies to notes with a history panel or comparison open; shutdown also covers Jujutsu workspaces used during this session.
+
+Note-triggered snapshots first compare the saved file with the latest snapshot. An unchanged note does not trigger a workspace snapshot; changes to another file do not make that note dirty. Each monitored file has its own save debounce.
+
+The camera in the left ribbon runs **Snapshot working copy (entire repository)**; the action is also available in Pending changes. Both manual and automatic snapshots record saved content across the entire Jujutsu workspace, including hidden files and files outside the vault, subject to Jujutsu tracking and ignore rules. They preserve the current change ID and do not finalize a change. The camera and shutdown snapshots apply only to Jujutsu; Git repositories do not receive automatic commits. Force termination and crashes cannot run the shutdown task.
 
 ![Jujutsu file history with snapshots beneath the current Workcopy](docs/screenshots/history-jj/jj-workcopy-evolog-light.png)
 
@@ -66,7 +72,9 @@ Deleted files can be opened from change details into historical File History. Th
 
 ## Create a change from selected files
 
-Open **Pending changes** from a note header, file or folder context menu, repository header, or the command palette. Opening it from a file or folder preselects that target's pending files. Select individual files with checkboxes, use Select all, or right-click a folder to select or deselect its contents. The list includes non-Markdown files as well as notes.
+Open **VCS Pending Changes** from a file or folder context menu, repository header, or the command palette. Opening it from a file or folder preselects that target's pending files. Select individual files with checkboxes, use Select all, or right-click a folder to select or deselect its contents. The list includes non-Markdown files as well as notes.
+
+Use the **View** selector to switch between **File Tree** and a flat **File List**. Hover over a filename to see its full path. The plugin remembers the view and retains your filter, selected files and description when switching.
 
 Enter a description, then choose **Create change** or press **Ctrl/Cmd+Enter**. The plugin checks that the repository still matches the list you reviewed; if files have changed, refresh and review the selection again. Failed submissions retain your description and selection.
 
@@ -85,9 +93,11 @@ Selections include whole files. Selecting a renamed file includes both its old a
 
 Use **Push** and **Pull** in the repository panel header, or the commands **Push to remote** and **Pull from remote**. These actions apply to the repository, including when the panel shows a folder or a change. The panel shows progress, prevents repeated submissions, and refreshes history after the operation.
 
-![Push, Pull and remote settings in the repository context menu](docs/screenshots/repository/remote-actions.png)
+![Repository synchronization actions](docs/screenshots/repository/remote-actions.png)
 
-The plugin uses the current branch's upstream, a tracked bookmark, or the default remote (`origin` when present). When the destination is ambiguous, choose a **Remote** and **Branch** on first use. Right-click the repository heading or location and choose **Remote settings** to change the destination; it is also available from plugin settings and the **Configure repository remote** command. Choices are remembered per repository, and per local branch for Git. Existing remotes and credentials come from your Git/Jujutsu setup; the plugin does not store passwords or tokens.
+The plugin uses the current Git branch's configured upstream, or the uniquely tracked Jujutsu bookmark. It has no separate remote configuration: set tracking in Git/Jujutsu if it is absent or ambiguous. Existing remotes and credentials come from your VCS setup; the plugin does not store passwords or tokens.
+
+Repository history uses green dots for commits reachable from the tracked remote branch and amber dots for commits not recorded there. This reads the local remote-tracking state; opening history does not fetch from the network. A gray **Uncommitted changes** item appears at the top when files are pending and opens the Pending changes panel.
 
 ![Remote and branch selection](docs/screenshots/repository/remote-settings.png)
 
@@ -131,7 +141,7 @@ AI actions send the selected document or change evidence to the CLI's configured
 | Compare the current note | Note-header **Compare**; note-menu **VCS Compare**; command palette |
 | File or folder history | Explorer context-menu **VCS History**; note header/menu; affected-file tree |
 | Repository history | Ribbon; history-panel headers; **Open repository history** command |
-| Pending changes | Note header; file/folder menus; repository header; **Open pending changes** command |
+| Pending changes | File/folder menus; repository header; **Open VCS Pending Changes** command |
 | Change details | Click a repository row; right-click a File History version |
 | Explain | Note, version, change and affected-file/folder context menus |
 | Generate a description | Sparkle button beside the Pending changes selection |
@@ -187,6 +197,6 @@ Change Review covers everyday documentation review, selective recording and remo
 
 Repository lists and selected changes support non-Markdown files, while rendered comparisons are Markdown-only. Files outside the current vault may appear in repository details but cannot be opened as vault notes. Ignored files are not force-tracked.
 
-Historical content uses Obsidian's Markdown renderer. Properties and unsupported syntax are compared conservatively, plugin-generated output does not define equality, and moved blocks have no special category. When detailed analysis reaches its budget, the panel identifies simplified results. Native table highlighting reports a limitation if Obsidian's renderer prevents reliable mapping.
+Historical content uses Obsidian's Markdown renderer. Historical metadata appears as read-only properties, including lists, tags, links and checkboxes. Properties and unsupported syntax are compared conservatively, plugin-generated output does not define equality, and moved blocks have no special category. When detailed analysis reaches its budget, the panel identifies simplified results. Native table highlighting reports a limitation if Obsidian's renderer prevents reliable mapping.
 
 The plugin does not directly edit note content through vault or filesystem APIs. Your edits stay under Obsidian's control; explicit Create change actions and Jujutsu snapshots write repository history and metadata, and Pull can update working files through the VCS. AI actions generate descriptions or explanations for review and do not apply document edits.

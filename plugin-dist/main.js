@@ -258,6 +258,22 @@ async function snapshotWorkspace(ctx, signal) {
     await jj(root, ["util", "snapshot"], signal, true);
   });
 }
+async function snapshotNote(ctx, signal) {
+  if (ctx.backend !== "jj") return false;
+  return withRepositoryMutation(ctx, async () => {
+    var _a;
+    if (signal == null ? void 0 : signal.aborted) throw new Error("Snapshot cancelled");
+    const sha = (await jj(ctx.workspaceRoot, ["log", "-G", "-r", "@", "-T", "commit_id"], signal)).trim();
+    const [tree, hash] = await Promise.all([
+      gitRead(ctx.root, ["--literal-pathspecs", "ls-tree", "-z", sha, "--", ctx.rel], signal),
+      gitRead(ctx.root, ["hash-object", "--no-filters", "--", ctx.abs], signal)
+    ]);
+    const stored = (_a = tree.match(/^\d+ blob ([0-9a-f]+)\t/)) == null ? void 0 : _a[1];
+    if (stored === hash.trim()) return false;
+    await jj(ctx.workspaceRoot, ["util", "snapshot"], signal, true);
+    return true;
+  });
+}
 async function resolveRepository(app, file, signal) {
   const abs = absPathOf(app, file), dir = path2.dirname(abs);
   let workspaceRoot;
@@ -288,7 +304,7 @@ function records(out) {
 }
 async function repositoryHead(ctx, signal) {
   if (ctx.backend === "jj") {
-    await snapshotWorkspace(ctx, signal);
+    await snapshotNote(ctx, signal);
     return (await jj(ctx.workspaceRoot, ["log", "-G", "-r", "@", "-T", "commit_id"], signal)).trim();
   }
   try {
@@ -302,12 +318,24 @@ async function repositoryLog(ctx, head2, limit, signal) {
   const wc = workcopy(ctx.rel);
   if (!head2) return [wc];
   const log = await fileLogAsync(ctx.root, ctx.rel, limit, { head: head2, signal });
-  if (ctx.backend !== "jj") return [wc, ...log];
+  if (ctx.backend !== "jj") {
+    const changed2 = await gitRead(ctx.root, ["--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", head2, "--", ctx.rel], signal);
+    if (log.length && !changed2) {
+      Object.assign(wc, { currentSha: head2, headCommit: log[0] });
+      return [wc, ...log.slice(1)];
+    }
+    return [wc, ...log];
+  }
   const ids = [.../* @__PURE__ */ new Set([head2, ...log.map((c) => c.sha)])];
   const meta = records(await jj(ctx.workspaceRoot, ["log", "-G", "-r", ids.join("|"), "-T", `json({${fields()}}) ++ "\\n"`], signal));
   const current = meta.find((c) => c.sha === head2);
   Object.assign(wc, { changeId: current.changeId, currentSha: head2, subject: current.subject === "(no description)" ? "Workcopy" : current.subject });
-  return [wc, ...log.filter((c) => c.sha !== head2).map((c) => ({ ...c, ...meta.find((m) => m.sha === c.sha), path: c.path }))];
+  const history = log.filter((c) => c.sha !== head2).map((c) => ({ ...c, ...meta.find((m) => m.sha === c.sha), path: c.path }));
+  const changed = await jj(ctx.workspaceRoot, ["diff", "-r", head2, "--summary", "--", `root-file:${JSON.stringify(ctx.rel)}`], signal);
+  if (history.length && !changed.trim()) {
+    wc.headCommit = history.shift();
+  }
+  return [wc, ...history];
 }
 async function revisionInfo(ctx, sha, signal) {
   if (sha.startsWith("-")) throw new Error("Invalid revision.");
@@ -319,6 +347,24 @@ async function revisionInfo(ctx, sha, signal) {
 async function resolveRevision(ctx, ref, signal) {
   if (ctx.backend !== "jj") return resolveRefAsync(ctx.root, ref, signal);
   return (await revisionInfo(ctx, ref === "HEAD" ? "@-" : ref === "HEAD~1" ? "@--" : ref, signal)).sha;
+}
+async function previousReviewBase(ctx, signal, workingText) {
+  const head2 = await resolveRevision(ctx, "HEAD", signal);
+  const status = ctx.backend === "jj" ? await jj(ctx.workspaceRoot, ["diff", "-r", "@", "--summary", "--", `root-file:${JSON.stringify(ctx.rel)}`], signal) : await gitRead(ctx.root, ["--literal-pathspecs", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ctx.rel], signal);
+  let dirty = !!status.trim();
+  if (!dirty && workingText !== void 0) {
+    const base = await readBaseAtAsync(ctx.root, ctx.rel, head2, signal);
+    const normalize = (text) => text.replace(/\r\n?/g, "\n");
+    dirty = normalize(base.text) !== normalize(workingText);
+  }
+  if (dirty) return { sha: head2, label: "HEAD" };
+  try {
+    const sha = await resolveRevision(ctx, ctx.backend === "jj" ? `${head2}-` : `${head2}^`, signal);
+    return { sha, label: "HEAD~1" };
+  } catch (error2) {
+    if (signal == null ? void 0 : signal.aborted) throw error2;
+    throw new Error("HEAD has no single previous commit to compare against. Choose a version explicitly.");
+  }
 }
 async function readRevision(ctx, commit, signal) {
   if (commit.absent) return { text: "", path: commit.path, renamedFrom: null };
@@ -335,7 +381,7 @@ async function readRevision(ctx, commit, signal) {
 async function evolution(ctx, parent, limit, signal) {
   if (ctx.backend !== "jj") return { commits: [], hasMore: false };
   const start = parent.kind === "workcopy" ? parent.currentSha : parent.sha;
-  const entries = records(await jj(ctx.workspaceRoot, ["evolog", "-G", "-r", start, "-n", String(limit + 1), "-T", `json({${fields("self.commit().")}, "predecessors" => predecessors.map(|c| c.commit_id()), "operationDate" => operation.time().end().local().format("%b %d, %H:%M:%S")}) ++ "\\n"`], signal));
+  const entries = records(await jj(ctx.workspaceRoot, ["evolog", "-G", "-r", start, "-n", String(limit + 1), "-T", `json({${fields("self.commit().")}}) ++ "\\n"`], signal));
   const versions = [];
   let last;
   let previous, trackedPath = parent.path || ctx.rel;
@@ -371,6 +417,15 @@ async function evolution(ctx, parent, limit, signal) {
 }
 
 // src/repositoryManager.ts
+var RepositoryCommandError = class extends Error {
+  constructor(binary, error2, stdout, stderr) {
+    var _a, _b;
+    const details = [...new Set([stderr.trim(), stdout.trim()].filter(Boolean))].join("\n");
+    super(details || `${binary} failed (${(_a = error2.code) != null ? _a : "no exit code"}). ${error2.message.trim()}`);
+    this.exitCode = (_b = error2.code) != null ? _b : void 0;
+    this.details = details;
+  }
+};
 function command(binary, cwd, args, signal, input) {
   return new Promise((resolve3, reject) => {
     var _a, _b;
@@ -386,7 +441,7 @@ function command(binary, cwd, args, signal, input) {
         signal,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
       },
-      (error2, out, err) => error2 ? reject(new Error(String(err || error2.message).trim())) : resolve3(out)
+      (error2, out, err) => error2 ? reject(new RepositoryCommandError(binary, error2, out, err)) : resolve3(out)
     );
     (_a = child.stdin) == null ? void 0 : _a.on("error", () => {
     });
@@ -414,7 +469,7 @@ async function head(ctx, signal) {
     return (await git(ctx, ["rev-parse", "--verify", "--quiet", "HEAD"], signal)).trim();
   } catch (error2) {
     if (signal == null ? void 0 : signal.aborted) throw error2;
-    if (/^Command failed:/.test(String(error2.message))) return "";
+    if (error2 instanceof RepositoryCommandError && error2.exitCode === 1 && !error2.details) return "";
     throw error2;
   }
 }
@@ -474,7 +529,7 @@ async function listRepositoryHistory(ctx, options, signal) {
       "log",
       "-G",
       "-r",
-      "all() ~ root()",
+      "(all() ~ root()) ~ @",
       "-n",
       String(offset + limit + 1),
       "-T",
@@ -630,9 +685,26 @@ async function pendingPatch(ctx, file, signal) {
   validPath(file.path);
   if (file.oldPath) validPath(file.oldPath);
   if (ctx.backend === "jj") return jj2(ctx, ["diff", "--git", "-r", "@", "--", `root-file:${JSON.stringify(file.path)}`, ...file.oldPath ? [`root-file:${JSON.stringify(file.oldPath)}`] : []], signal);
+  if (file.status === "A") return untrackedPatch(ctx, file.path, signal);
   const current = await head(ctx, signal);
-  if (!current && file.status === "A") return "";
   return git(ctx, ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", ...current ? [current] : ["--cached"], "--", file.path, ...file.oldPath ? [file.oldPath] : []], signal);
+}
+function untrackedPatch(ctx, filePath, signal) {
+  return new Promise((resolve3, reject) => {
+    var _a, _b;
+    const child = (0, import_child_process3.execFile)(
+      "git",
+      ["--literal-pathspecs", "-C", ctx.root, "diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "/dev/null", filePath],
+      { cwd: ctx.root, encoding: "utf8", windowsHide: true, timeout: 6e4, maxBuffer: 64 * 1024 * 1024, signal },
+      (error2, out, err) => {
+        if (error2 && error2.code !== 1) reject(new RepositoryCommandError("git", error2, out, err));
+        else resolve3(out || "Added binary or unsupported file; content omitted.");
+      }
+    );
+    (_a = child.stdin) == null ? void 0 : _a.on("error", () => {
+    });
+    (_b = child.stdin) == null ? void 0 : _b.end();
+  });
 }
 
 // src/repositoryCache.ts
@@ -817,632 +889,16 @@ var RepositoryCache = class {
 
 // src/repositoryView.ts
 var import_obsidian = require("obsidian");
-var REPOSITORY_VIEW_TYPE = "live-git-diff-repository";
-var statusName = (status) => ({ A: "Added", M: "Modified", D: "Deleted", R: "Renamed", C: "Copied", U: "Conflict", "?": "Added", T: "Type changed" })[status[0]] || status;
-var identity = (ctx) => `${ctx.backend || "git"}
-${ctx.workspaceRoot || ctx.root}`;
-var routeKey = (route) => `${identity(route.context)}
-${route.kind}
-${route.kind === "details" ? route.sha : route.kind === "log" ? route.path || "" : ""}`;
-var displayDate = (value) => {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
-};
-var GitRepositoryView = class extends import_obsidian.ItemView {
-  constructor(leaf, host) {
-    super(leaf);
-    this.route = null;
-    this.visits = /* @__PURE__ */ new Map();
-    this.state = null;
-    this.job = null;
-    this.generation = 0;
-    this.closed = false;
-    this.loading = false;
-    this.mutating = false;
-    this.remoteAction = null;
-    this.error = "";
-    this.changes = [];
-    this.hasMore = false;
-    this.details = null;
-    this.status = null;
-    this.body = null;
-    this.footer = null;
-    this.back = null;
-    this.forward = null;
-    this.createButton = null;
-    this.selectionLabel = null;
-    this.query = null;
-    this.more = null;
-    this.aiJob = null;
-    this.aiButton = null;
-    this.host = host;
-    this.scope = new import_obsidian.Scope(this.app.scope);
-    this.scope.register(["Mod"], "Enter", (event) => {
-      var _a;
-      if (event.isComposing || !this.contentEl.contains(this.contentEl.ownerDocument.activeElement)) return;
-      if (((_a = this.route) == null ? void 0 : _a.kind) === "changes" && !event.repeat) void this.submit();
-      return false;
-    });
-  }
-  get currentRoute() {
-    return this.route;
-  }
-  getViewType() {
-    return REPOSITORY_VIEW_TYPE;
-  }
-  getDisplayText() {
-    return "Repository";
-  }
-  getIcon() {
-    return "git-branch";
-  }
-  async onOpen() {
-    this.closed = false;
-    this.contentEl.addClass("lgd-repository");
-    this.render();
-  }
-  async onClose() {
-    var _a, _b;
-    this.rememberScroll();
-    this.closed = true;
-    (_a = this.job) == null ? void 0 : _a.abort();
-    (_b = this.aiJob) == null ? void 0 : _b.abort();
-    this.generation++;
-  }
-  async setRoute(route) {
-    var _a, _b;
-    (_a = this.aiJob) == null ? void 0 : _a.abort();
-    this.rememberScroll();
-    (_b = this.job) == null ? void 0 : _b.abort();
-    this.generation++;
-    this.route = route;
-    const key = routeKey(route);
-    let state = this.visits.get(key);
-    if (!state) {
-      state = { query: "", scroll: 0, collapsed: /* @__PURE__ */ new Set(), selected: /* @__PURE__ */ new Set(), description: "", initialized: false, pages: 1 };
-      this.visits.set(key, state);
-      if (this.visits.size > 60) {
-        const evict = [...this.visits.keys()].find((candidate) => candidate !== key && !candidate.includes("\nchanges\n"));
-        if (evict) this.visits.delete(evict);
-      }
-    }
-    this.state = state;
-    this.changes = [];
-    this.anchor = void 0;
-    this.details = null;
-    this.status = null;
-    this.hasMore = false;
-    this.error = "";
-    await this.loadRoute(false, route.kind === "changes" ? route.paths : void 0);
-  }
-  async refresh() {
-    if (!this.mutating) {
-      this.rememberScroll();
-      await this.loadRoute(false);
-    }
-  }
-  updateNavigation() {
-    const nav = this.host.navigationState();
-    if (this.back) this.back.disabled = !nav.back || this.mutating;
-    if (this.forward) this.forward.disabled = !nav.forward || this.mutating;
-  }
-  rememberScroll() {
-    if (this.state && this.body) this.state.scroll = this.body.scrollTop;
-  }
-  async run(action) {
-    try {
-      await action();
-    } catch (error2) {
-      if (!this.closed) {
-        this.error = String(error2.message || error2);
-        this.updateFooter();
-      }
-    }
-  }
-  navigate(route) {
-    if (!this.mutating) void this.run(() => this.host.navigateRepository(route));
-  }
-  actionButton(parent, icon, label, action) {
-    const button = parent.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": label, title: label } });
-    (0, import_obsidian.setIcon)(button, icon);
-    button.onclick = action;
-    return button;
-  }
-  async loadRoute(append, requestedPaths) {
-    var _a;
-    const route = this.route, state = this.state;
-    if (!route || !state || this.closed) return;
-    (_a = this.job) == null ? void 0 : _a.abort();
-    const job = this.job = new AbortController(), generation = ++this.generation;
-    const current = () => !this.closed && generation === this.generation;
-    this.loading = true;
-    this.error = "";
-    if (!append) this.render();
-    else this.updateFooter();
-    try {
-      if (route.kind === "log") {
-        const limit = Math.min(200, Math.max(10, this.host.settings.logLimit));
-        let pages = append ? 1 : state.pages;
-        const accumulated = append ? [...this.changes] : [];
-        let anchor = append ? this.anchor : void 0, restarted = false;
-        let hasMore = false;
-        for (let index = 0; index < pages; index++) {
-          const page = await this.host.loadRepositoryHistory(route.context, route.path, accumulated.length, limit, job.signal);
-          if (!current()) return;
-          if (accumulated.length && anchor && page.anchor && anchor !== page.anchor) {
-            if (restarted) throw new Error("Repository changed while loading history. Refresh to continue.");
-            accumulated.length = 0;
-            state.pages = 1;
-            pages = 1;
-            index = -1;
-            anchor = void 0;
-            restarted = true;
-            continue;
-          }
-          anchor = page.anchor;
-          accumulated.push(...page.changes);
-          hasMore = page.hasMore;
-          if (!hasMore) break;
-        }
-        this.changes = accumulated;
-        this.hasMore = hasMore;
-        this.anchor = anchor;
-        if (append && !restarted) state.pages++;
-      } else if (route.kind === "details") {
-        const result = await getChangeDetails(route.context, route.sha, job.signal);
-        if (!current()) return;
-        this.details = result;
-      } else {
-        const result = await getRepositoryStatus(route.context, job.signal);
-        if (!current()) return;
-        this.status = result;
-        const existing = new Set(result.files.map((file) => file.path));
-        state.selected = new Set([...state.selected].filter((path5) => existing.has(path5)));
-        if (!state.initialized && !state.description) state.description = result.description || "";
-        if (requestedPaths == null ? void 0 : requestedPaths.length) {
-          state.selected.clear();
-          for (const file of result.files) if (requestedPaths.some((path5) => file.path === path5 || file.path.startsWith(path5.replace(/\/$/, "") + "/"))) state.selected.add(file.path);
-        }
-        state.initialized = true;
-      }
-    } catch (error2) {
-      if (current() && !job.signal.aborted) this.error = String(error2.message || error2);
-    } finally {
-      if (current()) {
-        this.loading = false;
-        this.render();
-      }
-    }
-  }
-  render() {
-    var _a, _b;
-    if (this.closed) return;
-    const root = this.contentEl;
-    root.empty();
-    this.query = null;
-    this.more = null;
-    this.createButton = null;
-    this.selectionLabel = null;
-    this.aiButton = null;
-    const heading = root.createDiv({ cls: "lgd-repository-heading" });
-    this.back = this.actionButton(heading, "arrow-left", "Back", () => this.host.navigationBack());
-    this.forward = this.actionButton(heading, "arrow-right", "Forward", () => this.host.navigationForward());
-    const route = this.route;
-    const title = (route == null ? void 0 : route.kind) === "changes" ? "Pending changes" : (route == null ? void 0 : route.kind) === "details" ? "Change details" : (route == null ? void 0 : route.path) ? route.path.split("/").pop() : "Repository history";
-    heading.createDiv({ cls: "lgd-repository-title", text: title, attr: { title: (route == null ? void 0 : route.kind) === "log" && route.path ? route.path : title } });
-    if (route) {
-      if (route.kind !== "log" || route.path) this.actionButton(heading, "history", "Repository history", () => this.navigate({ kind: "log", context: route.context }));
-      if (route.kind !== "changes") this.actionButton(heading, "git-commit-horizontal", "Pending changes", () => this.navigate({ kind: "changes", context: route.context }));
-      if (route.kind === "changes" && route.context.backend === "jj") this.actionButton(heading, "camera", "Snapshot working copy", () => {
-        void this.snapshot();
-      });
-      if (this.host.syncRepository) {
-        this.actionButton(heading, "download", "Pull", () => {
-          void this.remote("pull");
-        }).disabled = this.loading || this.mutating;
-        this.actionButton(heading, "upload", "Push", () => {
-          void this.remote("push");
-        }).disabled = this.loading || this.mutating;
-      }
-      const refresh = this.actionButton(heading, "refresh-cw", "Refresh", () => {
-        void this.refresh();
-      });
-      refresh.disabled = this.loading || this.mutating;
-      const context = route.kind === "log" && route.path ? route.path : (route.context.workspaceRoot || route.context.root).replace(/\\/g, "/").split("/").pop() || "Repository";
-      const location = root.createDiv({ cls: "lgd-repository-location", text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
-      heading.oncontextmenu = location.oncontextmenu = (event) => this.remoteMenu(event);
-    }
-    if ((route == null ? void 0 : route.kind) === "log" || (route == null ? void 0 : route.kind) === "changes") {
-      this.query = root.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: route.kind === "log" ? "Filter loaded changes" : "Filter files", attr: { "aria-label": route.kind === "log" ? "Filter loaded changes" : "Filter files" } });
-      this.query.value = ((_a = this.state) == null ? void 0 : _a.query) || "";
-      this.query.oninput = () => {
-        if (this.state) this.state.query = this.query.value;
-        this.renderBody();
-      };
-    }
-    this.body = root.createDiv({ cls: "lgd-repository-body" });
-    this.body.addEventListener("keydown", (event) => this.moveFocus(event));
-    this.renderBody();
-    if ((route == null ? void 0 : route.kind) === "log" && this.hasMore) {
-      this.more = root.createEl("button", { cls: "lgd-history-more", text: "Load more", attr: { type: "button" } });
-      this.more.onclick = () => {
-        this.rememberScroll();
-        void this.loadRoute(true);
-      };
-    }
-    if ((route == null ? void 0 : route.kind) === "changes" && this.state) this.renderComposer(root, this.state);
-    this.footer = root.createDiv({ cls: "lgd-history-footer", attr: { role: "status", "aria-live": "polite" } });
-    this.updateFooter();
-    this.updateNavigation();
-    this.body.scrollTop = ((_b = this.state) == null ? void 0 : _b.scroll) || 0;
-    this.setMutationDisabled();
-  }
-  renderBody() {
-    var _a;
-    const body = this.body, route = this.route, state = this.state;
-    if (!body) return;
-    const scroll = body.scrollTop;
-    body.empty();
-    const query = (state == null ? void 0 : state.query.trim().toLocaleLowerCase()) || "";
-    if ((route == null ? void 0 : route.kind) === "log") {
-      body.setAttr("role", "list");
-      body.setAttr("aria-label", "Repository changes");
-      const changes = this.changes.filter((change2) => [change2.subject, change2.sha, change2.changeId || "", change2.author, change2.date].some((value) => value.toLocaleLowerCase().includes(query)));
-      for (const change2 of changes) {
-        const row = body.createDiv({ cls: "lgd-repository-history-row", attr: { role: "listitem" } });
-        const button = row.createEl("button", { cls: "lgd-repository-change", attr: { type: "button" } });
-        button.createDiv({ cls: "lgd-history-subject", text: change2.subject || "(no description)" });
-        button.createDiv({ cls: "lgd-history-meta", text: `${(change2.changeId || change2.shortSha).slice(0, 10)} \xB7 ${change2.author || "Unknown author"}` });
-        button.createDiv({ cls: "lgd-history-date", text: displayDate(change2.date), attr: { title: change2.date } });
-        button.onclick = () => this.navigate({ kind: "details", context: route.context, sha: change2.sha });
-        row.oncontextmenu = (event) => {
-          event.preventDefault();
-          const menu = new import_obsidian.Menu();
-          menu.addItem((item) => item.setTitle("Change details").setIcon("git-commit-horizontal").onClick(() => this.navigate({ kind: "details", context: route.context, sha: change2.sha })));
-          if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(route.context, { sha: change2.sha }))));
-          menu.addItem((item) => item.setTitle("Copy change ID").setIcon("copy").onClick(() => this.run(() => body.ownerDocument.defaultView.navigator.clipboard.writeText(change2.changeId || change2.sha))));
-          menu.showAtMouseEvent(event);
-        };
-      }
-      if (!changes.length) this.empty(this.loading ? "Loading changes\u2026" : query ? "No loaded changes match." : this.error ? "" : "No changes.");
-    } else if ((route == null ? void 0 : route.kind) === "details" && this.details) {
-      body.removeAttribute("role");
-      body.removeAttribute("aria-label");
-      const { change: change2, files } = this.details;
-      const info = body.createDiv({ cls: "lgd-repository-details" });
-      info.oncontextmenu = (event) => {
-        if (!this.host.explainRepository) return;
-        event.preventDefault();
-        const menu = new import_obsidian.Menu();
-        menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(route.context, { sha: route.sha }))));
-        menu.showAtMouseEvent(event);
-      };
-      info.createDiv({ cls: "lgd-history-subject", text: change2.description || change2.subject || "(no description)" });
-      info.createDiv({ cls: "lgd-history-meta", text: change2.changeId || change2.sha });
-      info.createDiv({ cls: "lgd-history-date", text: `${change2.author || "Unknown author"} \xB7 ${displayDate(change2.date)}`, attr: { title: change2.date } });
-      if ((_a = change2.parents) == null ? void 0 : _a.length) {
-        const parents = info.createDiv({ cls: "lgd-repository-parents" });
-        for (const sha of change2.parents) {
-          const parent = parents.createEl("button", { cls: "lgd-repository-parent", text: sha.slice(0, 8), attr: { type: "button", title: "Parent change", "aria-label": `Parent change ${sha.slice(0, 8)}` } });
-          parent.onclick = () => this.navigate({ kind: "details", context: route.context, sha });
-        }
-      }
-      this.renderFiles(body, files, false, route);
-      if (!files.length) this.empty("No changed files.");
-    } else if ((route == null ? void 0 : route.kind) === "changes" && this.status) {
-      body.removeAttribute("role");
-      body.removeAttribute("aria-label");
-      const files = this.status.files.filter((file) => [file.path, file.oldPath || ""].some((path5) => path5.toLocaleLowerCase().includes(query)));
-      this.renderFiles(body, files, true, route);
-      if (!files.length) this.empty(query ? "No files match." : "Working copy is clean.");
-    } else this.empty(this.loading ? "Loading\u2026" : this.error ? "" : "Repository");
-    body.scrollTop = scroll;
-  }
-  empty(text) {
-    var _a;
-    if (text) (_a = this.body) == null ? void 0 : _a.createDiv({ cls: "lgd-history-empty", text });
-  }
-  renderFiles(container, files, selecting, route) {
-    const root = { folders: /* @__PURE__ */ new Map(), files: [], path: "" };
-    for (const file of files) {
-      let node = root;
-      const parts = file.path.split("/");
-      parts.pop();
-      for (const part of parts) {
-        if (!node.folders.has(part)) node.folders.set(part, { folders: /* @__PURE__ */ new Map(), files: [], path: node.path ? `${node.path}/${part}` : part });
-        node = node.folders.get(part);
-      }
-      node.files.push(file);
-    }
-    const tree = container.createDiv({ cls: "lgd-repository-tree", attr: { role: "group", "aria-label": selecting ? "Pending files" : "Affected files" } });
-    const renderNode = (parent, node) => {
-      var _a, _b;
-      for (const [name, child] of [...node.folders].sort(([a], [b]) => a.localeCompare(b))) {
-        const group = parent.createEl("details", { cls: "lgd-repository-folder" });
-        group.open = !((_a = this.state) == null ? void 0 : _a.collapsed.has(child.path));
-        group.ontoggle = () => {
-          var _a2, _b2;
-          if (group.open) (_a2 = this.state) == null ? void 0 : _a2.collapsed.delete(child.path);
-          else (_b2 = this.state) == null ? void 0 : _b2.collapsed.add(child.path);
-        };
-        const summary = group.createEl("summary");
-        const icon = summary.createSpan({ cls: "lgd-repository-folder-icon" });
-        (0, import_obsidian.setIcon)(icon, "folder");
-        summary.createSpan({ text: name });
-        summary.oncontextmenu = (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const menu = new import_obsidian.Menu();
-          menu.addItem((item) => item.setTitle("VCS History").setIcon("history").onClick(() => this.navigate({ kind: "log", context: route.context, path: child.path })));
-          if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => {
-            var _a2;
-            return this.host.explainRepository(
-              route.context,
-              { sha: route.kind === "details" ? route.sha : void 0, paths: files.filter((file) => file.path.startsWith(child.path + "/")).map((file) => file.path), token: selecting ? (_a2 = this.status) == null ? void 0 : _a2.token : void 0 }
-            );
-          })));
-          if (selecting) {
-            menu.addSeparator();
-            const descendants = files.filter((file) => file.path.startsWith(child.path + "/"));
-            const all = descendants.every((file) => {
-              var _a2;
-              return (_a2 = this.state) == null ? void 0 : _a2.selected.has(file.path);
-            });
-            menu.addItem((item) => item.setTitle(all ? "Deselect folder" : "Select folder").setIcon(all ? "square" : "square-check").onClick(() => {
-              var _a2, _b2;
-              if (this.mutating || this.route !== route) return;
-              for (const file of descendants) {
-                if (all) (_a2 = this.state) == null ? void 0 : _a2.selected.delete(file.path);
-                else (_b2 = this.state) == null ? void 0 : _b2.selected.add(file.path);
-              }
-              this.renderBody();
-              this.updateSelection();
-            }));
-          }
-          menu.showAtMouseEvent(event);
-        };
-        renderNode(group.createDiv({ cls: "lgd-repository-folder-content" }), child);
-      }
-      for (const file of [...node.files].sort((a, b) => a.path.localeCompare(b.path))) {
-        const row = parent.createDiv({ cls: "lgd-repository-file" });
-        if (selecting) {
-          const checkbox = row.createEl("input", { type: "checkbox", attr: { "aria-label": `Include ${file.path}` } });
-          checkbox.checked = !!((_b = this.state) == null ? void 0 : _b.selected.has(file.path));
-          checkbox.disabled = this.mutating;
-          checkbox.onchange = () => {
-            var _a2, _b2;
-            if (checkbox.checked) (_a2 = this.state) == null ? void 0 : _a2.selected.add(file.path);
-            else (_b2 = this.state) == null ? void 0 : _b2.selected.delete(file.path);
-            this.updateSelection();
-          };
-        }
-        const name = row.createEl("button", { cls: "lgd-repository-filename", text: file.path.split("/").pop(), attr: { type: "button", title: file.oldPath ? `${file.oldPath} \u2192 ${file.path}` : file.path } });
-        const revision = route.kind === "details" ? route.sha : void 0;
-        name.onclick = () => {
-          if (!this.mutating) void this.run(() => this.host.openRepositoryFile(route.context, file.path, revision));
-        };
-        row.createSpan({ cls: "lgd-repository-status", text: file.status[0] === "?" ? "A" : file.status[0], attr: { title: statusName(file.status), "aria-label": statusName(file.status), "data-status": file.status[0] } });
-        if (file.oldPath) row.createDiv({ cls: "lgd-repository-old-path", text: file.oldPath });
-        row.oncontextmenu = (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const menu = new import_obsidian.Menu();
-          menu.addItem((item) => item.setTitle("VCS History").setIcon("history").onClick(() => this.run(() => this.host.openRepositoryFile(route.context, file.path, revision))));
-          if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => {
-            var _a2;
-            return this.host.explainRepository(
-              route.context,
-              { sha: revision, paths: [file.path], token: selecting ? (_a2 = this.status) == null ? void 0 : _a2.token : void 0 }
-            );
-          })));
-          const folder = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : void 0;
-          menu.addItem((item) => item.setTitle("Folder history").setIcon("folder-clock").onClick(() => this.navigate({ kind: "log", context: route.context, path: folder })));
-          if (this.host.openRepositoryNote && !file.status.startsWith("D")) menu.addItem((item) => item.setTitle("Open file").setIcon("file").onClick(() => this.run(() => this.host.openRepositoryNote(route.context, file.path))));
-          menu.addSeparator();
-          menu.addItem((item) => item.setTitle("Copy path").setIcon("copy").onClick(() => this.run(() => container.ownerDocument.defaultView.navigator.clipboard.writeText(file.path))));
-          menu.showAtMouseEvent(event);
-        };
-      }
-    };
-    renderNode(tree, root);
-  }
-  renderComposer(root, state) {
-    const composer = root.createDiv({ cls: "lgd-repository-composer" });
-    const selection = composer.createDiv({ cls: "lgd-repository-selection" });
-    const all = selection.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all files" } });
-    all.onchange = () => {
-      var _a;
-      if (this.mutating) return;
-      if (all.checked) for (const file of ((_a = this.status) == null ? void 0 : _a.files) || []) state.selected.add(file.path);
-      else state.selected.clear();
-      this.renderBody();
-      this.updateSelection();
-    };
-    this.selectionLabel = selection.createSpan();
-    selection.oncontextmenu = (event) => {
-      var _a;
-      if (!this.host.explainRepository || !this.route || !state.selected.size) return;
-      event.preventDefault();
-      const menu = new import_obsidian.Menu(), context = this.route.context, paths = [...state.selected], token = (_a = this.status) == null ? void 0 : _a.token;
-      menu.addItem((item) => item.setTitle("Explain selected changes").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(context, { paths, token }))));
-      menu.showAtMouseEvent(event);
-    };
-    if (this.host.generateDescription) {
-      this.aiButton = this.actionButton(selection, "sparkles", "Generate description", () => {
-        if (this.aiJob) this.aiJob.abort();
-        else void this.generateDescription();
-      });
-    }
-    const description = composer.createEl("textarea", { cls: "lgd-repository-description", placeholder: "Description", attr: { "aria-label": "Change description", rows: "3" } });
-    description.value = state.description;
-    description.oninput = () => {
-      state.description = description.value;
-      this.updateSelection();
-    };
-    this.createButton = composer.createEl("button", { cls: "mod-cta", text: "Create change", attr: { type: "button", title: "Create change (Ctrl/Cmd+Enter)" } });
-    this.createButton.onclick = () => {
-      void this.submit();
-    };
-    this.updateSelection();
-  }
-  updateSelection() {
-    var _a, _b, _c, _d;
-    const count = ((_a = this.state) == null ? void 0 : _a.selected.size) || 0, total = ((_b = this.status) == null ? void 0 : _b.files.length) || 0;
-    (_c = this.selectionLabel) == null ? void 0 : _c.setText(`${count} / ${total} files`);
-    const all = this.contentEl.querySelector(".lgd-repository-selection input");
-    if (all) {
-      all.checked = total > 0 && count === total;
-      all.indeterminate = count > 0 && count < total;
-      all.disabled = this.mutating || this.loading || !total;
-    }
-    if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count || !((_d = this.state) == null ? void 0 : _d.description.trim());
-    if (this.aiButton) this.aiButton.disabled = !this.aiJob && (this.mutating || this.loading || !count);
-  }
-  updateFooter() {
-    var _a, _b, _c;
-    const route = this.route;
-    const remoteStatus = this.remoteAction === "push" ? "Pushing\u2026" : this.remoteAction === "pull" ? "Pulling\u2026" : this.remoteAction === "configure" ? "Remote settings\u2026" : "";
-    const text = this.error || (remoteStatus || (this.aiJob ? "Generating description\u2026" : this.mutating ? "Saving\u2026" : this.loading ? "Loading\u2026" : (route == null ? void 0 : route.kind) === "log" ? `${this.changes.length} changes` : (route == null ? void 0 : route.kind) === "details" && this.details ? `${this.details.files.length} files` : ""));
-    (_a = this.footer) == null ? void 0 : _a.setText(text);
-    (_b = this.footer) == null ? void 0 : _b.toggleClass("lgd-error", !!this.error);
-    (_c = this.body) == null ? void 0 : _c.setAttr("aria-busy", String(this.loading || this.mutating));
-    if (this.more) this.more.disabled = this.loading || this.mutating;
-    this.updateSelection();
-  }
-  setMutationDisabled() {
-    if (this.mutating) for (const input of Array.from(this.contentEl.querySelectorAll("button,input,textarea"))) input.disabled = true;
-    this.updateNavigation();
-    this.updateFooter();
-    if (this.aiJob && this.aiButton) this.aiButton.disabled = false;
-  }
-  async generateDescription() {
-    const route = this.route, state = this.state, status = this.status;
-    if (this.mutating || this.loading || !route || !(state == null ? void 0 : state.selected.size) || !status || !this.host.generateDescription) return;
-    const job = this.aiJob = new AbortController();
-    this.mutating = true;
-    this.error = "";
-    if (this.aiButton) {
-      (0, import_obsidian.setIcon)(this.aiButton, "x");
-      this.aiButton.setAttr("title", "Cancel generation");
-      this.aiButton.setAttr("aria-label", "Cancel generation");
-    }
-    this.setMutationDisabled();
-    try {
-      const description = await this.host.generateDescription(route.context, [...state.selected], status.token, job.signal);
-      if (!job.signal.aborted && !this.closed && this.route === route) state.description = description;
-    } catch (error2) {
-      if (!job.signal.aborted && this.route === route) this.error = error2.message;
-    } finally {
-      if (this.aiJob === job) {
-        this.aiJob = null;
-        this.mutating = false;
-        if (!this.closed) this.render();
-      }
-    }
-  }
-  async submit() {
-    const route = this.route, state = this.state, status = this.status;
-    if (this.closed || this.mutating || this.loading || (route == null ? void 0 : route.kind) !== "changes" || !(state == null ? void 0 : state.selected.size) || !state.description.trim() || !status) return;
-    this.rememberScroll();
-    this.mutating = true;
-    this.error = "";
-    this.setMutationDisabled();
-    const paths = [...state.selected], description = state.description;
-    let saved = false;
-    try {
-      await createChange(route.context, paths, description, status.token);
-      saved = true;
-      state.description = "";
-      state.selected.clear();
-      await this.host.repositoryChanged(route.context);
-      if (!this.closed) new import_obsidian.Notice("Change created.");
-    } catch (error2) {
-      if (!this.closed && this.route === route) this.error = saved ? `Change created. Refresh failed: ${error2.message || error2}` : String(error2.message || error2);
-    } finally {
-      this.mutating = false;
-      if (!this.closed) {
-        if (this.route === route && saved && !this.error) await this.loadRoute(false);
-        else this.render();
-      }
-    }
-  }
-  async snapshot() {
-    const route = this.route;
-    if (this.closed || this.mutating || this.loading || (route == null ? void 0 : route.context.backend) !== "jj") return;
-    this.rememberScroll();
-    this.mutating = true;
-    this.error = "";
-    this.setMutationDisabled();
-    try {
-      await snapshotWorkspace(route.context);
-      await this.host.repositoryChanged(route.context);
-      if (!this.closed) new import_obsidian.Notice("Snapshot saved.");
-    } catch (error2) {
-      if (!this.closed && this.route === route) this.error = String(error2.message || error2);
-    } finally {
-      this.mutating = false;
-      if (!this.closed) {
-        if (this.route === route && !this.error) await this.loadRoute(false);
-        else this.render();
-      }
-    }
-  }
-  remoteMenu(event) {
-    if (!this.route || !this.host.syncRepository && !this.host.configureRemote) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const menu = new import_obsidian.Menu(), disabled = this.loading || this.mutating;
-    if (this.host.syncRepository) {
-      menu.addItem((item) => item.setTitle("Pull").setIcon("download").setDisabled(disabled).onClick(() => this.remote("pull")));
-      menu.addItem((item) => item.setTitle("Push").setIcon("upload").setDisabled(disabled).onClick(() => this.remote("push")));
-    }
-    if (this.host.configureRemote) {
-      if (this.host.syncRepository) menu.addSeparator();
-      menu.addItem((item) => item.setTitle("Remote settings").setIcon("settings-2").setDisabled(disabled).onClick(() => this.remote("configure")));
-    }
-    menu.showAtMouseEvent(event);
-  }
-  async remote(action) {
-    const route = this.route;
-    if (this.closed || this.loading || this.mutating || !route) return;
-    if (action === "configure" ? !this.host.configureRemote : !this.host.syncRepository) return;
-    this.rememberScroll();
-    this.mutating = true;
-    this.remoteAction = action;
-    this.error = "";
-    this.setMutationDisabled();
-    try {
-      if (action === "configure") await this.host.configureRemote(route.context);
-      else await this.host.syncRepository(route.context, action);
-    } catch (error2) {
-      if (!this.closed && this.route === route) this.error = String(error2.message || error2);
-    } finally {
-      this.mutating = false;
-      this.remoteAction = null;
-      if (!this.closed) {
-        if (this.route === route && action !== "configure") {
-          const operationError = this.error;
-          await this.loadRoute(false);
-          if (operationError && this.route === route) {
-            this.error = operationError;
-            this.updateFooter();
-          }
-        } else this.render();
-      }
-    }
-  }
-  moveFocus(event) {
-    var _a;
-    if (event.isComposing || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    const controls = Array.from(((_a = this.body) == null ? void 0 : _a.querySelectorAll("button,input,summary")) || []).filter((element) => !element.closest("details:not([open]) .lgd-repository-folder-content"));
-    const index = controls.indexOf(event.target);
-    const destination = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : event.key === "ArrowDown" ? Math.min(controls.length - 1, index + 1) : Math.max(0, index - 1);
-    if (controls[destination]) {
-      event.preventDefault();
-      controls[destination].focus();
-    }
-  }
-};
+
+// src/errors.ts
+function errorMessage(error2) {
+  const detail = error2 instanceof Error ? error2.message : typeof error2 === "string" ? error2 : error2 && typeof error2 === "object" && "message" in error2 ? String(error2.message || "") : "";
+  return detail.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").trim() || "The operation failed without details. Refresh the list and try again.";
+}
+
+// src/icons.ts
+var FILE_HISTORY_ICON = "history";
+var REPOSITORY_HISTORY_ICON = "git-branch";
 
 // src/repositoryRemote.ts
 var import_child_process4 = require("child_process");
@@ -1452,7 +908,7 @@ var CommandError = class extends Error {
     this.code = code;
   }
 };
-function command2(tool, cwd, args, signal) {
+function command2(tool, cwd, args, signal, input) {
   return new Promise((resolve3, reject) => {
     var _a, _b;
     const child = (0, import_child_process4.execFile)(tool, args, {
@@ -1469,10 +925,10 @@ function command2(tool, cwd, args, signal) {
     });
     (_a = child.stdin) == null ? void 0 : _a.on("error", () => {
     });
-    (_b = child.stdin) == null ? void 0 : _b.end();
+    (_b = child.stdin) == null ? void 0 : _b.end(input);
   });
 }
-var git2 = (ctx, args, signal, raw = false) => command2("git", ctx.root, ["-C", ctx.root, ...args], signal).then((value) => raw ? value : value.trim());
+var git2 = (ctx, args, signal, raw = false, input) => command2("git", ctx.root, ["-C", ctx.root, ...args], signal, input).then((value) => raw ? value : value.trim());
 var jj3 = (ctx, args, signal, mutate = false) => command2("jj", ctx.workspaceRoot, [
   ...mutate ? [] : ["--ignore-working-copy"],
   "--no-pager",
@@ -1503,7 +959,6 @@ async function bookmarks(ctx, signal) {
 async function getRepositoryRemotes(ctx, signal) {
   var _a;
   const remotes = lines(await git2(ctx, ["remote"], signal));
-  const preferred = remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0] : void 0;
   if (ctx.backend === "jj") {
     const refs2 = await bookmarks(ctx, signal);
     const branches2 = [...new Set(refs2.filter((ref) => ref.remote !== "git").map((ref) => ref.name))].sort();
@@ -1511,8 +966,15 @@ async function getRepositoryRemotes(ctx, signal) {
     const nearby = refs2.filter((ref) => !ref.conflict && ref.sha && ancestors.has(ref.sha) && ref.remote !== "git");
     const names = new Set(nearby.map((ref) => ref.name));
     const tracked = refs2.filter((ref) => names.has(ref.name) && !ref.conflict && ref.remote && ref.tracked && remotes.includes(ref.remote));
-    const choices = tracked.length ? tracked : nearby.filter((ref) => !ref.remote).map((ref) => ({ ...ref, remote: preferred }));
-    const unique = [...new Map(choices.filter((ref) => ref.remote).map((ref) => [`${ref.remote}\0${ref.name}`, { remote: ref.remote, branch: ref.name }])).values()];
+    const unique = [...new Map(tracked.map((ref) => [`${ref.remote}\0${ref.name}`, { remote: ref.remote, branch: ref.name }])).values()];
+    if (!unique.length && await git2(ctx, ["rev-parse", "--is-bare-repository"], signal) === "false") {
+      const configured = await getRepositoryRemotes({ ...ctx, backend: "git" }, signal);
+      if (configured.currentBranch)
+        return { remotes, branches: branches2, suggested: names.has(configured.currentBranch) ? configured.suggested : void 0 };
+      const upstreams = lines(await git2(ctx, ["for-each-ref", "--format=%(refname:short)%00%(upstream:remotename)%00%(upstream:remoteref)", "refs/heads"], signal)).map((line) => line.split("\0")).filter(([name, remote, ref]) => names.has(name) && remotes.includes(remote) && (ref == null ? void 0 : ref.startsWith("refs/heads/"))).map(([, remote, ref]) => ({ remote, branch: ref.slice(11) }));
+      const choices = [...new Map(upstreams.map((target) => [`${target.remote}\0${target.branch}`, target])).values()];
+      if (choices.length === 1) return { remotes, branches: branches2, suggested: choices[0] };
+    }
     return { remotes, branches: branches2, suggested: unique.length === 1 ? unique[0] : void 0 };
   }
   const currentBranch = await optional(git2(ctx, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal));
@@ -1524,13 +986,49 @@ async function getRepositoryRemotes(ctx, signal) {
     return name && name !== "HEAD" ? [name] : [];
   }))].sort();
   let suggested;
+  let trackingRef;
   if (currentBranch) {
-    const upstream = (await git2(ctx, ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)", `refs/heads/${currentBranch}`], signal)).split("\0");
-    if (remotes.includes(upstream[0]) && ((_a = upstream[1]) == null ? void 0 : _a.startsWith("refs/heads/"))) suggested = { remote: upstream[0], branch: upstream[1].slice(11) };
-    else if (preferred) suggested = { remote: preferred, branch: currentBranch };
+    const upstream = (await git2(ctx, ["for-each-ref", "--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream)", `refs/heads/${currentBranch}`], signal)).split("\0");
+    if (remotes.includes(upstream[0]) && ((_a = upstream[1]) == null ? void 0 : _a.startsWith("refs/heads/"))) {
+      suggested = { remote: upstream[0], branch: upstream[1].slice(11) };
+      trackingRef = upstream[2] || void 0;
+    }
     if (!branches.includes(currentBranch)) branches.push(currentBranch);
   }
-  return { remotes, branches, currentBranch: currentBranch || void 0, suggested };
+  return { remotes, branches, currentBranch: currentBranch || void 0, suggested, trackingRef };
+}
+async function trackedRemote(ctx, signal) {
+  const options = await getRepositoryRemotes(ctx, signal);
+  if (!options.suggested) throw new Error(ctx.backend === "jj" ? "No unique tracked remote bookmark. Configure tracking in Jujutsu before syncing." : "The current branch has no remote upstream. Configure tracking in Git before syncing.");
+  return options.suggested;
+}
+async function repositorySyncState(ctx, revisions, signal) {
+  const ids = [...new Set(revisions)];
+  if (ids.some((id) => !/^[0-9a-f]{40,64}$/.test(id))) throw new Error("Invalid change identifier.");
+  let remote;
+  try {
+    const options = await getRepositoryRemotes(ctx, signal), target = options.suggested;
+    if (!target) return { synced: [], warning: ctx.backend === "jj" ? "No unique tracked remote bookmark" : "No remote upstream configured" };
+    remote = `${target.remote}/${target.branch}`;
+    if (ctx.backend === "jj") {
+      const tip2 = await jj3(ctx, ["log", "-G", "-r", remoteRev(target), "-T", "commit_id"], signal);
+      if (!/^[0-9a-f]{40,64}$/.test(tip2)) throw new Error("The tracked remote bookmark is unavailable.");
+      const synced = [];
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        const set = ids.slice(offset, offset + 100).join(" | ");
+        synced.push(...lines(await jj3(ctx, ["log", "-G", "-r", `(${set}) & ancestors(${tip2})`, "-T", 'commit_id ++ "\\n"'], signal)));
+      }
+      return { synced, remote };
+    }
+    if (!options.trackingRef) throw new Error("The upstream tracking reference is unavailable.");
+    const tip = await git2(ctx, ["rev-parse", "--verify", "--end-of-options", `${options.trackingRef}^{commit}`], signal);
+    if (!ids.length) return { synced: [], remote };
+    const unsynced = new Set(lines(await git2(ctx, ["rev-list", "--stdin"], signal, false, [...ids, `^${tip}`].join("\n") + "\n")));
+    return { synced: ids.filter((id) => !unsynced.has(id)), remote };
+  } catch (error2) {
+    if (signal == null ? void 0 : signal.aborted) throw error2;
+    return { synced: [], remote, warning: `Remote status unavailable: ${String(error2.message || error2)}` };
+  }
 }
 async function validateTarget(ctx, target, signal) {
   if (!target.remote || target.remote.startsWith("-") || /[\0\r\n]/.test(target.remote) || !(await git2(ctx, ["remote"], signal)).split(/\r?\n/).includes(target.remote)) throw new Error("Choose a configured remote.");
@@ -1688,91 +1186,712 @@ async function pullRepository(ctx, target, signal) {
   });
 }
 
-// src/remoteModal.ts
-var import_obsidian2 = require("obsidian");
-var RemoteTargetModal = class extends import_obsidian2.Modal {
-  constructor(app, options) {
-    super(app);
-    this.saving = false;
-    this.completed = false;
-    this.options = options;
+// src/repositoryView.ts
+var REPOSITORY_VIEW_TYPE = "live-git-diff-repository";
+var statusName = (status) => ({ A: "Added", M: "Modified", D: "Deleted", R: "Renamed", C: "Copied", U: "Conflict", "?": "Added", T: "Type changed" })[status[0]] || status;
+var identity = (ctx) => `${ctx.backend || "git"}
+${ctx.workspaceRoot || ctx.root}`;
+var routeKey = (route) => `${identity(route.context)}
+${route.kind}
+${route.kind === "details" ? route.sha : route.kind === "log" ? route.path || "" : ""}`;
+var displayDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+};
+var GitRepositoryView = class extends import_obsidian.ItemView {
+  constructor(leaf, host) {
+    super(leaf);
+    this.route = null;
+    this.visits = /* @__PURE__ */ new Map();
+    this.state = null;
+    this.job = null;
+    this.generation = 0;
+    this.closed = false;
+    this.loading = false;
+    this.mutating = false;
+    this.remoteAction = null;
+    this.error = "";
+    this.changes = [];
+    this.hasMore = false;
+    this.details = null;
+    this.status = null;
+    this.pendingCount = 0;
+    this.syncState = { synced: [], warning: "" };
+    this.body = null;
+    this.footer = null;
+    this.back = null;
+    this.forward = null;
+    this.createButton = null;
+    this.selectionLabel = null;
+    this.query = null;
+    this.more = null;
+    this.aiJob = null;
+    this.aiButton = null;
+    this.folderSelections = /* @__PURE__ */ new Map();
+    this.host = host;
+    this.scope = new import_obsidian.Scope(this.app.scope);
+    this.scope.register(["Mod"], "Enter", (event) => {
+      var _a;
+      if (event.isComposing || !this.contentEl.contains(this.contentEl.ownerDocument.activeElement)) return;
+      if (((_a = this.route) == null ? void 0 : _a.kind) === "changes" && !event.repeat) void this.submit();
+      return false;
+    });
   }
-  onOpen() {
+  get currentRoute() {
+    return this.route;
+  }
+  getViewType() {
+    return REPOSITORY_VIEW_TYPE;
+  }
+  getDisplayText() {
+    return "Repository";
+  }
+  getIcon() {
+    return REPOSITORY_HISTORY_ICON;
+  }
+  async onOpen() {
+    this.closed = false;
+    this.contentEl.addClass("lgd-repository");
+    this.render();
+  }
+  async onClose() {
     var _a, _b;
-    this.titleEl.setText(this.options.title || "Remote settings");
-    const { contentEl } = this, options = this.options;
-    let remote = options.remotes.includes(((_a = options.initial) == null ? void 0 : _a.remote) || "") ? options.initial.remote : options.remotes[0] || "";
-    let branch = ((_b = options.initial) == null ? void 0 : _b.branch) || "";
-    new import_obsidian2.Setting(contentEl).setName("Remote").addDropdown((dropdown) => {
-      if (!options.remotes.length) dropdown.addOption("", "No remotes");
-      for (const name of options.remotes) dropdown.addOption(name, name);
-      dropdown.setValue(remote).setDisabled(!options.remotes.length).onChange((value) => {
-        remote = value;
-        update();
-      });
-      dropdown.selectEl.setAttribute("aria-label", "Remote");
-    });
-    const listId = `change-review-branches-${Math.random().toString(36).slice(2)}`;
-    const suggestions = contentEl.createEl("datalist", { attr: { id: listId } });
-    for (const name of [...new Set(options.branches)]) suggestions.createEl("option", { attr: { value: name } });
-    let branchInput;
-    new import_obsidian2.Setting(contentEl).setName("Branch").addText((text) => {
-      branchInput = text.inputEl;
-      text.setValue(branch).onChange((value) => {
-        branch = value;
-        update();
-      });
-      text.inputEl.setAttribute("list", listId);
-      text.inputEl.setAttribute("aria-label", "Branch");
-      text.inputEl.spellcheck = false;
-    });
-    const error2 = contentEl.createDiv({ cls: "lgd-error", attr: { role: "alert" } });
-    error2.hidden = options.remotes.length > 0;
-    if (!options.remotes.length) error2.setText("Configure a remote in this repository first.");
-    const actions = new import_obsidian2.Setting(contentEl);
-    actions.addButton((button) => {
-      button.setButtonText("Cancel").onClick(() => this.close());
-    });
-    let save;
-    const update = () => {
-      if (save) save.disabled = this.saving || !remote || !branch.trim();
-    };
-    const submit = async () => {
-      if (this.saving || !remote || !branch.trim()) return;
-      this.saving = true;
-      error2.setText("");
-      error2.hidden = true;
-      for (const control of Array.from(contentEl.querySelectorAll("input,select,button"))) control.disabled = true;
-      try {
-        await options.onSubmit({ remote, branch: branch.trim() });
-        this.completed = true;
-        this.close();
-      } catch (failure) {
-        error2.setText(String(failure.message || failure));
-        error2.hidden = false;
-        for (const control of Array.from(contentEl.querySelectorAll("input,select,button"))) control.disabled = false;
-      } finally {
-        this.saving = false;
-        update();
+    this.rememberScroll();
+    this.closed = true;
+    (_a = this.job) == null ? void 0 : _a.abort();
+    (_b = this.aiJob) == null ? void 0 : _b.abort();
+    this.generation++;
+  }
+  async setRoute(route) {
+    var _a, _b;
+    (_a = this.aiJob) == null ? void 0 : _a.abort();
+    this.rememberScroll();
+    (_b = this.job) == null ? void 0 : _b.abort();
+    this.generation++;
+    this.route = route;
+    const key = routeKey(route);
+    let state = this.visits.get(key);
+    if (!state) {
+      state = { query: "", scroll: 0, collapsed: /* @__PURE__ */ new Set(), selected: /* @__PURE__ */ new Set(), description: "", initialized: false, pages: 1 };
+      this.visits.set(key, state);
+      if (this.visits.size > 60) {
+        const evict = [...this.visits.keys()].find((candidate) => candidate !== key && !candidate.includes("\nchanges\n"));
+        if (evict) this.visits.delete(evict);
       }
-    };
-    actions.addButton((button) => {
-      save = button.buttonEl;
-      button.setButtonText(options.submitLabel || "Save").setCta().onClick(submit);
-    });
-    branchInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && !event.isComposing) {
+    }
+    this.state = state;
+    this.changes = [];
+    this.anchor = void 0;
+    this.details = null;
+    this.status = null;
+    this.hasMore = false;
+    this.error = "";
+    this.pendingCount = 0;
+    this.syncState = { synced: [], warning: "" };
+    await this.loadRoute(false, route.kind === "changes" ? route.paths : void 0);
+  }
+  async refresh() {
+    if (!this.mutating) {
+      this.rememberScroll();
+      await this.loadRoute(false);
+    }
+  }
+  updateNavigation() {
+    const nav = this.host.navigationState();
+    if (this.back) this.back.disabled = !nav.back || this.mutating;
+    if (this.forward) this.forward.disabled = !nav.forward || this.mutating;
+  }
+  rememberScroll() {
+    if (this.state && this.body) this.state.scroll = this.body.scrollTop;
+  }
+  async run(action) {
+    try {
+      await action();
+    } catch (error2) {
+      if (!this.closed) {
+        this.error = errorMessage(error2);
+        this.updateFooter();
+      }
+    }
+  }
+  navigate(route) {
+    if (!this.mutating) void this.run(() => this.host.navigateRepository(route));
+  }
+  actionButton(parent, icon, label, action) {
+    const button = parent.createEl("button", { cls: "clickable-icon", attr: { type: "button", "aria-label": label, title: label } });
+    (0, import_obsidian.setIcon)(button, icon);
+    button.onclick = action;
+    return button;
+  }
+  async loadRoute(append, requestedPaths) {
+    var _a;
+    const route = this.route, state = this.state;
+    if (!route || !state || this.closed) return;
+    (_a = this.job) == null ? void 0 : _a.abort();
+    const job = this.job = new AbortController(), generation = ++this.generation;
+    const current = () => !this.closed && generation === this.generation;
+    this.loading = true;
+    this.error = "";
+    if (!append) this.render();
+    else this.updateFooter();
+    try {
+      if (route.kind === "log") {
+        const limit = Math.min(200, Math.max(10, this.host.settings.logLimit));
+        let pages = append ? 1 : state.pages;
+        const accumulated = append ? [...this.changes] : [];
+        let anchor = append ? this.anchor : void 0, restarted = false;
+        let hasMore = false;
+        for (let index = 0; index < pages; index++) {
+          const page = await this.host.loadRepositoryHistory(route.context, route.path, accumulated.length, limit, job.signal);
+          if (!current()) return;
+          if (accumulated.length && anchor && page.anchor && anchor !== page.anchor) {
+            if (restarted) throw new Error("Repository changed while loading history. Refresh to continue.");
+            accumulated.length = 0;
+            state.pages = 1;
+            pages = 1;
+            index = -1;
+            anchor = void 0;
+            restarted = true;
+            continue;
+          }
+          anchor = page.anchor;
+          accumulated.push(...page.changes);
+          hasMore = page.hasMore;
+          if (!hasMore) break;
+        }
+        this.changes = accumulated;
+        this.hasMore = hasMore;
+        this.anchor = anchor;
+        const [pending, sync] = await Promise.all([
+          getRepositoryStatus(route.context, job.signal),
+          repositorySyncState(route.context, accumulated.map((change2) => change2.sha), job.signal)
+        ]);
+        if (!current()) return;
+        this.pendingCount = pending.files.length;
+        this.syncState = sync;
+        if (append && !restarted) state.pages++;
+      } else if (route.kind === "details") {
+        const result = await getChangeDetails(route.context, route.sha, job.signal);
+        if (!current()) return;
+        this.details = result;
+      } else {
+        const result = await getRepositoryStatus(route.context, job.signal);
+        if (!current()) return;
+        this.status = result;
+        const existing = new Set(result.files.map((file) => file.path));
+        state.selected = new Set([...state.selected].filter((path5) => existing.has(path5)));
+        if (!state.initialized && !state.description) state.description = result.description || "";
+        if (requestedPaths == null ? void 0 : requestedPaths.length) {
+          state.selected.clear();
+          for (const file of result.files) if (requestedPaths.some((path5) => file.path === path5 || file.path.startsWith(path5.replace(/\/$/, "") + "/"))) state.selected.add(file.path);
+        }
+        state.initialized = true;
+      }
+    } catch (error2) {
+      if (current() && !job.signal.aborted) this.error = errorMessage(error2);
+    } finally {
+      if (current()) {
+        this.loading = false;
+        this.render();
+      }
+    }
+  }
+  render() {
+    var _a, _b;
+    if (this.closed) return;
+    const root = this.contentEl;
+    root.empty();
+    this.query = null;
+    this.more = null;
+    this.createButton = null;
+    this.selectionLabel = null;
+    this.aiButton = null;
+    const heading = root.createDiv({ cls: "lgd-repository-heading" });
+    this.back = this.actionButton(heading, "arrow-left", "Back", () => this.host.navigationBack());
+    this.forward = this.actionButton(heading, "arrow-right", "Forward", () => this.host.navigationForward());
+    const route = this.route;
+    const title = (route == null ? void 0 : route.kind) === "changes" ? "VCS Pending Changes" : (route == null ? void 0 : route.kind) === "details" ? "Change details" : (route == null ? void 0 : route.path) ? route.path.split("/").pop() : "Repository history";
+    heading.createDiv({ cls: "lgd-repository-title", text: title, attr: { title: (route == null ? void 0 : route.kind) === "log" && route.path ? route.path : title } });
+    if (route) {
+      if (route.kind !== "log" || route.path) this.actionButton(heading, REPOSITORY_HISTORY_ICON, "Repository history", () => this.navigate({ kind: "log", context: route.context }));
+      if (route.kind !== "changes") this.actionButton(heading, "git-commit-horizontal", "VCS Pending Changes", () => this.navigate({ kind: "changes", context: route.context }));
+      if (route.kind === "changes" && route.context.backend === "jj") this.actionButton(heading, "camera", "Snapshot working copy", () => {
+        void this.snapshot();
+      });
+      if (this.host.syncRepository) {
+        this.actionButton(heading, "download", "Pull", () => {
+          void this.remote("pull");
+        }).disabled = this.loading || this.mutating;
+        this.actionButton(heading, "upload", "Push", () => {
+          void this.remote("push");
+        }).disabled = this.loading || this.mutating;
+      }
+      const refresh = this.actionButton(heading, "refresh-cw", "Refresh", () => {
+        void this.refresh();
+      });
+      refresh.disabled = this.loading || this.mutating;
+      const context = route.kind === "log" && route.path ? route.path : (route.context.workspaceRoot || route.context.root).replace(/\\/g, "/").split("/").pop() || "Repository";
+      const location = root.createDiv({ cls: "lgd-repository-location", text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
+      heading.oncontextmenu = location.oncontextmenu = (event) => this.remoteMenu(event);
+    }
+    if ((route == null ? void 0 : route.kind) === "log" || (route == null ? void 0 : route.kind) === "changes") {
+      if (route.kind === "changes") {
+        const layout = root.createDiv({ cls: "lgd-repository-layout" });
+        const label = layout.createEl("label", { text: "View" });
+        const select = label.createEl("select", { cls: "dropdown", attr: { "aria-label": "Pending files view" } });
+        select.createEl("option", { text: "File Tree", attr: { value: "tree" } });
+        select.createEl("option", { text: "File List", attr: { value: "list" } });
+        select.value = this.host.settings.pendingChangesView || "tree";
+        select.disabled = this.loading || this.mutating;
+        select.onchange = () => {
+          this.host.settings.pendingChangesView = select.value === "list" ? "list" : "tree";
+          this.renderBody();
+          this.updateSelection();
+          if (this.host.saveSettings) void this.run(() => this.host.saveSettings());
+        };
+      }
+      this.query = root.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: route.kind === "log" ? "Filter loaded changes" : "Filter files", attr: { "aria-label": route.kind === "log" ? "Filter loaded changes" : "Filter files" } });
+      this.query.value = ((_a = this.state) == null ? void 0 : _a.query) || "";
+      this.query.oninput = () => {
+        if (this.state) this.state.query = this.query.value;
+        this.renderBody();
+      };
+    }
+    this.body = root.createDiv({ cls: "lgd-repository-body" });
+    this.body.addEventListener("keydown", (event) => this.moveFocus(event));
+    this.renderBody();
+    if ((route == null ? void 0 : route.kind) === "log" && this.hasMore) {
+      this.more = root.createEl("button", { cls: "lgd-history-more", text: "Load more", attr: { type: "button" } });
+      this.more.onclick = () => {
+        this.rememberScroll();
+        void this.loadRoute(true);
+      };
+    }
+    if ((route == null ? void 0 : route.kind) === "changes" && this.state) this.renderComposer(root, this.state);
+    this.footer = root.createDiv({ cls: "lgd-history-footer", attr: { role: "status", "aria-live": "polite" } });
+    this.updateFooter();
+    this.updateNavigation();
+    this.body.scrollTop = ((_b = this.state) == null ? void 0 : _b.scroll) || 0;
+    this.setMutationDisabled();
+  }
+  renderBody() {
+    var _a;
+    const body = this.body, route = this.route, state = this.state;
+    if (!body) return;
+    const scroll = body.scrollTop;
+    body.empty();
+    this.folderSelections.clear();
+    const query = (state == null ? void 0 : state.query.trim().toLocaleLowerCase()) || "";
+    if ((route == null ? void 0 : route.kind) === "log") {
+      body.setAttr("role", "list");
+      body.setAttr("aria-label", "Repository changes");
+      if (this.pendingCount) {
+        const row = body.createDiv({ cls: "lgd-repository-history-row", attr: { role: "listitem" } });
+        const pending = row.createEl("button", { cls: "lgd-repository-change", attr: { type: "button", "data-sync": "pending" } });
+        pending.createDiv({ cls: "lgd-history-subject", text: "Uncommitted changes" });
+        pending.createDiv({ cls: "lgd-history-meta", text: `${this.pendingCount} pending ${this.pendingCount === 1 ? "file" : "files"} \xB7 Open VCS Pending Changes` });
+        pending.onclick = () => this.navigate({ kind: "changes", context: route.context });
+      }
+      const synced = new Set(this.syncState.synced);
+      const changes = this.changes.filter((change2) => [change2.subject, change2.sha, change2.changeId || "", change2.author, change2.date].some((value) => value.toLocaleLowerCase().includes(query)));
+      for (const change2 of changes) {
+        const row = body.createDiv({ cls: "lgd-repository-history-row", attr: { role: "listitem" } });
+        const remote = this.syncState.remote;
+        const sync = synced.has(change2.sha) ? "synced" : "unsynced";
+        const description = this.syncState.warning || (sync === "synced" ? `Synced with ${remote}` : `Not synced with ${remote}`);
+        const button = row.createEl("button", { cls: "lgd-repository-change", attr: { type: "button", "data-sync": sync, title: description, "aria-label": `${change2.subject || "(no description)"} \xB7 ${description}` } });
+        button.createDiv({ cls: "lgd-history-subject", text: change2.subject || "(no description)" });
+        button.createDiv({ cls: "lgd-history-meta", text: `${(change2.changeId || change2.shortSha).slice(0, 10)} \xB7 ${change2.author || "Unknown author"}` });
+        button.createDiv({ cls: "lgd-history-date", text: displayDate(change2.date), attr: { title: change2.date } });
+        button.onclick = () => this.navigate({ kind: "details", context: route.context, sha: change2.sha });
+        row.oncontextmenu = (event) => {
+          event.preventDefault();
+          const menu = new import_obsidian.Menu();
+          menu.addItem((item) => item.setTitle("Change details").setIcon("git-commit-horizontal").onClick(() => this.navigate({ kind: "details", context: route.context, sha: change2.sha })));
+          if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(route.context, { sha: change2.sha }))));
+          menu.addItem((item) => item.setTitle("Copy change ID").setIcon("copy").onClick(() => this.run(() => body.ownerDocument.defaultView.navigator.clipboard.writeText(change2.changeId || change2.sha))));
+          menu.showAtMouseEvent(event);
+        };
+      }
+      if (!changes.length && !this.pendingCount) this.empty(this.loading ? "Loading changes\u2026" : query ? "No loaded changes match." : this.error ? "" : "No changes.");
+    } else if ((route == null ? void 0 : route.kind) === "details" && this.details) {
+      body.removeAttribute("role");
+      body.removeAttribute("aria-label");
+      const { change: change2, files } = this.details;
+      const info = body.createDiv({ cls: "lgd-repository-details" });
+      info.oncontextmenu = (event) => {
+        if (!this.host.explainRepository) return;
         event.preventDefault();
-        void submit();
+        const menu = new import_obsidian.Menu();
+        menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(route.context, { sha: route.sha }))));
+        menu.showAtMouseEvent(event);
+      };
+      info.createDiv({ cls: "lgd-history-subject", text: change2.description || change2.subject || "(no description)" });
+      info.createDiv({ cls: "lgd-history-meta", text: change2.changeId || change2.sha });
+      info.createDiv({ cls: "lgd-history-date", text: `${change2.author || "Unknown author"} \xB7 ${displayDate(change2.date)}`, attr: { title: change2.date } });
+      if ((_a = change2.parents) == null ? void 0 : _a.length) {
+        const parents = info.createDiv({ cls: "lgd-repository-parents" });
+        for (const sha of change2.parents) {
+          const parent = parents.createEl("button", { cls: "lgd-repository-parent", text: sha.slice(0, 8), attr: { type: "button", title: "Parent change", "aria-label": `Parent change ${sha.slice(0, 8)}` } });
+          parent.onclick = () => this.navigate({ kind: "details", context: route.context, sha });
+        }
       }
-    });
-    update();
-    branchInput.focus();
+      this.renderFiles(body, files, false, route);
+      if (!files.length) this.empty("No changed files.");
+    } else if ((route == null ? void 0 : route.kind) === "changes" && this.status) {
+      body.removeAttribute("role");
+      body.removeAttribute("aria-label");
+      const files = this.status.files.filter((file) => [file.path, file.oldPath || ""].some((path5) => path5.toLocaleLowerCase().includes(query)));
+      this.renderFiles(body, files, true, route);
+      if (!files.length) this.empty(query ? "No files match." : "Working copy is clean.");
+    } else this.empty(this.loading ? "Loading\u2026" : this.error ? "" : "Repository");
+    body.scrollTop = scroll;
   }
-  onClose() {
-    var _a, _b;
-    if (!this.completed) (_b = (_a = this.options).onCancel) == null ? void 0 : _b.call(_a);
-    this.contentEl.empty();
+  empty(text) {
+    var _a;
+    if (text) (_a = this.body) == null ? void 0 : _a.createDiv({ cls: "lgd-history-empty", text });
+  }
+  renderFiles(container, files, selecting, route) {
+    const root = { folders: /* @__PURE__ */ new Map(), files: [], path: "" };
+    const flat = selecting && this.host.settings.pendingChangesView === "list";
+    for (const file of files) {
+      let node = root;
+      const parts = flat ? [] : file.path.split("/").slice(0, -1);
+      for (const part of parts) {
+        if (!node.folders.has(part)) node.folders.set(part, { folders: /* @__PURE__ */ new Map(), files: [], path: node.path ? `${node.path}/${part}` : part });
+        node = node.folders.get(part);
+      }
+      node.files.push(file);
+    }
+    const tree = container.createDiv({ cls: flat ? "lgd-repository-tree lgd-repository-list" : "lgd-repository-tree", attr: { role: "group", "aria-label": selecting ? "Pending files" : "Affected files" } });
+    const renderNode = (parent, node) => {
+      var _a, _b, _c;
+      for (const [name, child] of [...node.folders].sort(([a], [b]) => a.localeCompare(b))) {
+        const group = parent.createEl("details", { cls: "lgd-repository-folder" });
+        group.open = !((_a = this.state) == null ? void 0 : _a.collapsed.has(child.path));
+        group.ontoggle = () => {
+          var _a2, _b2;
+          if (group.open) (_a2 = this.state) == null ? void 0 : _a2.collapsed.delete(child.path);
+          else (_b2 = this.state) == null ? void 0 : _b2.collapsed.add(child.path);
+        };
+        const summary = group.createEl("summary");
+        const descendants = (selecting ? ((_b = this.status) == null ? void 0 : _b.files) || [] : files).filter((file) => file.path.startsWith(child.path + "/"));
+        if (selecting) {
+          const all = descendants.length > 0 && descendants.every((file) => {
+            var _a2;
+            return (_a2 = this.state) == null ? void 0 : _a2.selected.has(file.path);
+          });
+          const some = descendants.some((file) => {
+            var _a2;
+            return (_a2 = this.state) == null ? void 0 : _a2.selected.has(file.path);
+          });
+          const checkbox = summary.createEl("input", { type: "checkbox", attr: { "aria-label": `Include folder ${child.path}`, title: "Include all files in this folder, including filtered files" } });
+          checkbox.checked = all;
+          checkbox.indeterminate = some && !all;
+          checkbox.disabled = this.mutating;
+          this.folderSelections.set(checkbox, descendants);
+          checkbox.onclick = (event) => {
+            var _a2, _b2;
+            event.preventDefault();
+            event.stopPropagation();
+            if (this.mutating || this.route !== route) return;
+            const all2 = descendants.every((file) => {
+              var _a3;
+              return (_a3 = this.state) == null ? void 0 : _a3.selected.has(file.path);
+            });
+            for (const file of descendants) {
+              if (all2) (_a2 = this.state) == null ? void 0 : _a2.selected.delete(file.path);
+              else (_b2 = this.state) == null ? void 0 : _b2.selected.add(file.path);
+            }
+            this.renderBody();
+            this.updateSelection();
+          };
+        }
+        const icon = summary.createSpan({ cls: "lgd-repository-folder-icon" });
+        (0, import_obsidian.setIcon)(icon, "folder");
+        summary.createSpan({ text: name });
+        summary.oncontextmenu = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const menu = new import_obsidian.Menu();
+          menu.addItem((item) => item.setTitle("VCS History").setIcon(REPOSITORY_HISTORY_ICON).onClick(() => this.navigate({ kind: "log", context: route.context, path: child.path })));
+          if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => {
+            var _a2;
+            return this.host.explainRepository(
+              route.context,
+              { sha: route.kind === "details" ? route.sha : void 0, paths: descendants.map((file) => file.path), token: selecting ? (_a2 = this.status) == null ? void 0 : _a2.token : void 0 }
+            );
+          })));
+          if (selecting) {
+            menu.addSeparator();
+            const all = descendants.every((file) => {
+              var _a2;
+              return (_a2 = this.state) == null ? void 0 : _a2.selected.has(file.path);
+            });
+            menu.addItem((item) => item.setTitle(all ? "Deselect folder" : "Select folder").setIcon(all ? "square" : "square-check").onClick(() => {
+              var _a2, _b2;
+              if (this.mutating || this.route !== route) return;
+              for (const file of descendants) {
+                if (all) (_a2 = this.state) == null ? void 0 : _a2.selected.delete(file.path);
+                else (_b2 = this.state) == null ? void 0 : _b2.selected.add(file.path);
+              }
+              this.renderBody();
+              this.updateSelection();
+            }));
+          }
+          menu.showAtMouseEvent(event);
+        };
+        renderNode(group.createDiv({ cls: "lgd-repository-folder-content" }), child);
+      }
+      for (const file of [...node.files].sort((a, b) => flat ? a.path.split("/").pop().localeCompare(b.path.split("/").pop()) || a.path.localeCompare(b.path) : a.path.localeCompare(b.path))) {
+        const row = parent.createDiv({ cls: "lgd-repository-file", attr: { title: file.oldPath ? `${file.oldPath} \u2192 ${file.path}` : file.path } });
+        if (selecting) {
+          const checkbox = row.createEl("input", { type: "checkbox", attr: { "aria-label": `Include ${file.path}` } });
+          checkbox.checked = !!((_c = this.state) == null ? void 0 : _c.selected.has(file.path));
+          checkbox.disabled = this.mutating;
+          checkbox.onchange = () => {
+            var _a2, _b2;
+            if (checkbox.checked) (_a2 = this.state) == null ? void 0 : _a2.selected.add(file.path);
+            else (_b2 = this.state) == null ? void 0 : _b2.selected.delete(file.path);
+            this.updateSelection();
+          };
+        }
+        const name = row.createEl("button", { cls: "lgd-repository-filename", text: file.path.split("/").pop(), attr: { type: "button", title: file.oldPath ? `${file.oldPath} \u2192 ${file.path}` : file.path } });
+        const revision = route.kind === "details" ? route.sha : void 0;
+        name.onclick = () => {
+          if (!this.mutating) void this.run(() => this.host.openRepositoryFile(route.context, file.path, revision));
+        };
+        row.createSpan({ cls: "lgd-repository-status", text: file.status[0] === "?" ? "A" : file.status[0], attr: { title: statusName(file.status), "aria-label": statusName(file.status), "data-status": file.status[0] } });
+        if (file.oldPath) row.createDiv({ cls: "lgd-repository-old-path", text: file.oldPath });
+        row.oncontextmenu = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const menu = new import_obsidian.Menu();
+          menu.addItem((item) => item.setTitle("VCS History").setIcon(FILE_HISTORY_ICON).onClick(() => this.run(() => this.host.openRepositoryFile(route.context, file.path, revision))));
+          if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => {
+            var _a2;
+            return this.host.explainRepository(
+              route.context,
+              { sha: revision, paths: [file.path], token: selecting ? (_a2 = this.status) == null ? void 0 : _a2.token : void 0 }
+            );
+          })));
+          const folder = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : void 0;
+          menu.addItem((item) => item.setTitle("Folder history").setIcon("folder-clock").onClick(() => this.navigate({ kind: "log", context: route.context, path: folder })));
+          if (this.host.openRepositoryNote && !file.status.startsWith("D")) menu.addItem((item) => item.setTitle("Open file").setIcon("file").onClick(() => this.run(() => this.host.openRepositoryNote(route.context, file.path))));
+          menu.addSeparator();
+          menu.addItem((item) => item.setTitle("Copy path").setIcon("copy").onClick(() => this.run(() => container.ownerDocument.defaultView.navigator.clipboard.writeText(file.path))));
+          menu.showAtMouseEvent(event);
+        };
+      }
+    };
+    renderNode(tree, root);
+  }
+  renderComposer(root, state) {
+    const composer = root.createDiv({ cls: "lgd-repository-composer" });
+    const selection = composer.createDiv({ cls: "lgd-repository-selection" });
+    const all = selection.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all files" } });
+    all.onchange = () => {
+      var _a;
+      if (this.mutating) return;
+      if (all.checked) for (const file of ((_a = this.status) == null ? void 0 : _a.files) || []) state.selected.add(file.path);
+      else state.selected.clear();
+      this.renderBody();
+      this.updateSelection();
+    };
+    this.selectionLabel = selection.createSpan();
+    selection.oncontextmenu = (event) => {
+      var _a;
+      if (!this.host.explainRepository || !this.route || !state.selected.size) return;
+      event.preventDefault();
+      const menu = new import_obsidian.Menu(), context = this.route.context, paths = [...state.selected], token = (_a = this.status) == null ? void 0 : _a.token;
+      menu.addItem((item) => item.setTitle("Explain selected changes").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(context, { paths, token }))));
+      menu.showAtMouseEvent(event);
+    };
+    if (this.host.generateDescription) {
+      this.aiButton = this.actionButton(selection, "sparkles", "Generate description", () => {
+        if (this.aiJob) this.aiJob.abort();
+        else void this.generateDescription();
+      });
+    }
+    const description = composer.createEl("textarea", { cls: "lgd-repository-description", placeholder: "Description", attr: { "aria-label": "Change description", rows: "3" } });
+    description.value = state.description;
+    description.oninput = () => {
+      state.description = description.value;
+      this.updateSelection();
+    };
+    this.createButton = composer.createEl("button", { cls: "mod-cta", text: "Create change", attr: { type: "button", title: "Create change (Ctrl/Cmd+Enter)" } });
+    this.createButton.onclick = () => {
+      void this.submit();
+    };
+    this.updateSelection();
+  }
+  updateSelection() {
+    var _a, _b, _c, _d;
+    const count = ((_a = this.state) == null ? void 0 : _a.selected.size) || 0, total = ((_b = this.status) == null ? void 0 : _b.files.length) || 0;
+    (_c = this.selectionLabel) == null ? void 0 : _c.setText(`${count} / ${total} files`);
+    const all = this.contentEl.querySelector(".lgd-repository-selection input");
+    if (all) {
+      all.checked = total > 0 && count === total;
+      all.indeterminate = count > 0 && count < total;
+      all.disabled = this.mutating || this.loading || !total;
+    }
+    for (const [checkbox, files] of this.folderSelections) {
+      const selected = files.filter((file) => {
+        var _a2;
+        return (_a2 = this.state) == null ? void 0 : _a2.selected.has(file.path);
+      }).length;
+      checkbox.checked = files.length > 0 && selected === files.length;
+      checkbox.indeterminate = selected > 0 && selected < files.length;
+      checkbox.disabled = this.mutating || this.loading;
+    }
+    if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count || !((_d = this.state) == null ? void 0 : _d.description.trim());
+    if (this.aiButton) this.aiButton.disabled = !this.aiJob && (this.mutating || this.loading || !count);
+  }
+  updateFooter() {
+    var _a, _b, _c, _d, _e;
+    const route = this.route;
+    const remoteStatus = this.remoteAction === "push" ? "Pushing\u2026" : this.remoteAction === "pull" ? "Pulling\u2026" : "";
+    const text = this.error || (remoteStatus || (this.aiJob ? "Generating description\u2026" : this.mutating ? "Saving\u2026" : this.loading ? "Loading\u2026" : (route == null ? void 0 : route.kind) === "log" ? `${this.changes.length} commits \xB7 ${this.syncState.warning || this.syncState.remote || "No upstream"}` : (route == null ? void 0 : route.kind) === "details" && this.details ? `${this.details.files.length} files` : ""));
+    (_a = this.footer) == null ? void 0 : _a.setText(this.error ? `Error: ${this.error}` : text);
+    (_b = this.footer) == null ? void 0 : _b.toggleClass("lgd-error", !!this.error);
+    (_c = this.footer) == null ? void 0 : _c.toggle(!!text);
+    if (this.error && this.footer) {
+      this.footer.setAttr("role", "alert");
+      const copy = this.footer.createEl("button", { cls: "lgd-repository-error-copy", text: "Copy error", attr: { type: "button" } });
+      const detail = this.error;
+      copy.onclick = () => {
+        void this.contentEl.ownerDocument.defaultView.navigator.clipboard.writeText(detail).catch(() => new import_obsidian.Notice("Unable to copy the error. Select and copy its text."));
+      };
+    } else (_d = this.footer) == null ? void 0 : _d.setAttr("role", "status");
+    (_e = this.body) == null ? void 0 : _e.setAttr("aria-busy", String(this.loading || this.mutating));
+    if (this.more) this.more.disabled = this.loading || this.mutating;
+    this.updateSelection();
+  }
+  setMutationDisabled() {
+    if (this.mutating) for (const input of Array.from(this.contentEl.querySelectorAll("button,input,textarea,select"))) input.disabled = true;
+    this.updateNavigation();
+    this.updateFooter();
+    if (this.aiJob && this.aiButton) this.aiButton.disabled = false;
+  }
+  async generateDescription() {
+    const route = this.route, state = this.state, status = this.status;
+    if (this.mutating || this.loading || !route || !(state == null ? void 0 : state.selected.size) || !status || !this.host.generateDescription) return;
+    const job = this.aiJob = new AbortController();
+    this.mutating = true;
+    this.error = "";
+    if (this.aiButton) {
+      (0, import_obsidian.setIcon)(this.aiButton, "x");
+      this.aiButton.setAttr("title", "Cancel generation");
+      this.aiButton.setAttr("aria-label", "Cancel generation");
+    }
+    this.setMutationDisabled();
+    try {
+      const description = await this.host.generateDescription(route.context, [...state.selected], status.token, job.signal);
+      if (!job.signal.aborted && !this.closed && this.route === route) state.description = description;
+    } catch (error2) {
+      if (!job.signal.aborted && this.route === route) this.error = errorMessage(error2);
+    } finally {
+      if (this.aiJob === job) {
+        this.aiJob = null;
+        this.mutating = false;
+        if (!this.closed) this.render();
+      }
+    }
+  }
+  async submit() {
+    const route = this.route, state = this.state, status = this.status;
+    if (this.closed || this.mutating || this.loading || (route == null ? void 0 : route.kind) !== "changes" || !(state == null ? void 0 : state.selected.size) || !state.description.trim() || !status) return;
+    this.rememberScroll();
+    this.mutating = true;
+    this.error = "";
+    this.setMutationDisabled();
+    const paths = [...state.selected], description = state.description;
+    let saved = false;
+    try {
+      await createChange(route.context, paths, description, status.token);
+      saved = true;
+      state.description = "";
+      state.selected.clear();
+      await this.host.repositoryChanged(route.context);
+      if (!this.closed) new import_obsidian.Notice("Change created.");
+    } catch (error2) {
+      if (!this.closed && this.route === route) this.error = saved ? `Change created. Refresh failed: ${errorMessage(error2)}` : errorMessage(error2);
+    } finally {
+      this.mutating = false;
+      if (!this.closed) {
+        if (this.route === route && saved && !this.error) await this.loadRoute(false);
+        else this.render();
+      }
+    }
+  }
+  async snapshot() {
+    const route = this.route;
+    if (this.closed || this.mutating || this.loading || (route == null ? void 0 : route.context.backend) !== "jj") return;
+    this.rememberScroll();
+    this.mutating = true;
+    this.error = "";
+    this.setMutationDisabled();
+    try {
+      await snapshotWorkspace(route.context);
+      await this.host.repositoryChanged(route.context);
+      if (!this.closed) new import_obsidian.Notice("Snapshot saved.");
+    } catch (error2) {
+      if (!this.closed && this.route === route) this.error = errorMessage(error2);
+    } finally {
+      this.mutating = false;
+      if (!this.closed) {
+        if (this.route === route && !this.error) await this.loadRoute(false);
+        else this.render();
+      }
+    }
+  }
+  remoteMenu(event) {
+    if (!this.route || !this.host.syncRepository) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = new import_obsidian.Menu(), disabled = this.loading || this.mutating;
+    menu.addItem((item) => item.setTitle("Pull").setIcon("download").setDisabled(disabled).onClick(() => this.remote("pull")));
+    menu.addItem((item) => item.setTitle("Push").setIcon("upload").setDisabled(disabled).onClick(() => this.remote("push")));
+    menu.showAtMouseEvent(event);
+  }
+  async remote(action) {
+    const route = this.route;
+    if (this.closed || this.loading || this.mutating || !route) return;
+    if (!this.host.syncRepository) return;
+    this.rememberScroll();
+    this.mutating = true;
+    this.remoteAction = action;
+    this.error = "";
+    this.setMutationDisabled();
+    try {
+      await this.host.syncRepository(route.context, action);
+    } catch (error2) {
+      if (!this.closed && this.route === route) this.error = errorMessage(error2);
+    } finally {
+      this.mutating = false;
+      this.remoteAction = null;
+      if (!this.closed) {
+        if (this.route === route) {
+          const operationError = this.error;
+          await this.loadRoute(false);
+          if (operationError && this.route === route) {
+            this.error = operationError;
+            this.updateFooter();
+          }
+        } else this.render();
+      }
+    }
+  }
+  moveFocus(event) {
+    var _a;
+    if (event.isComposing || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const controls = Array.from(((_a = this.body) == null ? void 0 : _a.querySelectorAll("button,input,summary")) || []).filter((element) => !element.closest("details:not([open]) .lgd-repository-folder-content"));
+    const index = controls.indexOf(event.target);
+    const destination = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1 : event.key === "ArrowDown" ? Math.min(controls.length - 1, index + 1) : Math.max(0, index - 1);
+    if (controls[destination]) {
+      event.preventDefault();
+      controls[destination].focus();
+    }
   }
 };
 
@@ -1809,9 +1928,9 @@ var NavigationTrail = class {
 };
 
 // src/explainView.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian2 = require("obsidian");
 var EXPLAIN_VIEW_TYPE = "live-git-diff-explain";
-var ExplainView = class extends import_obsidian3.ItemView {
+var ExplainView = class extends import_obsidian2.ItemView {
   constructor() {
     super(...arguments);
     this.job = null;
@@ -1846,8 +1965,15 @@ var ExplainView = class extends import_obsidian3.ItemView {
     root.oncontextmenu = null;
     const header = root.createDiv({ cls: "lgd-explain-heading" });
     header.createDiv({ cls: "lgd-explain-title", text: title });
-    const cancel = header.createEl("button", { cls: "clickable-icon", attr: { title: "Cancel", "aria-label": "Cancel" } });
-    (0, import_obsidian3.setIcon)(cancel, "x");
+    const close = header.createEl("button", { cls: "clickable-icon", attr: { title: "Close Explain panel", "aria-label": "Close Explain panel" } });
+    (0, import_obsidian2.setIcon)(close, "x");
+    close.onclick = () => {
+      var _a2;
+      (_a2 = this.job) == null ? void 0 : _a2.abort();
+      void this.leaf.detach();
+    };
+    const cancel = header.createEl("button", { cls: "clickable-icon", attr: { title: "Cancel generation", "aria-label": "Cancel generation" } });
+    (0, import_obsidian2.setIcon)(cancel, "square");
     cancel.onclick = () => job.abort();
     const body = root.createDiv({ cls: "lgd-explain-text", text: "Preparing explanation\u2026", attr: { role: "status", "aria-live": "polite" } });
     try {
@@ -1857,14 +1983,14 @@ var ExplainView = class extends import_obsidian3.ItemView {
       cancel.remove();
       root.oncontextmenu = (event) => {
         event.preventDefault();
-        const menu = new import_obsidian3.Menu();
+        const menu = new import_obsidian2.Menu();
         menu.addItem((item) => item.setTitle("Copy explanation").setIcon("copy").onClick(() => root.ownerDocument.defaultView.navigator.clipboard.writeText(result)));
         menu.addItem((item) => item.setTitle("Explain again").setIcon("sparkles").onClick(() => this.explain(title, load)));
         menu.showAtMouseEvent(event);
       };
     } catch (error2) {
       if (this.closed || generation !== this.generation) return;
-      body.setText(job.signal.aborted ? "Cancelled." : error2.message);
+      body.setText(job.signal.aborted ? "Cancelled." : errorMessage(error2));
       body.toggleClass("lgd-error", !job.signal.aborted);
       cancel.remove();
     }
@@ -1879,24 +2005,42 @@ var AI_PROMPTS = {
   explain: "Explain the supplied document or changes to a Product Owner. Focus on purpose, behavior, business rules and acceptance criteria. For differences, explain what changed and its practical impact. Be very brief: at most 4 short paragraphs and 220 words. Use the language of the source documents. Return only the explanation, without a preamble. Do not invent context or claim that omitted content was reviewed."
 };
 var DEFAULT_AI = {
-  description: { provider: "copilot", executable: "", model: "", prompt: AI_PROMPTS.description },
-  explain: { provider: "copilot", executable: "", model: "", prompt: AI_PROMPTS.explain }
+  description: { provider: "copilot", executable: "", model: "", effort: "", prompt: AI_PROMPTS.description },
+  explain: { provider: "copilot", executable: "", model: "", effort: "", prompt: AI_PROMPTS.explain }
 };
 var AI_MODELS = {
-  copilot: ["auto", "gpt-6-sol", "gpt-6-astra", "claude-sonnet-4.6", "claude-haiku-4.5"],
+  // Account catalog checked with Copilot CLI 1.0.108, 2026-11-16.
+  copilot: ["auto", "gpt-6.1-terra", "gpt-6-luna", "claude-haiku-5.5", "gpt-5.3-codex"],
   codex: ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-astra"],
   claude: ["sonnet", "haiku", "opus", "claude-sonnet-4-6", "claude-opus-4-6"]
 };
+var standardEfforts = ["low", "medium", "high", "xhigh"];
+function aiEfforts(provider, model) {
+  const id = model.trim();
+  if (provider === "copilot") {
+    if (!id || id === "auto" || id === "gpt-5.3-codex") return standardEfforts;
+    if (id === "gpt-6-luna") return ["none", ...standardEfforts, "max"];
+    if (id === "gpt-6.1-terra" || id === "claude-haiku-5.5") return [...standardEfforts, "max"];
+    return [];
+  }
+  if (provider === "codex") return !id ? standardEfforts : AI_MODELS.codex.includes(id) ? [...standardEfforts, "max", "ultra"] : [];
+  if (!id || id === "sonnet" || id === "claude-sonnet-4-6") return ["low", "medium", "high"];
+  if (id === "opus" || id === "claude-opus-4-6") return ["low", "medium", "high", "max"];
+  return [];
+}
 function mergeAi(value) {
   const stored = value && typeof value === "object" ? value : {};
   const task = (purpose) => {
     const input = stored[purpose];
-    return {
+    const result = {
       provider: input && ["copilot", "codex", "claude"].includes(input.provider) ? input.provider : "copilot",
       executable: typeof (input == null ? void 0 : input.executable) === "string" ? input.executable : "",
       model: typeof (input == null ? void 0 : input.model) === "string" ? input.model : "",
+      effort: typeof (input == null ? void 0 : input.effort) === "string" ? input.effort : "",
       prompt: typeof (input == null ? void 0 : input.prompt) === "string" && input.prompt.trim() ? input.prompt : AI_PROMPTS[purpose]
     };
+    if (!aiEfforts(result.provider, result.model).includes(result.effort)) result.effort = "";
+    return result;
   };
   return { description: task("description"), explain: task("explain") };
 }
@@ -1915,11 +2059,13 @@ ${JSON.stringify({ content: boundedContext(context) })}`;
 }
 function aiArguments(settings) {
   const model = settings.model.trim();
+  const effort = settings.effort.trim();
   if (model && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,159}$/.test(model)) throw new Error("Invalid model identifier.");
+  if (effort && !aiEfforts(settings.provider, model).includes(effort)) throw new Error("Invalid reasoning effort for this model. Choose a supported effort or Agent default.");
   const selected = model ? ["--model", model] : [];
-  if (settings.provider === "copilot") return ["--silent", "--stream", "off", "--no-color", "--no-ask-user", "--no-custom-instructions", "--disable-builtin-mcps", "--available-tools", "--deny-tool", "shell,read,write,url", ...selected];
-  if (settings.provider === "claude") return ["--print", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--permission-mode", "dontAsk", "--no-session-persistence", ...selected];
-  return ["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never", "--json", "-c", 'approval_policy="never"', "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", 'web_search="disabled"', "-c", "mcp_servers={}", ...selected, "-"];
+  if (settings.provider === "copilot") return ["--silent", "--stream", "off", "--no-color", "--no-ask-user", "--no-custom-instructions", "--disable-builtin-mcps", "--available-tools", "--deny-tool", "shell,read,write,url", ...selected, ...effort ? ["--reasoning-effort", effort] : []];
+  if (settings.provider === "claude") return ["--print", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--settings", '{"disableAllHooks":true}', "--permission-mode", "dontAsk", "--no-session-persistence", ...selected, ...effort ? ["--effort", effort] : []];
+  return ["exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never", "--json", "-c", 'approval_policy="never"', "-c", "features.shell_tool=false", "-c", "features.unified_exec=false", "-c", 'web_search="disabled"', "-c", "mcp_servers={}", ...effort ? ["-c", `model_reasoning_effort="${effort}"`] : [], ...selected, "-"];
 }
 function aiOutput(provider, stdout) {
   var _a, _b;
@@ -1955,7 +2101,8 @@ async function resolveAiExecutable(executable, provider, signal) {
     ["-NoProfile", "-NonInteractive", "-Command", resolver],
     { cwd: (0, import_os.tmpdir)(), encoding: "utf8", windowsHide: true, timeout: 1e4, signal, env: { ...process.env, CHANGE_REVIEW_CLI: JSON.stringify({ executable, provider, package: packages[provider] }) } },
     (error2, out, err) => {
-      if (error2) reject(new Error(`Unable to locate ${provider}. Check the CLI path in settings. ${err.trim() || error2.message}`));
+      if (signal == null ? void 0 : signal.aborted) reject(Object.assign(new Error("Cancelled."), { name: "AbortError" }));
+      else if (error2) reject(new Error(`Unable to locate ${provider}. Check the CLI path in settings. ${err.trim() || error2.message}`));
       else {
         try {
           resolve3(JSON.parse(out));
@@ -2042,6 +2189,7 @@ async function runAi(settings, context, purpose, signal) {
           detail = error2.message;
         }
       }
+      if (!detail) detail = out.trim();
       finish(new Error(`${settings.provider} exited with code ${code}. ${detail.slice(0, 2e3) || "Check CLI authentication in a terminal."}`));
     });
     child.stdin.on("error", () => {
@@ -2581,8 +2729,7 @@ ${boundedContext(a, 12e3)}
 After excerpt:
 ${boundedContext(b, 12e3)}`}`);
 }
-var textFile = (file) => /\.(md|markdown|txt|json|yaml|yml|csv|tsv|xml|html|css|js|ts|cs|sql)$/i.test(file);
-async function repositoryAiContext(context, options, readWorking, signal) {
+async function repositoryAiContext(context, options, signal) {
   var _a;
   const details = options.sha ? await getChangeDetails(context, options.sha, signal) : null;
   const pending = details ? null : await getRepositoryStatus(context, signal);
@@ -2604,7 +2751,7 @@ ${files.map((file) => `${file.status} ${file.path}${file.oldPath ? ` (from ${fil
     }
     let patch;
     if (details) patch = await changePatch(context, options.sha, file, signal);
-    else patch = await workingPatch(file);
+    else patch = await pendingPatch(context, file, signal);
     result += `
 File: ${file.path}
 ${boundedContext(patch, 8e3)}
@@ -2613,12 +2760,6 @@ ${boundedContext(patch, 8e3)}
   if (files.length > 40) result += "\n[Only the first 40 file patches are included.]";
   if (pending && (await getRepositoryStatus(context, signal)).token !== pending.token) throw new Error("Files changed while preparing AI context. Refresh and try again.");
   return boundedContext(result);
-  async function workingPatch(file) {
-    const patch = await pendingPatch(context, file, signal);
-    if (patch || file.status !== "A") return patch || "No textual difference.";
-    return textFile(file.path) ? `Added file:
-${await readWorking(file.path)}` : "Added binary or unsupported file; content omitted.";
-  }
 }
 
 // src/baseView.ts
@@ -2857,6 +2998,9 @@ var enabled = false;
 function setDebug(v) {
   enabled = !!v;
 }
+function debug(...args) {
+  if (enabled) console.log(PREFIX, ...args);
+}
 function warn(...args) {
   console.warn(PREFIX, ...args);
 }
@@ -3087,6 +3231,50 @@ var CharMarkLayer = class {
   }
 };
 
+// src/properties.ts
+var import_obsidian3 = require("obsidian");
+async function renderProperties(app, source, container, sourcePath, component) {
+  let properties;
+  try {
+    const lines2 = source.replace(/\r\n?/g, "\n").split("\n");
+    const closing = lines2.findIndex((line, index) => index > 0 && /^(---|\.\.\.)\s*$/.test(line));
+    const parsed = (0, import_obsidian3.parseYaml)(lines2.slice(1, closing < 0 ? void 0 : closing).join("\n"));
+    if (parsed == null) properties = {};
+    else if (typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Expected a mapping");
+    else properties = parsed;
+  } catch (e) {
+    container.createDiv({ cls: "lgd-properties-error", text: "Unable to render properties: invalid YAML." });
+    container.createEl("pre").createEl("code", { text: source });
+    return;
+  }
+  const metadata = container.createDiv({ cls: "metadata-container lgd-properties", attr: { "data-property-count": String(Object.keys(properties).length) } });
+  metadata.createDiv({ cls: "metadata-properties-heading" }).createDiv({ cls: "metadata-properties-title", text: "Properties" });
+  const list = metadata.createDiv({ cls: "metadata-content" }).createDiv({ cls: "metadata-properties" });
+  for (const [key, value] of Object.entries(properties)) {
+    const tags = key.toLowerCase() === "tags";
+    const type = tags ? "tags" : Array.isArray(value) ? "multitext" : typeof value === "boolean" ? "checkbox" : typeof value === "number" ? "number" : "text";
+    const row = list.createDiv({ cls: "metadata-property", attr: { "data-property-key": key, "data-property-type": type } });
+    const name = row.createDiv({ cls: "metadata-property-key" });
+    const icon = name.createSpan({ cls: "metadata-property-icon" });
+    (0, import_obsidian3.setIcon)(icon, tags ? "tags" : type === "checkbox" ? "check-square" : type === "number" ? "hash" : type === "multitext" ? "list" : "text");
+    name.createSpan({ cls: "metadata-property-key-input", text: key, attr: { title: key } });
+    const content = row.createDiv({ cls: "metadata-property-value lgd-property-value" });
+    if (typeof value === "boolean") {
+      const checkbox = content.createEl("input", { type: "checkbox", attr: { "aria-label": key } });
+      checkbox.checked = value;
+      checkbox.disabled = true;
+      continue;
+    }
+    for (const item of Array.isArray(value) ? value : [value]) {
+      const text = item == null ? "" : item instanceof Date ? item.toISOString() : typeof item === "object" ? JSON.stringify(item) : String(item);
+      const el = content.createDiv({ cls: Array.isArray(value) ? "lgd-property-item multi-select-pill" : "lgd-property-item" });
+      if (!text) el.createSpan({ cls: "lgd-property-empty", text: "Empty" });
+      else if (typeof item === "object" || typeof item === "number") el.setText(text);
+      else await import_obsidian3.MarkdownRenderer.render(app, tags ? `#${text.replace(/^#/, "")}` : text, el, sourcePath, component);
+    }
+  }
+}
+
 // src/baseView.ts
 var VIEW_TYPE = "live-git-diff-base";
 var GitBaseView = class extends import_obsidian4.ItemView {
@@ -3206,7 +3394,9 @@ var GitBaseView = class extends import_obsidian4.ItemView {
         const note = element.createDiv({ cls: "lgd-explanation" });
         entry = { element, content, note, rendered: Promise.resolve() };
         this.cache.set(block.sourceStart, entry);
-        if (block.type === "properties" || block.type === "reference" || ((_b = block.conservative) == null ? void 0 : _b.startsWith("Plugin-generated content"))) {
+        if (block.type === "properties") {
+          entry.rendered = renderProperties(this.app, block.text, content, sourcePath, this.component);
+        } else if (block.type === "reference" || ((_b = block.conservative) == null ? void 0 : _b.startsWith("Plugin-generated content"))) {
           content.createEl("pre").createEl("code", { text: block.text });
         } else {
           entry.rendered = import_obsidian4.MarkdownRenderer.render(this.app, block.text + (references ? "\n\n" + references : ""), content, sourcePath, this.component);
@@ -3373,7 +3563,11 @@ var HistoryController = class {
       if (!current()) return;
       const oldWorkcopy = (_b = this.state.entry) == null ? void 0 : _b.commits.find((c) => c.kind === "workcopy");
       const newWorkcopy = entry.commits.find((c) => c.kind === "workcopy");
-      let selected = this.state.selected.map((c) => c.kind === "workcopy" && newWorkcopy ? newWorkcopy : c);
+      let selected = this.state.selected.map((c) => {
+        var _a2;
+        return newWorkcopy && (c.kind === "workcopy" || c.sha === ((_a2 = newWorkcopy.headCommit) == null ? void 0 : _a2.sha)) ? newWorkcopy : c;
+      });
+      selected = selected.filter((c, index) => selected.findIndex((other) => other.sha === c.sha) === index);
       const opened = Object.keys(this.state.expanded || {});
       selected = selected.map((c) => {
         if (c.kind === "workcopy" || !c.changeId || entry.commits.some((item) => item.sha === c.sha)) return c;
@@ -3561,7 +3755,7 @@ var GitHistoryView = class extends import_obsidian5.ItemView {
     return "File History";
   }
   getIcon() {
-    return "history";
+    return FILE_HISTORY_ICON;
   }
   async onOpen() {
     var _a;
@@ -3585,16 +3779,9 @@ var GitHistoryView = class extends import_obsidian5.ItemView {
       };
       this.updateNavigation();
     }
-    this.contextEl = heading.createSpan({ cls: "lgd-history-context", attr: { role: "status", "aria-live": "polite" } });
-    this.fileTitleEl = heading.createDiv({ cls: "lgd-history-file", text: "File History" });
-    this.refreshEl = heading.createEl("button", { cls: "clickable-icon lgd-history-refresh", attr: { type: "button", "aria-label": "Refresh history", title: "Refresh history" } });
-    (0, import_obsidian5.setIcon)(this.refreshEl, "refresh-cw");
-    this.refreshEl.onclick = () => {
-      void this.controller.refresh();
-    };
     if (this.host.openRepository) {
       const repo = heading.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Repository history", title: "Repository history" } });
-      (0, import_obsidian5.setIcon)(repo, "git-branch");
+      (0, import_obsidian5.setIcon)(repo, REPOSITORY_HISTORY_ICON);
       repo.onclick = () => {
         var _a2, _b, _c;
         const context = (_a2 = this.controller.state.entry) == null ? void 0 : _a2.context;
@@ -3602,6 +3789,13 @@ var GitHistoryView = class extends import_obsidian5.ItemView {
         else void ((_c = (_b = this.host).openRepository) == null ? void 0 : _c.call(_b));
       };
     }
+    this.contextEl = heading.createSpan({ cls: "lgd-history-context", attr: { role: "status", "aria-live": "polite" } });
+    this.fileTitleEl = heading.createDiv({ cls: "lgd-history-file", text: "File History" });
+    this.refreshEl = heading.createEl("button", { cls: "clickable-icon lgd-history-refresh", attr: { type: "button", "aria-label": "Refresh history", title: "Refresh history" } });
+    (0, import_obsidian5.setIcon)(this.refreshEl, "refresh-cw");
+    this.refreshEl.onclick = () => {
+      void this.controller.refresh();
+    };
     this.followEl = heading.createEl("button", { cls: "clickable-icon lgd-history-follow", attr: { type: "button", "aria-label": "Show history for active note", title: "Show history for active note" } });
     (0, import_obsidian5.setIcon)(this.followEl, "locate-fixed");
     this.followEl.onclick = () => {
@@ -3855,9 +4049,9 @@ ${active.left} \u2194 ${active.right}` : "No comparison open.");
       }
       const selected = state.selected.some((item) => item.sha === commit.sha);
       const content = row.querySelector(".lgd-history-commit");
-      row.querySelector(".lgd-history-subject").setText(commit.kind === "workcopy" ? "Workcopy" : commit.absent ? "File absent at this snapshot" : commit.subject);
-      row.querySelector(".lgd-history-meta").setText(commit.kind === "workcopy" ? commit.changeId ? `@ \xB7 ${commit.changeId.slice(0, 8)} \xB7 ${(_m = commit.currentSha) == null ? void 0 : _m.slice(0, 8)}` : "Live document" : `${commit.changeId ? commit.changeId.slice(0, 8) + " \xB7 " : ""}${commit.shortSha} \xB7 ${commit.author || "Unknown author"}`);
-      row.querySelector(".lgd-history-date").setText(commit.kind === "workcopy" ? "Live document" : `${commit.snapshot ? "Snapshot \xB7 " : ""}${commit.date} \xB7 ${commit.relative}`);
+      row.querySelector(".lgd-history-subject").setText(commit.kind === "workcopy" ? commit.headCommit ? "Workcopy \xB7 HEAD" : "Workcopy" : commit.absent ? "File absent at this snapshot" : commit.subject);
+      row.querySelector(".lgd-history-meta").setText(commit.headCommit ? `${commit.headCommit.shortSha} \xB7 ${commit.headCommit.subject}` : commit.kind === "workcopy" ? commit.changeId ? `@ \xB7 ${commit.changeId.slice(0, 8)} \xB7 ${(_m = commit.currentSha) == null ? void 0 : _m.slice(0, 8)}` : "Live document" : `${commit.changeId ? commit.changeId.slice(0, 8) + " \xB7 " : ""}${commit.shortSha} \xB7 ${commit.author || "Unknown author"}`);
+      row.querySelector(".lgd-history-date").setText(commit.headCommit ? `${commit.headCommit.author || "Unknown author"} \xB7 ${commit.headCommit.date} \xB7 Live document` : commit.kind === "workcopy" ? "Live document" : `${commit.snapshot ? "Snapshot \xB7 " : ""}${commit.date} \xB7 ${commit.relative}`);
       content.disabled = state.unavailable;
       content.setAttr("aria-selected", String(selected));
       row.toggleClass("is-selected", selected);
@@ -3940,7 +4134,7 @@ function registerFileMenus(plugin, host) {
     };
     menu.addItem((item) => item.setSection("action").setTitle("VCS History").setIcon("history").onClick(() => run(false)));
     if (file instanceof import_obsidian6.TFile && file.extension === "md") menu.addItem((item) => item.setSection("action").setTitle("VCS Compare").setIcon("git-compare").onClick(() => run(true)));
-    menu.addItem((item) => item.setSection("action").setTitle("Pending changes").setIcon("git-commit-horizontal").onClick(() => {
+    menu.addItem((item) => item.setSection("action").setTitle("VCS Pending Changes").setIcon("git-commit-horizontal").onClick(() => {
       if (!disposed) void host.openChanges(file);
     }));
     if (file instanceof import_obsidian6.TFile && file.extension === "md") menu.addItem((item) => item.setSection("action").setTitle("VCS Explain").setIcon("sparkles").onClick(() => {
@@ -5030,12 +5224,13 @@ var ViewZones = class {
 var import_obsidian8 = require("obsidian");
 var DEFAULT_SETTINGS = {
   colors: { insBg: "", delBg: "", insRail: "", delRail: "" },
-  baseRefMode: "head",
+  baseRefMode: "file-prev",
   baseRef: "main",
   logLimit: 50,
+  pendingChangesView: "tree",
   debug: false,
   ai: mergeAi(DEFAULT_AI),
-  remoteTargets: {}
+  comparisonDefaultsVersion: 1
 };
 var CSS_VAR = {
   insBg: "--lgd-ins-bg",
@@ -5098,15 +5293,19 @@ async function persistSettings(plugin) {
 var pendingSaves = /* @__PURE__ */ new WeakMap();
 function mergeSettings(loaded) {
   const l = loaded || {};
-  const { repositoryHistoryCache: _cache, ...config } = l;
+  const { repositoryHistoryCache: _cache, remoteTargets: _remoteTargets, ...config } = l;
   return {
     ...DEFAULT_SETTINGS,
     ...config,
+    // Move the former default to the new automatic mode once. Explicit custom
+    // refs and HEAD~1 are retained; subsequent user choices of HEAD are retained.
+    baseRefMode: !l.comparisonDefaultsVersion && l.baseRefMode === "head" ? "file-prev" : l.baseRefMode || DEFAULT_SETTINGS.baseRefMode,
+    comparisonDefaultsVersion: 1,
+    pendingChangesView: l.pendingChangesView === "list" ? "list" : "tree",
     // Nested object: a spread alone would replace the whole colors block with a
     // partial one from an older data.json and leave the new keys undefined.
     colors: { ...DEFAULT_SETTINGS.colors, ...l.colors || {} },
-    ai: mergeAi(l.ai),
-    remoteTargets: Object.fromEntries(Object.entries(l.remoteTargets && typeof l.remoteTargets === "object" ? l.remoteTargets : {}).filter(([, target]) => target && typeof target.remote === "string" && typeof target.branch === "string").map(([key, target]) => [key, { remote: target.remote, branch: target.branch }]))
+    ai: mergeAi(l.ai)
   };
 }
 var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
@@ -5117,7 +5316,6 @@ var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    if (this.plugin.configureRemote) new import_obsidian8.Setting(containerEl).setName("Remote").addButton((button) => button.setButtonText("Configure").onClick(() => this.plugin.configureRemote()));
     new import_obsidian8.Setting(containerEl).setName("AI assistants").setHeading();
     for (const purpose of ["description", "explain"]) {
       const task = this.plugin.settings.ai[purpose];
@@ -5125,6 +5323,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
       new import_obsidian8.Setting(containerEl).setName("Agent").addDropdown((dropdown) => dropdown.addOptions({ copilot: "GitHub Copilot", codex: "OpenAI Codex", claude: "Claude Code" }).setValue(task.provider).onChange(async (value) => {
         task.provider = value;
         task.model = "";
+        task.effort = "";
         task.executable = "";
         await this.plugin.saveSettings();
         this.display();
@@ -5133,9 +5332,23 @@ var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
         task.executable = value.trim();
         await this.plugin.saveSettings();
       }));
+      let effortDropdown;
+      let effortSetting;
+      const updateEffort = () => {
+        const levels = aiEfforts(task.provider, task.model);
+        if (!levels.includes(task.effort)) task.effort = "";
+        if (effortDropdown) {
+          effortDropdown.selectEl.replaceChildren();
+          effortDropdown.addOption("", "Agent default");
+          for (const level of levels) effortDropdown.addOption(level, { none: "None", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra" }[level] || level);
+          effortDropdown.setValue(task.effort).setDisabled(!levels.length);
+        }
+        effortSetting == null ? void 0 : effortSetting.setDesc(levels.length ? "Optional. Available levels depend on the selected model." : "No effort override is known for this model. The CLI default will be used.");
+      };
       new import_obsidian8.Setting(containerEl).setName("Model").addText((text) => {
         text.setPlaceholder("Agent default").setValue(task.model).onChange(async (value) => {
           task.model = value.trim();
+          updateEffort();
           await this.plugin.saveSettings();
         });
         const id = `change-review-model-${purpose}`;
@@ -5143,6 +5356,14 @@ var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
         const choices = containerEl.createEl("datalist", { attr: { id } });
         for (const model of AI_MODELS[task.provider]) choices.createEl("option", { value: model });
       });
+      effortSetting = new import_obsidian8.Setting(containerEl).setName("Reasoning effort").addDropdown((dropdown) => {
+        effortDropdown = dropdown;
+        dropdown.onChange(async (value) => {
+          task.effort = value;
+          await this.plugin.saveSettings();
+        });
+      });
+      updateEffort();
       new import_obsidian8.Setting(containerEl).setName("Prompt").addTextArea((text) => {
         text.inputEl.rows = 5;
         text.inputEl.addClass("lgd-ai-prompt");
@@ -5179,7 +5400,7 @@ var LiveGitDiffSettingTab = class extends import_obsidian8.PluginSettingTab {
     if (this.plugin.settings.baseRefMode === "file-prev") {
       const note2 = containerEl.createEl("p", { cls: "lgd-settings-note" });
       note2.setText(
-        'The commit before the most recent one that touched this file \u2014 i.e. "what changed in the last edit to this document", regardless of what else was committed since.'
+        "Compare this note with HEAD when it has uncommitted changes, or with HEAD~1 when it is clean. HEAD~1 is the direct parent of HEAD."
       );
     }
     if (this.plugin.settings.baseRefMode === "custom") {
@@ -5262,7 +5483,6 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.navigationRequest = 0;
     this.explainRequest = 0;
     this.remoteJobs = /* @__PURE__ */ new Map();
-    this.remoteModals = /* @__PURE__ */ new Set();
     this.historicalContext = null;
     this.worker = new ComparisonWorker();
     this.revisions = new RevisionGate();
@@ -5278,7 +5498,15 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.opening = 0;
     this.openingFile = null;
     this.historyOpening = 0;
+    this.historyCreation = null;
     this.snapshotTimers = /* @__PURE__ */ new Map();
+    this.snapshotWorkspaces = /* @__PURE__ */ new Map();
+    this.snapshotRibbon = null;
+    this.snapshotRibbonContext = null;
+    this.snapshotRibbonTimer = null;
+    this.snapshotRibbonRequest = 0;
+    this.snapshotRibbonBusy = false;
+    this.quitting = false;
     this.creating = false;
     this.disposed = false;
     this.layoutPending = false;
@@ -5287,7 +5515,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.previewFrame = null;
   }
   async onload() {
-    var _a;
+    var _a, _b, _c;
     await this.loadSettings();
     this.zones = new ViewZones(this);
     this.sync = new ScrollSync(this);
@@ -5327,7 +5555,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.addCommand({ id: "repository-history", name: "Open repository history", callback: () => {
       void this.openRepository();
     } });
-    this.addCommand({ id: "repository-changes", name: "Open pending changes", callback: () => {
+    this.addCommand({ id: "repository-changes", name: "Open VCS Pending Changes", callback: () => {
       void this.openChanges();
     } });
     for (const action of ["push", "pull"]) this.addCommand({
@@ -5337,12 +5565,32 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
         void this.syncCurrentRepository(action);
       }
     });
-    this.addCommand({ id: "repository-remote", name: "Configure repository remote", callback: () => {
-      void this.configureRemote();
-    } });
-    (_a = this.addRibbonIcon) == null ? void 0 : _a.call(this, "git-branch", "Repository history", () => {
+    (_a = this.addRibbonIcon) == null ? void 0 : _a.call(this, REPOSITORY_HISTORY_ICON, "Repository history", () => {
       void this.openRepository();
     });
+    this.snapshotRibbon = ((_b = this.addRibbonIcon) == null ? void 0 : _b.call(this, "camera", "Snapshot working copy (entire repository)", () => {
+      void this.snapshotCurrentWorkspace();
+    })) || null;
+    (_c = this.snapshotRibbon) == null ? void 0 : _c.addClass("lgd-snapshot-action");
+    if (this.snapshotRibbon) this.snapshotRibbon.hidden = true;
+    this.registerEvent(this.app.workspace.on("quit", (tasks) => {
+      var _a2, _b2;
+      if (this.quitting) return;
+      this.quitting = true;
+      for (const timer of this.snapshotTimers.values()) clearTimeout(timer);
+      this.snapshotTimers.clear();
+      if (this.snapshotRibbonTimer) clearTimeout(this.snapshotRibbonTimer);
+      for (const leaf of this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)) {
+        const context = (_a2 = leaf.view.controller.state.entry) == null ? void 0 : _a2.context;
+        if (context) this.rememberSnapshotWorkspace(context);
+      }
+      for (const leaf of this.app.workspace.getLeavesOfType(REPOSITORY_VIEW_TYPE)) {
+        const context = (_b2 = leaf.view.currentRoute) == null ? void 0 : _b2.context;
+        if (context) this.rememberSnapshotWorkspace(context);
+      }
+      const active = this.app.workspace.getActiveFile();
+      tasks.add(() => this.snapshotBeforeQuit(active));
+    }));
     this.registerMarkdownPostProcessor((element, context) => {
       var _a2;
       if (element.closest(".lgd-view") || context.sourcePath !== ((_a2 = this.session) == null ? void 0 : _a2.filePath)) return;
@@ -5351,21 +5599,27 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       this.scheduleReadingPaint();
     });
     this.registerEvent(this.app.workspace.on("layout-change", () => this.scheduleLayout()));
-    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.scheduleLayout()));
-    this.registerEvent(this.app.workspace.on("file-open", () => this.scheduleLayout()));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      this.scheduleLayout();
+      this.scheduleSnapshotRibbonUpdate();
+    }));
+    this.registerEvent(this.app.workspace.on("file-open", () => {
+      this.scheduleLayout();
+      this.scheduleSnapshotRibbonUpdate();
+    }));
     this.registerEvent(this.app.workspace.on("resize", () => this.sync.attach()));
     this.registerEvent(this.app.vault.on("modify", (file) => {
-      var _a2, _b, _c, _d;
-      if (file instanceof import_obsidian9.TFile && (file.path === ((_a2 = this.session) == null ? void 0 : _a2.filePath) || file.path === ((_c = (_b = this.historyView()) == null ? void 0 : _b.controller.state.file) == null ? void 0 : _c.path))) {
+      var _a2, _b2, _c2, _d;
+      if (file instanceof import_obsidian9.TFile && (file.path === ((_a2 = this.session) == null ? void 0 : _a2.filePath) || file.path === ((_c2 = (_b2 = this.historyView()) == null ? void 0 : _b2.controller.state.file) == null ? void 0 : _c2.path))) {
         void this.scheduleSavedSnapshot(file);
       }
       if (!this.isHistoricalPair() && file instanceof import_obsidian9.TFile && file.path === ((_d = this.session) == null ? void 0 : _d.filePath)) void this.externalChange(file);
     }));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-      var _a2, _b;
+      var _a2, _b2;
       const contains = (path6) => !!path6 && (path6 === oldPath || path6.startsWith(oldPath + "/"));
       if (contains((_a2 = this.session) == null ? void 0 : _a2.filePath) || contains(this.openingFile || void 0)) this.closeReview();
-      const view = this.historyView(), path5 = (_b = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b.path;
+      const view = this.historyView(), path5 = (_b2 = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b2.path;
       if (path5 && contains(path5)) {
         const renamed = this.app.vault.getAbstractFileByPath(file.path + path5.slice(oldPath.length));
         if (renamed instanceof import_obsidian9.TFile) void view.setFile(renamed);
@@ -5373,23 +5627,23 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       this.scheduleLayout();
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
-      var _a2, _b;
+      var _a2, _b2;
       const contains = (path5) => !!path5 && (path5 === file.path || path5.startsWith(file.path + "/"));
       if (contains((_a2 = this.session) == null ? void 0 : _a2.filePath) || contains(this.openingFile || void 0)) this.closeReview();
       const view = this.historyView();
-      if (contains((_b = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b.path)) view.controller.fileUnavailable();
+      if (contains((_b2 = view == null ? void 0 : view.controller.state.file) == null ? void 0 : _b2.path)) view.controller.fileUnavailable();
       this.scheduleLayout();
     }));
     this.app.workspace.onLayoutReady(() => {
       if (!this.disposed) {
         if (!this.session) this.app.workspace.detachLeavesOfType(VIEW_TYPE);
         this.scheduleLayout();
+        this.scheduleSnapshotRibbonUpdate();
       }
     });
   }
   onunload() {
     for (const job of this.remoteJobs.values()) job.abort();
-    for (const modal of this.remoteModals) modal.close();
     if (this.cacheSaveTimer) {
       clearTimeout(this.cacheSaveTimer);
       this.cacheSaveTimer = null;
@@ -5397,6 +5651,8 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     }
     for (const timer of this.snapshotTimers.values()) clearTimeout(timer);
     this.snapshotTimers.clear();
+    if (this.snapshotRibbonTimer) clearTimeout(this.snapshotRibbonTimer);
+    this.snapshotRibbonRequest++;
     this.disposed = true;
     this.closeReview();
     this.historyCache.dispose();
@@ -5406,7 +5662,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     for (const buttons of this.actions.values()) {
       buttons.compare.remove();
       buttons.history.remove();
-      buttons.changes.remove();
+      buttons.repository.remove();
     }
     this.actions.clear();
     this.sync.dispose();
@@ -5416,8 +5672,9 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
   async scheduleSavedSnapshot(file) {
     try {
       const ctx = await resolveRepository(this.app, file);
-      if (ctx.backend !== "jj" || this.disposed) return;
-      const key = ctx.workspaceRoot;
+      this.rememberSnapshotWorkspace(ctx);
+      if (ctx.backend !== "jj" || this.disposed || this.quitting) return;
+      const key = ctx.workspaceRoot + "\0" + ctx.rel;
       clearTimeout(this.snapshotTimers.get(key));
       this.snapshotTimers.set(key, setTimeout(() => {
         this.snapshotTimers.delete(key);
@@ -5429,16 +5686,93 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
   }
   async snapshotSavedNote(file) {
     var _a, _b, _c, _d, _e, _f;
-    if (this.disposed) return;
+    if (this.disposed || this.quitting) return;
     try {
       const ctx = await resolveRepository(this.app, file);
-      if (ctx.backend !== "jj" || this.disposed) return;
-      await snapshotWorkspace(ctx);
+      this.rememberSnapshotWorkspace(ctx);
+      if (ctx.backend !== "jj" || this.disposed || this.quitting) return;
+      if (!await snapshotNote(ctx)) return;
       if (!this.disposed && ((_b = (_a = this.historyView()) == null ? void 0 : _a.controller.state.entry) == null ? void 0 : _b.context.workspaceRoot) === ctx.workspaceRoot) await ((_c = this.historyView()) == null ? void 0 : _c.controller.refresh());
     } catch (error2) {
       warn("Unable to snapshot saved note", error2);
       if (((_e = (_d = this.historyView()) == null ? void 0 : _d.controller.state.file) == null ? void 0 : _e.path) === file.path) (_f = this.historyView()) == null ? void 0 : _f.controller.reportError(`Unable to snapshot saved note: ${error2}`);
     }
+  }
+  rememberSnapshotWorkspace(context) {
+    if (context.backend !== "jj" || !context.workspaceRoot) return;
+    const root = path4.resolve(context.workspaceRoot);
+    this.snapshotWorkspaces.set(process.platform === "win32" ? root.toLowerCase() : root, context);
+  }
+  async resolveSnapshotContext() {
+    var _a;
+    const view = (_a = this.app.workspace.activeLeaf) == null ? void 0 : _a.view;
+    const file = this.app.workspace.getActiveFile();
+    const context = view instanceof GitRepositoryView && view.currentRoute ? view.currentRoute.context : view instanceof GitHistoryView && view.controller.state.entry ? view.controller.state.entry.context : file ? await resolveRepository(this.app, file) : await resolveRepositoryDirectory(this.app, "");
+    this.rememberSnapshotWorkspace(context);
+    return context;
+  }
+  scheduleSnapshotRibbonUpdate() {
+    if (!this.snapshotRibbon || this.disposed || this.quitting) return;
+    if (this.snapshotRibbonTimer) clearTimeout(this.snapshotRibbonTimer);
+    this.snapshotRibbonTimer = setTimeout(() => {
+      this.snapshotRibbonTimer = null;
+      void this.updateSnapshotRibbon();
+    }, 150);
+  }
+  async updateSnapshotRibbon() {
+    const request = ++this.snapshotRibbonRequest;
+    try {
+      const context = await this.resolveSnapshotContext();
+      if (request !== this.snapshotRibbonRequest || this.disposed || this.quitting) return;
+      this.snapshotRibbonContext = context.backend === "jj" ? context : null;
+    } catch (e) {
+      if (request === this.snapshotRibbonRequest) this.snapshotRibbonContext = null;
+    }
+    if (request === this.snapshotRibbonRequest && this.snapshotRibbon) this.snapshotRibbon.hidden = !this.snapshotRibbonContext;
+  }
+  async snapshotCurrentWorkspace() {
+    var _a, _b, _c, _d, _e;
+    if (this.snapshotRibbonBusy || this.disposed || this.quitting) return;
+    this.snapshotRibbonBusy = true;
+    (_a = this.snapshotRibbon) == null ? void 0 : _a.setAttr("aria-busy", "true");
+    let progress;
+    try {
+      const context = await this.resolveSnapshotContext();
+      if (context.backend !== "jj") {
+        new import_obsidian9.Notice("Snapshots are only available in Jujutsu workspaces.");
+        return;
+      }
+      progress = new import_obsidian9.Notice("Snapshotting the entire Jujutsu workspace\u2026", 0);
+      await snapshotWorkspace(context);
+      if (!this.disposed && !this.quitting) {
+        await this.repositoryChanged(context);
+        if (((_c = (_b = this.repositoryView()) == null ? void 0 : _b.currentRoute) == null ? void 0 : _c.context.root) === context.root) await ((_d = this.repositoryView()) == null ? void 0 : _d.refresh());
+        new import_obsidian9.Notice("Workspace snapshot saved.");
+      }
+    } catch (error2) {
+      warn("Unable to snapshot workspace", error2);
+      if (!this.disposed && !this.quitting) new import_obsidian9.Notice(`Unable to snapshot workspace: ${errorMessage(error2)}`, 1e4);
+    } finally {
+      progress == null ? void 0 : progress.hide();
+      this.snapshotRibbonBusy = false;
+      (_e = this.snapshotRibbon) == null ? void 0 : _e.setAttr("aria-busy", "false");
+    }
+  }
+  async snapshotBeforeQuit(active) {
+    const candidates = [resolveRepositoryDirectory(this.app, "")];
+    if (active) candidates.push(resolveRepository(this.app, active));
+    for (const result of await Promise.allSettled(candidates)) {
+      if (result.status === "fulfilled") this.rememberSnapshotWorkspace(result.value);
+      else debug("No snapshot workspace could be resolved at quit", result.reason);
+    }
+    await Promise.all([...this.snapshotWorkspaces.values()].map(async (context) => {
+      try {
+        await snapshotWorkspace(context);
+      } catch (error2) {
+        warn("Unable to snapshot workspace before quit", context.workspaceRoot, error2);
+        new import_obsidian9.Notice(`Unable to snapshot before closing: ${errorMessage(error2)}`, 1e4);
+      }
+    }));
   }
   async loadSettings() {
     const data = await this.loadData();
@@ -5500,7 +5834,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     for (const [view, buttons] of this.actions) if (!views.has(view)) {
       buttons.compare.remove();
       buttons.history.remove();
-      buttons.changes.remove();
+      buttons.repository.remove();
       this.actions.delete(view);
     }
     for (const view of views) {
@@ -5508,17 +5842,17 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       if (!buttons || !view.containerEl.contains(buttons.compare)) {
         buttons == null ? void 0 : buttons.compare.remove();
         buttons == null ? void 0 : buttons.history.remove();
-        buttons == null ? void 0 : buttons.changes.remove();
+        buttons == null ? void 0 : buttons.repository.remove();
         buttons = {
           compare: view.addAction("git-compare", "Compare", () => {
             if (this.participants.has(view.leaf)) this.closeReview();
             else if (view.file) void this.openReview({ file: view.file, leaf: view.leaf });
           }),
-          history: view.addAction("history", "VCS History", () => {
+          history: view.addAction(FILE_HISTORY_ICON, "VCS History", () => {
             void this.openHistory(view.file);
           }),
-          changes: view.addAction("git-commit-horizontal", "Pending changes", () => {
-            void this.openChanges(view.file || void 0);
+          repository: view.addAction(REPOSITORY_HISTORY_ICON, "Repository history", () => {
+            void this.openRepository(view.file || void 0);
           })
         };
         buttons.compare.addClass("lgd-compare-action");
@@ -5629,6 +5963,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     if (request === this.navigationRequest) this.updateNavigation();
   }
   async navigateRepository(route) {
+    this.rememberSnapshotWorkspace(route.context);
     this.navigation.push(route);
     await this.showNavigation(route);
   }
@@ -5700,38 +6035,6 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     const history = this.historyView();
     if (((_a = history == null ? void 0 : history.controller.state.entry) == null ? void 0 : _a.context.root) === context.root) await history.controller.refresh();
   }
-  remoteKey(context, options) {
-    return JSON.stringify([
-      context.backend || "git",
-      context.workspaceRoot || context.root,
-      context.backend === "jj" ? "" : options.currentBranch || ""
-    ]);
-  }
-  chooseRemote(context, options, action) {
-    if (!options.remotes.length) throw new Error("No remote configured. Add a remote in your VCS, then try again.");
-    const key = this.remoteKey(context, options);
-    const initial = this.settings.remoteTargets[key] || options.suggested;
-    return new Promise((resolve3) => {
-      const modal = new RemoteTargetModal(this.app, {
-        ...options,
-        initial,
-        title: action ? action === "push" ? "Push" : "Pull" : "Remote",
-        submitLabel: action ? action === "push" ? "Push" : "Pull" : "Save",
-        onSubmit: async (target) => {
-          this.settings.remoteTargets[key] = { ...target };
-          await persistSettings(this);
-          this.remoteModals.delete(modal);
-          resolve3(target);
-        },
-        onCancel: () => {
-          this.remoteModals.delete(modal);
-          resolve3(null);
-        }
-      });
-      this.remoteModals.add(modal);
-      modal.open();
-    });
-  }
   async remoteContext() {
     var _a;
     const view = (_a = this.app.workspace.activeLeaf) == null ? void 0 : _a.view;
@@ -5739,16 +6042,6 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     if (view instanceof GitHistoryView && view.controller.state.entry) return view.controller.state.entry.context;
     const file = this.app.workspace.getActiveFile();
     return this.contextRepository(file || void 0);
-  }
-  async configureRemote(context) {
-    try {
-      const ctx = context || await this.remoteContext();
-      if (this.remoteJobs.has(ctx.root)) throw new Error("A remote operation is already running.");
-      const options = await getRepositoryRemotes(ctx);
-      if (!this.disposed) await this.chooseRemote(ctx, options);
-    } catch (error2) {
-      new import_obsidian9.Notice(error2.message);
-    }
   }
   async syncCurrentRepository(action) {
     try {
@@ -5764,12 +6057,8 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.remoteJobs.set(context.root, job);
     let progress, started = false;
     try {
-      const options = await getRepositoryRemotes(context, job.signal);
+      const target = await trackedRemote(context, job.signal);
       if (job.signal.aborted || this.disposed) return;
-      const saved = this.settings.remoteTargets[this.remoteKey(context, options)];
-      const inferred = saved && options.remotes.includes(saved.remote) ? saved : options.suggested;
-      const target = inferred || await this.chooseRemote(context, options, action);
-      if (!target || job.signal.aborted || this.disposed) return;
       progress = new import_obsidian9.Notice(`${action === "push" ? "Pushing to" : "Pulling from"} ${target.remote}/${target.branch}\u2026`, 0);
       started = true;
       const result = await (action === "push" ? pushRepository : pullRepository)(context, target, job.signal);
@@ -5798,7 +6087,8 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     await ((_a = this.repositoryView()) == null ? void 0 : _a.refresh());
     await ((_b = this.historyView()) == null ? void 0 : _b.controller.refresh());
   }
-  async readRepositoryWorking(context, relative3) {
+  /** Used only for a live note already opened by Obsidian's file-history view. */
+  async readRepositoryVaultWorking(context, relative3) {
     const file = this.app.vault.getAbstractFileByPath(this.repositoryVaultPath(context, relative3));
     if (!(file instanceof import_obsidian9.TFile)) throw new Error("The file is not available in this vault.");
     if (file.stat.size > 1048576) return "[Large file content omitted.]";
@@ -5806,7 +6096,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
   }
   async generateDescription(context, paths, token, signal) {
     const settings = { ...this.settings.ai.description };
-    const evidence = await repositoryAiContext(context, { paths, token }, (path5) => this.readRepositoryWorking(context, path5), signal);
+    const evidence = await repositoryAiContext(context, { paths, token }, signal);
     return runAi(settings, evidence, "description", signal);
   }
   async showExplain(title, prepare) {
@@ -5841,7 +6131,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     var _a;
     await this.showExplain(
       ((_a = options.paths) == null ? void 0 : _a.length) === 1 ? options.paths[0] : options.sha ? `Change ${options.sha.slice(0, 8)}` : "Pending changes",
-      (signal) => repositoryAiContext(context, options, (path5) => this.readRepositoryWorking(context, path5), signal)
+      (signal) => repositoryAiContext(context, options, signal)
     );
   }
   async explainHistory(filePath, context, commits) {
@@ -5849,7 +6139,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     await this.showExplain(captured.length === 2 ? `${filePath} \xB7 ${captured.map((c) => c.shortSha).join(" \u2192 ")}` : filePath, async (signal) => {
       const read = async (commit) => {
         var _a;
-        return commit.kind === "workcopy" ? (_a = this.liveNoteText(filePath)) != null ? _a : await this.readRepositoryWorking(context, context.rel) : (await readRevision(context, commit, signal)).text;
+        return commit.kind === "workcopy" ? (_a = this.liveNoteText(filePath)) != null ? _a : await this.readRepositoryVaultWorking(context, context.rel) : (await readRevision(context, commit, signal)).text;
       };
       if (captured.length === 1) return documentContext(`${filePath} at ${captured[0].shortSha}`, boundedContext(await read(captured[0])));
       const [before, after] = await Promise.all(captured.map(read));
@@ -5872,18 +6162,26 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     const navigationRequest = record ? ++this.navigationRequest : this.navigationRequest;
     if (record && file) this.navigation.push({ kind: "file", filePath: file.path });
     const request = ++this.historyOpening;
-    let view = this.historyView();
-    if (!view) {
+    if (!this.historyCreation && !this.historyView()) {
       const leaf = this.app.workspace.getRightLeaf(false);
       if (!leaf) return;
-      await leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
-      view = this.historyView();
+      this.historyCreation = leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
     }
-    if (view && !this.disposed && request === this.historyOpening && navigationRequest === this.navigationRequest) {
-      void view.setFile(file);
-      await this.app.workspace.revealLeaf(view.leaf);
-      this.updateNavigation();
+    if (this.historyCreation) {
+      const creation = this.historyCreation;
+      try {
+        await creation;
+      } finally {
+        if (this.historyCreation === creation) this.historyCreation = null;
+      }
     }
+    if (this.disposed || request !== this.historyOpening || navigationRequest !== this.navigationRequest) return;
+    const view = this.historyView();
+    if (!view) return;
+    for (const leaf of this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)) if (leaf !== view.leaf) leaf.detach();
+    void view.setFile(file);
+    await this.app.workspace.revealLeaf(view.leaf);
+    this.updateNavigation();
   }
   async compareHistory(filePath, commits) {
     var _a, _b;
@@ -5898,7 +6196,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       return;
     }
     const ctx = await resolveRepository(this.app, file);
-    await snapshotWorkspace(ctx);
+    await snapshotNote(ctx);
     const historical = commits.filter((c) => c.kind !== "workcopy");
     if (historical.length === 1) await this.openReview({ file, ref: historical[0].sha, label: historical[0].shortSha, commit: historical[0] });
     else await this.openHistorical(file, commits[0], commits[1]);
@@ -6076,12 +6374,10 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       for (const view of this.snapshotViews()) view.updateStatus();
     }
   }
-  async resolveBase(ctx, signal) {
+  async resolveBase(ctx, signal, workingText) {
     const mode = this.settings.baseRefMode;
     if (mode === "file-prev") {
-      const commits = await fileLogAsync(ctx.root, ctx.rel, 2, { signal });
-      if (commits.length < 2) throw new GitError("This note needs two commits to compare with its previous version.");
-      return { sha: commits[1].sha, label: "previous version" };
+      return previousReviewBase(ctx, signal, workingText);
     }
     const ref = mode === "custom" ? this.settings.baseRef : mode === "head~1" ? "HEAD~1" : "HEAD";
     return { sha: await resolveRevision(ctx, ref, signal), label: ref };
@@ -6100,7 +6396,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     return leaf;
   }
   async openReview(opts = {}) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const file = opts.file || this.contextFile();
     if (!file || file.extension !== "md") {
       new import_obsidian9.Notice("Open a Markdown note.");
@@ -6123,8 +6419,9 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       this.checkParticipants();
       this.updateActions();
       const ctx = await resolveRepository(this.app, file, signal);
-      await snapshotWorkspace(ctx, signal);
-      const base = keep || (opts.ref ? { sha: await resolveRevision(ctx, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal));
+      this.rememberSnapshotWorkspace(ctx);
+      await snapshotNote(ctx, signal);
+      const base = keep || (opts.ref ? { sha: await resolveRevision(ctx, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal, (_c = this.liveNoteText(file.path)) != null ? _c : void 0));
       const [read, commit, breaks] = await Promise.all([readRevision(ctx, { ...opts.commit || { shortSha: base.sha.slice(0, 8), subject: "", relative: "", date: "", path: ctx.rel }, sha: base.sha }, signal), revisionInfo(ctx, base.sha, signal), this.readBreaks()]);
       if (opening !== this.opening) return;
       this.session = sessionFromRows(file, read.text, ctx, { ...base, commit, readAs: read.renamedFrom }, "", [], 0, breaks);
@@ -6146,7 +6443,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
         this.creating = false;
         this.checkParticipants();
         this.updateActions();
-        (_c = this.historyView()) == null ? void 0 : _c.updateComparisonState();
+        (_d = this.historyView()) == null ? void 0 : _d.updateComparisonState();
       }
     }
   }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { GitContext } from '../src/git.ts';
-import { getRepositoryRemotes, pushRepository, pullRepository } from '../src/repositoryRemote.ts';
+import { getRepositoryRemotes, trackedRemote, repositorySyncState, pushRepository, pullRepository } from '../src/repositoryRemote.ts';
 import { createChange, getRepositoryStatus } from '../src/repositoryManager.ts';
 
 function fixture(backend: 'git' | 'jj' = 'git', colocate = true) {
@@ -46,6 +46,43 @@ function fixture(backend: 'git' | 'jj' = 'git', colocate = true) {
 const target = { remote: 'origin', branch: 'main' };
 const cases = [['git', true], ['jj', true], ['jj', false]] as const;
 
+for (const [backend, colocate] of cases) test(`history sync colors reflect the configured remote ancestry before and after push (${backend}, colocated=${colocate})`, async () => {
+  const f=fixture(backend,colocate);
+  try {
+    const initial=f.remoteHead();
+    assert.deepEqual(await trackedRemote(f.ctx),target);
+    f.write('note.md','Local change\n');
+    await createChange(f.ctx,['note.md'],'Local change',(await getRepositoryStatus(f.ctx)).token);
+    const current=backend==='git'?f.git('rev-parse','HEAD'):f.jj('log','-G','-r','@-','-T','commit_id');
+    const before=await repositorySyncState(f.ctx,[current,initial]);
+    assert.equal(before.remote,'origin/main');assert.equal(before.warning,undefined);
+    assert.deepEqual(before.synced,[initial]);
+    await pushRepository(f.ctx,await trackedRemote(f.ctx));
+    assert.deepEqual(new Set((await repositorySyncState(f.ctx,[current,initial])).synced),new Set([current,initial]));
+  } finally {f.clean();}
+});
+
+test('remote discovery follows a differently named upstream and never guesses origin when tracking is absent',async()=>{
+  const f=fixture();
+  try {
+    f.git('branch','-m','local-review');
+    assert.deepEqual(await trackedRemote(f.ctx),target,'upstream branch is main, not local-review');
+    f.git('branch','--unset-upstream');
+    assert.equal((await getRepositoryRemotes(f.ctx)).suggested,undefined);
+    await assert.rejects(trackedRemote(f.ctx),/no remote upstream/);
+    const sync=await repositorySyncState(f.ctx,[f.git('rev-parse','HEAD')]);
+    assert.deepEqual(sync.synced,[]);assert.match(sync.warning!,/No remote upstream/);
+  } finally {f.clean();}
+});
+
+test('a colocated workspace without Git upstream does not infer another branch destination',async()=>{
+  const f=fixture('jj',true);
+  try {
+    f.git('branch','--unset-upstream');
+    await assert.rejects(trackedRemote(f.ctx),/No unique tracked remote bookmark/);
+  } finally {f.clean();}
+});
+
 for (const [backend, colocate] of cases) {
   const label = `${backend}, colocated=${colocate}`;
   test(`Remote discovery infers existing tracking without network (${label})`, async () => {
@@ -82,6 +119,7 @@ for (const [backend, colocate] of cases) {
       const currentChange = backend === 'jj' ? f.jj('log', '-G', '-r', '@', '-T', 'change_id') : '';
       const incoming = f.publish('note.md', 'Peer improved the note\n');
       assert.match((await pullRepository(f.ctx, target)).message, /Pulled from origin\/main/);
+      assert.ok((await repositorySyncState(f.ctx,[incoming])).synced.includes(incoming),'the fetched commit is shown as synchronized after Pull');
       assert.equal(f.read('note.md'), 'Peer improved the note\n'); assert.equal(f.read('pending.md'), 'Still reviewing\n');
       assert.equal(backend === 'jj' ? f.jj('log', '-G', '-r', '@-', '-T', 'commit_id') : f.git('rev-parse', 'HEAD'), incoming);
       if (backend === 'jj') assert.equal(f.jj('log', '-G', '-r', '@', '-T', 'change_id'), currentChange);

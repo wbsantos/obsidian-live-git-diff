@@ -2,6 +2,7 @@ import { Component, ItemView, MarkdownRenderer, WorkspaceLeaf, type ViewStateRes
 import { CLS, ATTR_ROW } from './panes.ts';
 import { unwrapCharMarks, applyRowMarks } from './charmarks.ts';
 import type { Session } from './session.ts';
+import { renderProperties } from './properties.ts';
 export const VIEW_TYPE = 'live-git-diff-base';
 export interface BaseViewHost {
   session: Session | null; sync: { enabled: boolean; attach(): void }; closeReview(): void;
@@ -95,7 +96,9 @@ export class GitBaseView extends ItemView {
         const content = element.createDiv({ cls: 'lgd-content' });
         const note = element.createDiv({ cls: 'lgd-explanation' });
         entry = { element, content, note, rendered: Promise.resolve() }; this.cache.set(block.sourceStart, entry);
-        if (block.type === 'properties' || block.type === 'reference' || block.conservative?.startsWith('Plugin-generated content')) {
+        if (block.type === 'properties') {
+          entry.rendered = renderProperties(this.app, block.text, content, sourcePath, this.component);
+        } else if (block.type === 'reference' || block.conservative?.startsWith('Plugin-generated content')) {
           content.createEl('pre').createEl('code', { text: block.text });
         } else {
           entry.rendered = MarkdownRenderer.render(this.app, block.text + (references ? '\n\n' + references : ''), content, sourcePath, this.component);

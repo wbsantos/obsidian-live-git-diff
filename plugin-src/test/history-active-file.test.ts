@@ -261,6 +261,49 @@ test('openHistory captures content before activating a newly created sidebar', a
   assert.equal(s.plugin.historyActiveFile(), a.file);
 });
 
+test('concurrent history requests share the pending sidebar and open the latest file', async () => {
+  for (const visibleBeforeReady of [false, true]) {
+    const s = setup(), first = s.note('first.md'), latest = s.note('latest.md');
+    s.leaves.delete(s.historyLeaf);
+    let finish!: () => void, creations = 0, sets = 0;
+    const ready = new Promise<void>(resolve => { finish = resolve; });
+    s.workspace.getRightLeaf = () => { creations++; return s.historyLeaf; };
+    s.historyLeaf.setViewState = async () => {
+      if (visibleBeforeReady) s.leaves.add(s.historyLeaf);
+      await ready; s.leaves.add(s.historyLeaf);
+    };
+    s.history.setFile = async file => { sets++; s.history.controller.state.file = file; };
+    const older = s.plugin.openHistory(first.file), newer = s.plugin.openHistory(latest.file);
+    assert.equal(creations, 1);
+    assert.equal(sets, 0);
+    finish(); await Promise.all([older, newer]);
+    assert.equal(sets, 1);
+    assert.equal(s.history.controller.state.file, latest.file);
+    assert.equal(s.workspace.activeLeaf, s.historyLeaf);
+  }
+});
+
+test('history creation can be retried after a failure', async () => {
+  const s = setup(), note = s.note('note.md');
+  s.leaves.delete(s.historyLeaf);
+  s.historyLeaf.setViewState = async () => { throw new Error('creation failed'); };
+  await assert.rejects(s.plugin.openHistory(note.file), /creation failed/);
+  s.historyLeaf.setViewState = async () => { s.leaves.add(s.historyLeaf); };
+  await s.plugin.openHistory(note.file);
+  assert.equal(s.history.controller.state.file, note.file);
+});
+
+test('opening history reconciles duplicate panels and updates the panel it reveals', async () => {
+  const s = setup(), note = s.note('note.md');
+  const duplicate = Object.create(GitHistoryView.prototype) as HistoryView;
+  const duplicateLeaf = s.leaf(duplicate, 'right'); duplicate.leaf = duplicateLeaf;
+  duplicate.controller = { state: { file: { path: 'old.md' } }, fileUnavailable() {} };
+  await s.plugin.openHistory(note.file);
+  assert.equal(s.leaves.has(duplicateLeaf), false);
+  assert.equal(s.workspace.activeLeaf, s.historyLeaf);
+  assert.equal(s.history.controller.state.file, note.file);
+});
+
 test('registered workspace and vault events refresh active context, including folder rename/delete', async () => {
   const s = setup(); await s.plugin.onload();
   // onload installs the real sync object; geometry remains irrelevant here.

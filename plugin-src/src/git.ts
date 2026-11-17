@@ -28,6 +28,8 @@ export interface CommitInfo {
   kind?: 'commit' | 'workcopy';
   changeId?: string;
   currentSha?: string;
+  /** The committed version represented by the same live, unchanged file. */
+  headCommit?: CommitInfo;
   groupId?: string;
   snapshot?: boolean;
   absent?: boolean;

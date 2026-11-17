@@ -112,3 +112,16 @@ test('Workcopy is initially selected, remains an anchor, and explicit comparison
   s.panel.setSelection(['3','2']);assert.equal(s.panel.doubleSelect('1'),false);assert.deepEqual(s.panel.state.selected.map(c=>c.sha),['2','3']);
   s.panel.clearSelection();assert.equal(s.panel.doubleSelect('2'),true);assert.equal(s.panel.comparisonRequest(),null);
 });
+
+test('refresh combines selected HEAD with Workcopy without retaining a duplicate version',async()=>{
+  const s=setup(),a=s.panel.setFile({path:'A',name:'A'});await turn();
+  const wc={...commit('workcopy'),kind:'workcopy' as const};
+  s.jobs[0].resolve([wc,commit('3'),commit('2')]);await a;
+  s.panel.setSelection(['workcopy','3']);
+  const refresh=s.panel.refresh();await turn();
+  s.jobs[1].resolve([{...wc,headCommit:commit('3')},commit('2')]);await refresh;
+  assert.deepEqual(s.panel.state.selected.map(c=>c.sha),['workcopy']);
+  assert.equal(s.panel.available().some(c=>c.sha==='3'),false);
+  assert.equal(s.panel.comparisonRequest(),null);
+  s.panel.select('2');assert.deepEqual(s.panel.comparisonRequest()?.commits.map(c=>c.sha),['2','workcopy']);
+});

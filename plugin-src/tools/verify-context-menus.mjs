@@ -17,7 +17,7 @@ async function choose(title){
  const point=await e(`const el=[...document.querySelectorAll('.menu-item')].find(el=>el.querySelector('.menu-item-title')?.textContent===${JSON.stringify(title)}&&el.getBoundingClientRect().width);if(!el)throw new Error('Menu item missing: '+${JSON.stringify(title)});const r=el.getBoundingClientRect();return {x:r.left+40,y:r.top+r.height/2};`);
  for(const type of ['mousePressed','mouseReleased'])await c.send('Input.dispatchMouseEvent',{type,button:'left',clickCount:1,...point});await wait(100);
 }
-const hasPair=items=>items.filter(x=>x==='VCS History').length===1&&items.filter(x=>x==='VCS Compare').length===1;
+const hasPair=items=>items.filter(x=>x==='VCS History').length===1&&items.filter(x=>x==='VCS Compare').length===1&&items.filter(x=>x==='VCS Pending Changes').length===1;
 const explorer=file=>`app.workspace.getLeavesOfType('file-explorer')[0].view.containerEl.querySelector('[data-path="${file}"]')`;
 let verifiedVault=false;
 try{

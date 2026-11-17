@@ -113,7 +113,8 @@ export class HistoryController {
       if (!current()) return;
       const oldWorkcopy = this.state.entry?.commits.find(c=>c.kind==='workcopy');
       const newWorkcopy = entry.commits.find(c=>c.kind==='workcopy');
-      let selected = this.state.selected.map(c=>c.kind==='workcopy' && newWorkcopy ? newWorkcopy : c);
+      let selected = this.state.selected.map(c=>newWorkcopy && (c.kind==='workcopy' || c.sha===newWorkcopy.headCommit?.sha) ? newWorkcopy : c);
+      selected = selected.filter((c, index) => selected.findIndex(other => other.sha === c.sha) === index);
       const opened = Object.keys(this.state.expanded || {});
       selected=selected.map(c=>{
         if(c.kind==='workcopy' || !c.changeId || entry.commits.some(item=>item.sha===c.sha))return c;

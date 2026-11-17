@@ -30,7 +30,7 @@ export function registerFileMenus(plugin: Plugin, host: FileMenuHost): void {
     };
     menu.addItem(item => item.setSection('action').setTitle('VCS History').setIcon('history').onClick(() => run(false)));
     if (file instanceof TFile && file.extension === 'md') menu.addItem(item => item.setSection('action').setTitle('VCS Compare').setIcon('git-compare').onClick(() => run(true)));
-    menu.addItem(item => item.setSection('action').setTitle('Pending changes').setIcon('git-commit-horizontal')
+    menu.addItem(item => item.setSection('action').setTitle('VCS Pending Changes').setIcon('git-commit-horizontal')
       .onClick(() => { if (!disposed) void host.openChanges(file!); }));
     if (file instanceof TFile && file.extension === 'md') menu.addItem(item => item.setSection('action').setTitle('VCS Explain').setIcon('sparkles')
       .onClick(() => { if (!disposed) void host.explainFile(file); }));

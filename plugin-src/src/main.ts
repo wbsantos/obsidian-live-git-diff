@@ -4,18 +4,17 @@ import * as path from 'path';
 import { absPathOf } from './git.ts';
 import { RepositoryCache } from './repositoryCache.ts';
 import { GitRepositoryView, REPOSITORY_VIEW_TYPE } from './repositoryView.ts';
+import { FILE_HISTORY_ICON, REPOSITORY_HISTORY_ICON } from './icons.ts';
 import type { RepositoryRoute } from './repositoryView.ts';
 import { resolveRepositoryDirectory } from './repositoryManager.ts';
-import { getRepositoryRemotes, pushRepository, pullRepository } from './repositoryRemote.ts';
-import type { RemoteTarget, RepositoryRemotes } from './repositoryRemote.ts';
-import { RemoteTargetModal } from './remoteModal.ts';
+import { trackedRemote, pushRepository, pullRepository } from './repositoryRemote.ts';
 import { NavigationTrail } from './navigation.ts';
 import { ExplainView, EXPLAIN_VIEW_TYPE } from './explainView.ts';
 import { runAi, boundedContext } from './ai.ts';
 import { repositoryAiContext, documentContext, comparisonContext } from './aiContext.ts';
+import { errorMessage } from './errors.ts';
 import type { EditorView } from '@codemirror/view';
 import { GitBaseView, VIEW_TYPE } from './baseView.ts';
-import { GitError, fileLogAsync } from './git.ts';
 import type { CommitInfo, GitContext } from './git.ts';
 import { GitHistoryView, HISTORY_VIEW_TYPE } from './historyView.ts';
 import type { HistoryReviewState } from './historyView.ts';
@@ -34,7 +33,7 @@ import type { NotePane } from './panes.ts';
 import { DEFAULT_SETTINGS, LiveGitDiffSettingTab, applyColors, clearColors, mergeSettings, persistSettings } from './settings.ts';
 import type { LiveGitDiffSettings } from './settings.ts';
 import * as log from './log.ts';
-import { resolveRepository, resolveRevision, revisionInfo, snapshotWorkspace, readRevision, SNAPSHOT_DELAY } from './repository.ts';
+import { resolveRepository, resolveRevision, previousReviewBase, revisionInfo, snapshotWorkspace, snapshotNote, readRevision, SNAPSHOT_DELAY } from './repository.ts';
 
 type NavigationRoute = RepositoryRoute | { kind: 'file'; filePath: string; context?: GitContext; revision?: string };
 
@@ -50,7 +49,6 @@ export default class LiveGitDiffPlugin extends Plugin {
   private navigationRequest = 0;
   private explainRequest = 0;
   private remoteJobs = new Map<string, AbortController>();
-  private remoteModals = new Set<RemoteTargetModal>();
   private historicalContext: GitContext | null = null;
   zones!: ViewZones;
   sync!: ScrollSync;
@@ -61,7 +59,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   private preferredEditor: EditorView | null = null;
   private reviewLeaf: WorkspaceLeaf | null = null;
   private participants = new Map<WorkspaceLeaf, { type: string; path?: string; side?: 'a' | 'b' }>();
-  private actions = new Map<MarkdownView, { compare: HTMLElement; history: HTMLElement; changes: HTMLElement }>();
+  private actions = new Map<MarkdownView, { compare: HTMLElement; history: HTMLElement; repository: HTMLElement }>();
   private tableIssues = new Map<EditorView, string>();
   private noteLines = new WeakMap<HTMLElement, { lineStart: number; lineEnd: number }>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -69,7 +67,15 @@ export default class LiveGitDiffPlugin extends Plugin {
   private opening = 0;
   private openingFile: string | null = null;
   private historyOpening = 0;
+  private historyCreation: Promise<void> | null = null;
   private snapshotTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private snapshotWorkspaces = new Map<string, GitContext>();
+  private snapshotRibbon: HTMLElement | null = null;
+  private snapshotRibbonContext: GitContext | null = null;
+  private snapshotRibbonTimer: ReturnType<typeof setTimeout> | null = null;
+  private snapshotRibbonRequest = 0;
+  private snapshotRibbonBusy = false;
+  private quitting = false;
   private creating = false;
   private disposed = false;
   private layoutPending = false;
@@ -101,11 +107,32 @@ export default class LiveGitDiffPlugin extends Plugin {
     command('copy-alignment-report', 'Copy alignment report to clipboard', () => { void this.reportAlignment(); }, true);
     command('refresh-annotations', 'Refresh annotations in the note pane', () => this.rerenderPreviews(), true);
     this.addCommand({ id: 'repository-history', name: 'Open repository history', callback: () => { void this.openRepository(); } });
-    this.addCommand({ id: 'repository-changes', name: 'Open pending changes', callback: () => { void this.openChanges(); } });
+    this.addCommand({ id: 'repository-changes', name: 'Open VCS Pending Changes', callback: () => { void this.openChanges(); } });
     for (const action of ['push', 'pull'] as const) this.addCommand({ id: `repository-${action}`,
       name: action === 'push' ? 'Push to remote' : 'Pull from remote', callback: () => { void this.syncCurrentRepository(action); } });
-    this.addCommand({ id: 'repository-remote', name: 'Configure repository remote', callback: () => { void this.configureRemote(); } });
-    this.addRibbonIcon?.('git-branch', 'Repository history', () => { void this.openRepository(); });
+    this.addRibbonIcon?.(REPOSITORY_HISTORY_ICON, 'Repository history', () => { void this.openRepository(); });
+    this.snapshotRibbon = this.addRibbonIcon?.('camera', 'Snapshot working copy (entire repository)', () => { void this.snapshotCurrentWorkspace(); }) || null;
+    this.snapshotRibbon?.addClass('lgd-snapshot-action');
+    if (this.snapshotRibbon) this.snapshotRibbon.hidden = true;
+    this.registerEvent(this.app.workspace.on('quit', tasks => {
+      if (this.quitting) return;
+      this.quitting = true;
+      for (const timer of this.snapshotTimers.values()) clearTimeout(timer);
+      this.snapshotTimers.clear();
+      if (this.snapshotRibbonTimer) clearTimeout(this.snapshotRibbonTimer);
+      // Capture panel contexts before Obsidian unloads their views. The quit task
+      // must remain valid even if plugin teardown happens before it finishes.
+      for (const leaf of this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)) {
+        const context = (leaf.view as GitHistoryView).controller.state.entry?.context;
+        if (context) this.rememberSnapshotWorkspace(context);
+      }
+      for (const leaf of this.app.workspace.getLeavesOfType(REPOSITORY_VIEW_TYPE)) {
+        const context = (leaf.view as GitRepositoryView).currentRoute?.context;
+        if (context) this.rememberSnapshotWorkspace(context);
+      }
+      const active = this.app.workspace.getActiveFile();
+      tasks.add(() => this.snapshotBeforeQuit(active));
+    }));
     this.registerMarkdownPostProcessor((element, context) => {
       if (element.closest('.lgd-view') || context.sourcePath !== this.session?.filePath) return;
       const info = context.getSectionInfo(element); if (info) this.decorateNoteSection(element, info);
@@ -113,8 +140,8 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.scheduleReadingPaint();
     });
     this.registerEvent(this.app.workspace.on('layout-change', () => this.scheduleLayout()));
-    this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.scheduleLayout()));
-    this.registerEvent(this.app.workspace.on('file-open', () => this.scheduleLayout()));
+    this.registerEvent(this.app.workspace.on('active-leaf-change', () => { this.scheduleLayout(); this.scheduleSnapshotRibbonUpdate(); }));
+    this.registerEvent(this.app.workspace.on('file-open', () => { this.scheduleLayout(); this.scheduleSnapshotRibbonUpdate(); }));
     this.registerEvent(this.app.workspace.on('resize', () => this.sync.attach()));
     this.registerEvent(this.app.vault.on('modify', file => {
       if(file instanceof TFile && (file.path===this.session?.filePath || file.path===this.historyView()?.controller.state.file?.path)) {
@@ -143,41 +170,108 @@ export default class LiveGitDiffPlugin extends Plugin {
       if (!this.disposed) {
         if (!this.session) this.app.workspace.detachLeavesOfType(VIEW_TYPE);
         this.scheduleLayout();
+        this.scheduleSnapshotRibbonUpdate();
       }
     });
   }
   onunload(): void {
     for (const job of this.remoteJobs.values()) job.abort();
-    for (const modal of this.remoteModals) modal.close();
     if (this.cacheSaveTimer) { clearTimeout(this.cacheSaveTimer); this.cacheSaveTimer = null; void persistSettings(this).catch(error => log.warn('Unable to save history cache', error)); }
     for(const timer of this.snapshotTimers.values()) clearTimeout(timer);this.snapshotTimers.clear();
+    if (this.snapshotRibbonTimer) clearTimeout(this.snapshotRibbonTimer);
+    this.snapshotRibbonRequest++;
     this.disposed = true; this.closeReview(); this.historyCache.dispose();
     this.app.workspace.detachLeavesOfType(HISTORY_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(REPOSITORY_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(EXPLAIN_VIEW_TYPE);
-    for (const buttons of this.actions.values()) { buttons.compare.remove(); buttons.history.remove(); buttons.changes.remove(); }
+    for (const buttons of this.actions.values()) { buttons.compare.remove(); buttons.history.remove(); buttons.repository.remove(); }
     this.actions.clear(); this.sync.dispose(); this.zones.dispose(); clearColors();
   }
   private async scheduleSavedSnapshot(file: TFile): Promise<void> {
     try {
       const ctx=await resolveRepository(this.app,file);
-      if(ctx.backend!=='jj' || this.disposed) return;
-      const key=ctx.workspaceRoot!;
+      this.rememberSnapshotWorkspace(ctx);
+      if(ctx.backend!=='jj' || this.disposed || this.quitting) return;
+      const key=ctx.workspaceRoot! + '\0' + ctx.rel;
       clearTimeout(this.snapshotTimers.get(key));
       this.snapshotTimers.set(key,setTimeout(()=>{this.snapshotTimers.delete(key);void this.snapshotSavedNote(file);},SNAPSHOT_DELAY));
     } catch(error) { log.warn('Unable to schedule snapshot',error); }
   }
   private async snapshotSavedNote(file: TFile): Promise<void> {
-    if(this.disposed) return;
+    if(this.disposed || this.quitting) return;
     try {
       const ctx=await resolveRepository(this.app,file);
-      if(ctx.backend!=='jj' || this.disposed) return;
-      await snapshotWorkspace(ctx);
+      this.rememberSnapshotWorkspace(ctx);
+      if(ctx.backend!=='jj' || this.disposed || this.quitting) return;
+      if (!await snapshotNote(ctx)) return;
       if(!this.disposed && this.historyView()?.controller.state.entry?.context.workspaceRoot===ctx.workspaceRoot) await this.historyView()?.controller.refresh();
     } catch(error) {
       log.warn('Unable to snapshot saved note',error);
       if(this.historyView()?.controller.state.file?.path===file.path) this.historyView()?.controller.reportError(`Unable to snapshot saved note: ${error}`);
     }
+  }
+  private rememberSnapshotWorkspace(context: GitContext): void {
+    if (context.backend !== 'jj' || !context.workspaceRoot) return;
+    const root = path.resolve(context.workspaceRoot);
+    this.snapshotWorkspaces.set(process.platform === 'win32' ? root.toLowerCase() : root, context);
+  }
+  private async resolveSnapshotContext(): Promise<GitContext> {
+    const view = this.app.workspace.activeLeaf?.view;
+    const file = this.app.workspace.getActiveFile();
+    const context = view instanceof GitRepositoryView && view.currentRoute ? view.currentRoute.context
+      : view instanceof GitHistoryView && view.controller.state.entry ? view.controller.state.entry.context
+      : file ? await resolveRepository(this.app, file)
+      : await resolveRepositoryDirectory(this.app, '');
+    this.rememberSnapshotWorkspace(context);
+    return context;
+  }
+  private scheduleSnapshotRibbonUpdate(): void {
+    if (!this.snapshotRibbon || this.disposed || this.quitting) return;
+    if (this.snapshotRibbonTimer) clearTimeout(this.snapshotRibbonTimer);
+    this.snapshotRibbonTimer = setTimeout(() => { this.snapshotRibbonTimer = null; void this.updateSnapshotRibbon(); }, 150);
+  }
+  private async updateSnapshotRibbon(): Promise<void> {
+    const request = ++this.snapshotRibbonRequest;
+    try {
+      const context = await this.resolveSnapshotContext();
+      if (request !== this.snapshotRibbonRequest || this.disposed || this.quitting) return;
+      this.snapshotRibbonContext = context.backend === 'jj' ? context : null;
+    } catch { if (request === this.snapshotRibbonRequest) this.snapshotRibbonContext = null; }
+    if (request === this.snapshotRibbonRequest && this.snapshotRibbon) this.snapshotRibbon.hidden = !this.snapshotRibbonContext;
+  }
+  private async snapshotCurrentWorkspace(): Promise<void> {
+    if (this.snapshotRibbonBusy || this.disposed || this.quitting) return;
+    this.snapshotRibbonBusy = true; this.snapshotRibbon?.setAttr('aria-busy', 'true');
+    let progress: Notice | undefined;
+    try {
+      const context = await this.resolveSnapshotContext();
+      if (context.backend !== 'jj') { new Notice('Snapshots are only available in Jujutsu workspaces.'); return; }
+      progress = new Notice('Snapshotting the entire Jujutsu workspace…', 0);
+      await snapshotWorkspace(context);
+      if (!this.disposed && !this.quitting) {
+        await this.repositoryChanged(context);
+        if (this.repositoryView()?.currentRoute?.context.root === context.root) await this.repositoryView()?.refresh();
+        new Notice('Workspace snapshot saved.');
+      }
+    } catch (error) { log.warn('Unable to snapshot workspace', error); if (!this.disposed && !this.quitting) new Notice(`Unable to snapshot workspace: ${errorMessage(error)}`, 10_000); }
+    finally { progress?.hide(); this.snapshotRibbonBusy = false; this.snapshotRibbon?.setAttr('aria-busy', 'false'); }
+  }
+  private async snapshotBeforeQuit(active: TFile | null): Promise<void> {
+    // Always discover the vault's repository, even when no note/history is open.
+    // A vault may be a subdirectory of its JJ workspace; snapshotWorkspace has no fileset.
+    const candidates = [resolveRepositoryDirectory(this.app, '')];
+    if (active) candidates.push(resolveRepository(this.app, active));
+    for (const result of await Promise.allSettled(candidates)) {
+      if (result.status === 'fulfilled') this.rememberSnapshotWorkspace(result.value);
+      else log.debug('No snapshot workspace could be resolved at quit', result.reason);
+    }
+    await Promise.all([...this.snapshotWorkspaces.values()].map(async context => {
+      try { await snapshotWorkspace(context); }
+      catch (error) {
+        log.warn('Unable to snapshot workspace before quit', context.workspaceRoot, error);
+        new Notice(`Unable to snapshot before closing: ${errorMessage(error)}`, 10_000);
+      }
+    }));
   }
   async loadSettings(): Promise<void> {
     const data = await this.loadData();
@@ -224,19 +318,19 @@ export default class LiveGitDiffPlugin extends Plugin {
   private updateActions(): void {
     const views = new Set(this.app.workspace.getLeavesOfType('markdown').map(leaf => leaf.view).filter((view): view is MarkdownView => view instanceof MarkdownView));
     for (const [view, buttons] of this.actions) if (!views.has(view)) {
-      buttons.compare.remove(); buttons.history.remove(); buttons.changes.remove(); this.actions.delete(view);
+      buttons.compare.remove(); buttons.history.remove(); buttons.repository.remove(); this.actions.delete(view);
     }
     for (const view of views) {
       let buttons = this.actions.get(view);
       if (!buttons || !view.containerEl.contains(buttons.compare)) {
-        buttons?.compare.remove(); buttons?.history.remove(); buttons?.changes.remove();
+        buttons?.compare.remove(); buttons?.history.remove(); buttons?.repository.remove();
         buttons = {
           compare: view.addAction('git-compare', 'Compare', () => {
             if (this.participants.has(view.leaf)) this.closeReview();
             else if (view.file) void this.openReview({ file: view.file, leaf: view.leaf });
           }),
-          history: view.addAction('history', 'VCS History', () => { void this.openHistory(view.file); }),
-          changes: view.addAction('git-commit-horizontal', 'Pending changes', () => { void this.openChanges(view.file || undefined); }),
+          history: view.addAction(FILE_HISTORY_ICON, 'VCS History', () => { void this.openHistory(view.file); }),
+          repository: view.addAction(REPOSITORY_HISTORY_ICON, 'Repository history', () => { void this.openRepository(view.file || undefined); }),
         };
         buttons.compare.addClass('lgd-compare-action'); buttons.history.addClass('lgd-history-action'); this.actions.set(view, buttons);
       }
@@ -317,6 +411,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     if (request === this.navigationRequest) this.updateNavigation();
   }
   async navigateRepository(route: RepositoryRoute): Promise<void> {
+    this.rememberSnapshotWorkspace(route.context);
     this.navigation.push(route); await this.showNavigation(route);
   }
   private async contextRepository(target?: TAbstractFile | null): Promise<GitContext> {
@@ -374,42 +469,12 @@ export default class LiveGitDiffPlugin extends Plugin {
     const history = this.historyView();
     if (history?.controller.state.entry?.context.root === context.root) await history.controller.refresh();
   }
-  private remoteKey(context: GitContext, options: RepositoryRemotes): string {
-    return JSON.stringify([context.backend || 'git', context.workspaceRoot || context.root,
-      context.backend === 'jj' ? '' : options.currentBranch || '']);
-  }
-  private chooseRemote(context: GitContext, options: RepositoryRemotes, action?: 'push' | 'pull'): Promise<RemoteTarget | null> {
-    if (!options.remotes.length) throw new Error('No remote configured. Add a remote in your VCS, then try again.');
-    const key = this.remoteKey(context, options);
-    const initial = this.settings.remoteTargets[key] || options.suggested;
-    return new Promise(resolve => {
-      const modal = new RemoteTargetModal(this.app, { ...options, initial,
-        title: action ? action === 'push' ? 'Push' : 'Pull' : 'Remote',
-        submitLabel: action ? action === 'push' ? 'Push' : 'Pull' : 'Save',
-        onSubmit: async target => {
-          this.settings.remoteTargets[key] = { ...target };
-          await persistSettings(this);
-          this.remoteModals.delete(modal);
-          resolve(target);
-        }, onCancel: () => { this.remoteModals.delete(modal); resolve(null); },
-      });
-      this.remoteModals.add(modal); modal.open();
-    });
-  }
   private async remoteContext(): Promise<GitContext> {
     const view = this.app.workspace.activeLeaf?.view;
     if (view instanceof GitRepositoryView && view.currentRoute) return view.currentRoute.context;
     if (view instanceof GitHistoryView && view.controller.state.entry) return view.controller.state.entry.context;
     const file = this.app.workspace.getActiveFile();
     return this.contextRepository(file || undefined);
-  }
-  async configureRemote(context?: GitContext): Promise<void> {
-    try {
-      const ctx = context || await this.remoteContext();
-      if (this.remoteJobs.has(ctx.root)) throw new Error('A remote operation is already running.');
-      const options = await getRepositoryRemotes(ctx);
-      if (!this.disposed) await this.chooseRemote(ctx, options);
-    } catch (error) { new Notice((error as Error).message); }
   }
   private async syncCurrentRepository(action: 'push' | 'pull'): Promise<void> {
     try { await this.syncRepository(await this.remoteContext(), action); }
@@ -420,12 +485,8 @@ export default class LiveGitDiffPlugin extends Plugin {
     const job = new AbortController(); this.remoteJobs.set(context.root, job);
     let progress: Notice | undefined, started = false;
     try {
-      const options = await getRepositoryRemotes(context, job.signal);
+      const target = await trackedRemote(context, job.signal);
       if (job.signal.aborted || this.disposed) return;
-      const saved = this.settings.remoteTargets[this.remoteKey(context, options)];
-      const inferred = saved && options.remotes.includes(saved.remote) ? saved : options.suggested;
-      const target = inferred || await this.chooseRemote(context, options, action);
-      if (!target || job.signal.aborted || this.disposed) return;
       progress = new Notice(`${action === 'push' ? 'Pushing to' : 'Pulling from'} ${target.remote}/${target.branch}…`, 0);
       started = true;
       const result = await (action === 'push' ? pushRepository : pullRepository)(context, target, job.signal);
@@ -453,7 +514,8 @@ export default class LiveGitDiffPlugin extends Plugin {
     await this.repositoryView()?.refresh();
     await this.historyView()?.controller.refresh();
   }
-  private async readRepositoryWorking(context: GitContext, relative: string): Promise<string> {
+  /** Used only for a live note already opened by Obsidian's file-history view. */
+  private async readRepositoryVaultWorking(context: GitContext, relative: string): Promise<string> {
     const file = this.app.vault.getAbstractFileByPath(this.repositoryVaultPath(context, relative));
     if (!(file instanceof TFile)) throw new Error('The file is not available in this vault.');
     if (file.stat.size > 1_048_576) return '[Large file content omitted.]';
@@ -461,7 +523,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   }
   async generateDescription(context: GitContext, paths: string[], token: string, signal: AbortSignal): Promise<string> {
     const settings = { ...this.settings.ai.description };
-    const evidence = await repositoryAiContext(context, { paths, token }, path => this.readRepositoryWorking(context, path), signal);
+    const evidence = await repositoryAiContext(context, { paths, token }, signal);
     return runAi(settings, evidence, 'description', signal);
   }
   private async showExplain(title: string, prepare: (signal: AbortSignal) => Promise<string>): Promise<void> {
@@ -484,13 +546,13 @@ export default class LiveGitDiffPlugin extends Plugin {
   }
   async explainRepository(context: GitContext, options: { sha?: string; paths?: string[]; token?: string }): Promise<void> {
     await this.showExplain(options.paths?.length === 1 ? options.paths[0] : options.sha ? `Change ${options.sha.slice(0, 8)}` : 'Pending changes',
-      signal => repositoryAiContext(context, options, path => this.readRepositoryWorking(context, path), signal));
+      signal => repositoryAiContext(context, options, signal));
   }
   async explainHistory(filePath: string, context: GitContext, commits: readonly CommitInfo[]): Promise<void> {
     const captured = commits.map(commit => ({ ...commit }));
     await this.showExplain(captured.length === 2 ? `${filePath} · ${captured.map(c => c.shortSha).join(' → ')}` : filePath, async signal => {
       const read = async (commit: CommitInfo): Promise<string> => commit.kind === 'workcopy'
-        ? this.liveNoteText(filePath) ?? await this.readRepositoryWorking(context, context.rel)
+        ? this.liveNoteText(filePath) ?? await this.readRepositoryVaultWorking(context, context.rel)
         : (await readRevision(context, commit, signal)).text;
       if (captured.length === 1) return documentContext(`${filePath} at ${captured[0].shortSha}`, boundedContext(await read(captured[0])));
       const [before, after] = await Promise.all(captured.map(read));
@@ -507,13 +569,20 @@ export default class LiveGitDiffPlugin extends Plugin {
     const navigationRequest = record ? ++this.navigationRequest : this.navigationRequest;
     if (record && file) this.navigation.push({ kind: 'file', filePath: file.path });
     const request = ++this.historyOpening;
-    let view = this.historyView();
-    if (!view) {
+    if (!this.historyCreation && !this.historyView()) {
       const leaf = this.app.workspace.getRightLeaf(false); if (!leaf) return;
-      await leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
-      view = this.historyView();
+      this.historyCreation = leaf.setViewState({ type: HISTORY_VIEW_TYPE, active: true });
     }
-    if (view && !this.disposed && request === this.historyOpening && navigationRequest === this.navigationRequest) { void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); this.updateNavigation(); }
+    if (this.historyCreation) {
+      const creation = this.historyCreation;
+      try { await creation; }
+      finally { if (this.historyCreation === creation) this.historyCreation = null; }
+    }
+    if (this.disposed || request !== this.historyOpening || navigationRequest !== this.navigationRequest) return;
+    const view = this.historyView();
+    if (!view) return;
+    for (const leaf of this.app.workspace.getLeavesOfType(HISTORY_VIEW_TYPE)) if (leaf !== view.leaf) leaf.detach();
+    void view.setFile(file); await this.app.workspace.revealLeaf(view.leaf); this.updateNavigation();
   }
   async compareHistory(filePath: string, commits: readonly CommitInfo[]): Promise<void> {
     if (this.openingFile) return;
@@ -526,7 +595,7 @@ export default class LiveGitDiffPlugin extends Plugin {
       await this.openHistorical({ path: filePath, name: history.file.name } as TFile, commits[0], commits[1], history.entry.context);
       return;
     }
-    const ctx=await resolveRepository(this.app,file);await snapshotWorkspace(ctx);
+    const ctx=await resolveRepository(this.app,file);await snapshotNote(ctx);
     const historical=commits.filter(c=>c.kind!=='workcopy');
     if(historical.length===1) await this.openReview({file,ref:historical[0].sha,label:historical[0].shortSha,commit:historical[0]});
     else await this.openHistorical(file,commits[0],commits[1]);
@@ -650,12 +719,10 @@ export default class LiveGitDiffPlugin extends Plugin {
       for (const view of this.snapshotViews()) view.updateStatus();
     }
   }
-  private async resolveBase(ctx: GitContext, signal: AbortSignal): Promise<{ sha: string; label: string }> {
+  private async resolveBase(ctx: GitContext, signal: AbortSignal, workingText?: string): Promise<{ sha: string; label: string }> {
     const mode = this.settings.baseRefMode;
     if (mode === 'file-prev') {
-      const commits = await fileLogAsync(ctx.root, ctx.rel, 2, { signal });
-      if (commits.length < 2) throw new GitError('This note needs two commits to compare with its previous version.');
-      return { sha: commits[1].sha, label: 'previous version' };
+      return previousReviewBase(ctx, signal, workingText);
     }
     const ref = mode === 'custom' ? this.settings.baseRef : mode === 'head~1' ? 'HEAD~1' : 'HEAD';
     return { sha: await resolveRevision(ctx, ref, signal), label: ref };
@@ -683,8 +750,9 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.participants.set(this.reviewLeaf, { type: 'markdown', path: file.path });
       this.creating = false; this.checkParticipants(); this.updateActions();
       const ctx = await resolveRepository(this.app, file, signal);
-      await snapshotWorkspace(ctx,signal);
-      const base = keep || (opts.ref ? { sha: await resolveRevision(ctx, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal));
+      this.rememberSnapshotWorkspace(ctx);
+      await snapshotNote(ctx,signal);
+      const base = keep || (opts.ref ? { sha: await resolveRevision(ctx, opts.ref, signal), label: opts.label || opts.ref } : await this.resolveBase(ctx, signal, this.liveNoteText(file.path) ?? undefined));
       const [read, commit, breaks] = await Promise.all([readRevision(ctx, {...(opts.commit || {shortSha:base.sha.slice(0,8),subject:'',relative:'',date:'',path:ctx.rel}),sha:base.sha}, signal), revisionInfo(ctx, base.sha, signal), this.readBreaks()]);
       if (opening !== this.opening) return;
       this.session = sessionFromRows(file, read.text, ctx, { ...base, commit, readAs: read.renamedFrom }, '', [], 0, breaks);

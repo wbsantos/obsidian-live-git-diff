@@ -8,25 +8,27 @@ export interface RepositoryRemotes {
   branches: string[];
   suggested?: RemoteTarget;
   currentBranch?: string;
+  trackingRef?: string;
 }
+export interface RepositorySyncState { synced: string[]; remote?: string; warning?: string }
 export interface RemoteResult { message: string }
 
 class CommandError extends Error {
   readonly code?: string | number;
   constructor(message: string, code?: string | number) { super(message); this.code = code; }
 }
-function command(tool: string, cwd: string, args: string[], signal?: AbortSignal): Promise<string> {
+function command(tool: string, cwd: string, args: string[], signal?: AbortSignal, input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(tool, args, {
       cwd, encoding: 'utf8', windowsHide: true, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, signal,
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_MERGE_AUTOEDIT: 'no', SSH_ASKPASS_REQUIRE: 'never' },
     }, (error, out, err) => error ? reject(new CommandError(String(err || error.message).trim(), error.code ?? undefined)) : resolve(out));
     child.stdin?.on('error', () => {});
-    child.stdin?.end();
+    child.stdin?.end(input);
   });
 }
-const git = (ctx: GitContext, args: string[], signal?: AbortSignal, raw = false): Promise<string> =>
-  command('git', ctx.root, ['-C', ctx.root, ...args], signal).then(value => raw ? value : value.trim());
+const git = (ctx: GitContext, args: string[], signal?: AbortSignal, raw = false, input?: string): Promise<string> =>
+  command('git', ctx.root, ['-C', ctx.root, ...args], signal, input).then(value => raw ? value : value.trim());
 const jj = (ctx: GitContext, args: string[], signal?: AbortSignal, mutate = false): Promise<string> =>
   command('jj', ctx.workspaceRoot!, [...(mutate ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never',
     '--config', 'git.abandon-unreachable-commits=false', '-R', ctx.workspaceRoot!, ...args], signal).then(value => value.trim());
@@ -48,7 +50,6 @@ async function bookmarks(ctx: GitContext, signal?: AbortSignal): Promise<Bookmar
 /** Uses local configuration only. Opening the panel never starts a network request. */
 export async function getRepositoryRemotes(ctx: GitContext, signal?: AbortSignal): Promise<RepositoryRemotes> {
   const remotes = lines(await git(ctx, ['remote'], signal));
-  const preferred = remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : undefined;
   if (ctx.backend === 'jj') {
     const refs = await bookmarks(ctx, signal);
     const branches = [...new Set(refs.filter(ref => ref.remote !== 'git').map(ref => ref.name))].sort();
@@ -56,8 +57,22 @@ export async function getRepositoryRemotes(ctx: GitContext, signal?: AbortSignal
     const nearby = refs.filter(ref => !ref.conflict && ref.sha && ancestors.has(ref.sha) && ref.remote !== 'git');
     const names = new Set(nearby.map(ref => ref.name));
     const tracked = refs.filter(ref => names.has(ref.name) && !ref.conflict && ref.remote && ref.tracked && remotes.includes(ref.remote));
-    const choices = tracked.length ? tracked : nearby.filter(ref => !ref.remote).map(ref => ({ ...ref, remote: preferred }));
-    const unique = [...new Map(choices.filter(ref => ref.remote).map(ref => [`${ref.remote}\0${ref.name}`, { remote: ref.remote!, branch: ref.name }])).values()];
+    const unique = [...new Map(tracked.map(ref => [`${ref.remote}\0${ref.name}`, { remote: ref.remote!, branch: ref.name }])).values()];
+    // A colocated workspace can already have valid Git upstream configuration
+    // before JJ has imported that relationship as a tracked remote bookmark.
+    if (!unique.length && await git(ctx, ['rev-parse', '--is-bare-repository'], signal) === 'false') {
+      const configured = await getRepositoryRemotes({ ...ctx, backend: 'git' }, signal);
+      if (configured.currentBranch)
+        return { remotes, branches, suggested: names.has(configured.currentBranch) ? configured.suggested : undefined };
+      // JJ can detach Git HEAD when committing. The corresponding local branch
+      // still owns its upstream; use it only when the nearby configuration is unique.
+      const upstreams = lines(await git(ctx, ['for-each-ref', '--format=%(refname:short)%00%(upstream:remotename)%00%(upstream:remoteref)', 'refs/heads'], signal))
+        .map(line => line.split('\0'))
+        .filter(([name, remote, ref]) => names.has(name) && remotes.includes(remote) && ref?.startsWith('refs/heads/'))
+        .map(([, remote, ref]) => ({ remote, branch: ref.slice(11) }));
+      const choices = [...new Map(upstreams.map(target => [`${target.remote}\0${target.branch}`, target])).values()];
+      if (choices.length === 1) return { remotes, branches, suggested: choices[0] };
+    }
     return { remotes, branches, suggested: unique.length === 1 ? unique[0] : undefined };
   }
   const currentBranch = await optional(git(ctx, ['symbolic-ref', '--quiet', '--short', 'HEAD'], signal));
@@ -69,13 +84,55 @@ export async function getRepositoryRemotes(ctx: GitContext, signal?: AbortSignal
     return name && name !== 'HEAD' ? [name] : [];
   }))].sort();
   let suggested: RemoteTarget | undefined;
+  let trackingRef: string | undefined;
   if (currentBranch) {
-    const upstream = (await git(ctx, ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)', `refs/heads/${currentBranch}`], signal)).split('\0');
-    if (remotes.includes(upstream[0]) && upstream[1]?.startsWith('refs/heads/')) suggested = { remote: upstream[0], branch: upstream[1].slice(11) };
-    else if (preferred) suggested = { remote: preferred, branch: currentBranch };
+    const upstream = (await git(ctx, ['for-each-ref', '--format=%(upstream:remotename)%00%(upstream:remoteref)%00%(upstream)', `refs/heads/${currentBranch}`], signal)).split('\0');
+    if (remotes.includes(upstream[0]) && upstream[1]?.startsWith('refs/heads/')) {
+      suggested = { remote: upstream[0], branch: upstream[1].slice(11) }; trackingRef = upstream[2] || undefined;
+    }
     if (!branches.includes(currentBranch)) branches.push(currentBranch);
   }
-  return { remotes, branches, currentBranch: currentBranch || undefined, suggested };
+  return { remotes, branches, currentBranch: currentBranch || undefined, suggested, trackingRef };
+}
+
+/** Sync follows VCS tracking, never a second configuration maintained by the plugin. */
+export async function trackedRemote(ctx: GitContext, signal?: AbortSignal): Promise<RemoteTarget> {
+  const options = await getRepositoryRemotes(ctx, signal);
+  if (!options.suggested) throw new Error(ctx.backend === 'jj'
+    ? 'No unique tracked remote bookmark. Configure tracking in Jujutsu before syncing.'
+    : 'The current branch has no remote upstream. Configure tracking in Git before syncing.');
+  return options.suggested;
+}
+
+/** Color only proven ancestors of the tracked remote tip green. No network access. */
+export async function repositorySyncState(ctx: GitContext, revisions: string[], signal?: AbortSignal): Promise<RepositorySyncState> {
+  const ids = [...new Set(revisions)];
+  if (ids.some(id => !/^[0-9a-f]{40,64}$/.test(id))) throw new Error('Invalid change identifier.');
+  let remote: string | undefined;
+  try {
+    const options = await getRepositoryRemotes(ctx, signal), target = options.suggested;
+    if (!target) return { synced: [], warning: ctx.backend === 'jj' ? 'No unique tracked remote bookmark' : 'No remote upstream configured' };
+    remote = `${target.remote}/${target.branch}`;
+    if (ctx.backend === 'jj') {
+      const tip = await jj(ctx, ['log', '-G', '-r', remoteRev(target), '-T', 'commit_id'], signal);
+      if (!/^[0-9a-f]{40,64}$/.test(tip)) throw new Error('The tracked remote bookmark is unavailable.');
+      const synced: string[] = [];
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        const set = ids.slice(offset, offset + 100).join(' | ');
+        synced.push(...lines(await jj(ctx, ['log', '-G', '-r', `(${set}) & ancestors(${tip})`, '-T', 'commit_id ++ "\\n"'], signal)));
+      }
+      return { synced, remote };
+    }
+    if (!options.trackingRef) throw new Error('The upstream tracking reference is unavailable.');
+    const tip = await git(ctx, ['rev-parse', '--verify', '--end-of-options', `${options.trackingRef}^{commit}`], signal);
+    if (!ids.length) return { synced: [], remote };
+    // Feeding revisions on stdin also works for long, paginated histories on Windows.
+    const unsynced = new Set(lines(await git(ctx, ['rev-list', '--stdin'], signal, false, [...ids, `^${tip}`].join('\n') + '\n')));
+    return { synced: ids.filter(id => !unsynced.has(id)), remote };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return { synced: [], remote, warning: `Remote status unavailable: ${String((error as Error).message || error)}` };
+  }
 }
 
 async function validateTarget(ctx: GitContext, target: RemoteTarget, signal?: AbortSignal): Promise<void> {

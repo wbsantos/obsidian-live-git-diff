@@ -5,6 +5,41 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-17
+
+- Render historical note metadata as read-only Obsidian properties in comparisons.
+- Add persistent File Tree / File List views to Pending changes, retaining full paths in tooltips.
+- Combine unchanged Workcopy and HEAD versions in File History while preserving live comparisons.
+- Read evolution history for commits imported from Git without requiring a Jujutsu operation timestamp.
+- Skip note-triggered automatic snapshots when the file matches the latest snapshot, and debounce saves separately for each file.
+- Take a Jujutsu snapshot during normal Obsidian shutdown using an awaited quit task, including when no note or review is open.
+- Add a camera action to the left ribbon for Jujutsu workspaces. Snapshot the entire workspace, including hidden and non-vault files, while respecting Jujutsu tracking and ignore rules.
+- Preserve the current change ID and serialize shutdown snapshots with other repository mutations; leave Git-only repositories unchanged.
+
+## [0.7.0] - 2026-11-16
+
+- Distinguish repository history (branch icon) from file history (clock); add repository history to note headers and move its File History shortcut next to navigation arrows.
+- Color commits green when they are ancestors of the tracked remote tip, or amber otherwise, using local remote-tracking data without fetching on open.
+- Add a gray uncommitted-changes entry at the top of repository history that opens Pending changes; keep JJ working changes out of committed history.
+- Use link cursors on list entries that open another panel.
+- Remove manual remote configuration, stored overrides and the remote selector; use Git upstreams or tracked Jujutsu bookmarks, including existing Git tracking in colocated workspaces.
+- Make the automatic previous-version comparison the default: this note's pending or unsaved changes compare with HEAD; a clean note compares with HEAD's direct parent. Migrate the former HEAD default once and preserve explicit custom refs.
+
+## [0.6.2] - 2026-11-16
+
+- Keep error diagnostics readable when an Obsidian theme uses the same red for error text and backgrounds: use the normal text/background pair and reserve red for the alert border.
+- Verify error contrast in both light and dark themes with identical error-color variables.
+
+## [0.6.1] - 2026-11-16
+
+- Use the same repository-history icon in the ribbon, tabs, headers and actions.
+- Add per-model reasoning effort controls for Copilot, Codex and Claude Code; reset incompatible choices when changing models or providers.
+- Refresh the Copilot model suggestions from the account catalog, including GPT Luna and GPT-5.3-Codex.
+- Keep a close action in Explain and distinguish it from cancelling a running request.
+- Add synchronized folder checkboxes that include all pending descendants even when a filter hides them.
+- Build AI evidence for hidden and non-vault additions directly through Git, including unstaged edits to newly staged files.
+- Preserve Git/Jujutsu diagnostics from both stdout and stderr, show fallback messages for empty failures, and make long errors scrollable and copyable.
+
 ## [0.6.0] - 2026-11-15
 
 - Add Push and Pull to repository headers, context menus and commands for both Git and Jujutsu.

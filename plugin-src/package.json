@@ -1,6 +1,6 @@
 {
   "name": "obsidian-live-git-diff",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "description": "Review notes and manage Git and Jujutsu changes in Obsidian with optional AI CLI summaries.",
   "main": "main.js",
   "type": "module",

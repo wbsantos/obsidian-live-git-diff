@@ -36,7 +36,7 @@ async function contextMenu() {
   await e(`const element=p.repositoryView().contentEl.querySelector('.lgd-repository-location');
     const box=element.getBoundingClientRect();element.dispatchEvent(new MouseEvent('contextmenu',
       {bubbles:true,cancelable:true,clientX:box.left+24,clientY:box.bottom}));return true;`);
-  await until("Array.from(document.querySelectorAll('.menu-item-title')).some(item=>item.textContent==='Remote settings')");
+  await until("Array.from(document.querySelectorAll('.menu-item-title')).some(item=>item.textContent==='Push')");
 }
 
 try {
@@ -48,6 +48,10 @@ try {
   const existing = remotes.split(/\r?\n/).find(line => line.startsWith('backup '));
   if (existing) assert.equal(path.resolve(existing.slice('backup '.length).trim()), bare, 'Do not replace an unrelated remote.');
   else jj('git', 'remote', 'add', 'backup', bare);
+  // Tracking is configured in the scratch VCS, never through plugin settings.
+  let seeded=false;try{git(bare,'rev-parse','--verify','refs/heads/main');seeded=true;}catch{}
+  if(!seeded){const seed=jj('--ignore-working-copy','log','-G','-r','@--','-T','commit_id');git(vault,'push','backup',seed+':refs/heads/main');}
+  jj('git','fetch','--remote','backup');jj('bookmark','set','main','-r','@-');jj('bookmark','track','main','--remote','backup');
 
   fs.mkdirSync(output, { recursive: true });
   await c.send('Emulation.setDeviceMetricsOverride', { width: 1560, height: 1080, deviceScaleFactor: 1, mobile: false });
@@ -65,15 +69,9 @@ try {
   assert.equal(await e('return p.repositoryView().currentRoute.context.backend'), 'jj');
   assert.equal(await e('return p.repositoryView().error'), '');
   await contextMenu();
-  await e("Array.from(document.querySelectorAll('.menu-item-title')).find(item=>item.textContent==='Remote settings').click();return true;");
-  await until("document.querySelector('.modal-title')?.textContent==='Remote'");
-  await e(`const remote=document.querySelector('.modal [aria-label="Remote"]'),branch=document.querySelector('.modal [aria-label="Branch"]');
-    remote.value='backup';remote.dispatchEvent(new Event('change',{bubbles:true}));
-    branch.value='main';branch.dispatchEvent(new Event('input',{bubbles:true}));return true;`);
-  await shot('remote-settings');
-  await e("Array.from(document.querySelectorAll('.modal button')).find(button=>button.textContent==='Save').click();return true;");
-  await until("!document.querySelector('.modal')&&!p.repositoryView().mutating");
-  assert.ok(await e("return Object.values(p.settings.remoteTargets).some(target=>target.remote==='backup'&&target.branch==='main')"));
+  assert.equal(await e("return Array.from(document.querySelectorAll('.menu-item-title')).some(item=>item.textContent==='Remote settings')"),false);
+  await c.send('Input.dispatchKeyEvent', { type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 });
+  await c.send('Input.dispatchKeyEvent', { type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27 });
 
   const approval = fs.readFileSync(path.join(vault, 'Stories/Approval.md'), 'utf8');
   const changeId = jj('--ignore-working-copy', 'log', '-G', '-r', '@', '-T', 'change_id');
@@ -86,7 +84,7 @@ try {
   assert.equal(jj('--ignore-working-copy', 'log', '-G', '-r', '@', '-T', 'change_id'), changeId);
   await until("!document.querySelector('.notice')");
   await contextMenu();
-  assert.deepEqual(await e("return Array.from(document.querySelectorAll('.menu-item-title')).map(item=>item.textContent).filter(value=>['Push','Pull','Remote settings'].includes(value))"), ['Pull', 'Push', 'Remote settings']);
+  assert.deepEqual(await e("return Array.from(document.querySelectorAll('.menu-item-title')).map(item=>item.textContent).filter(value=>['Push','Pull','Remote settings'].includes(value))"), ['Pull', 'Push']);
   await shot('remote-actions');
   await c.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await c.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -108,6 +106,6 @@ try {
   assert.equal(fs.readFileSync(path.join(vault, 'Remote backup.md'), 'utf8'), remoteText);
   await until("!!app.vault.getAbstractFileByPath('Remote backup.md')");
   assert.ok(await e("return p.repositoryView().changes.some(change=>change.sha===" + JSON.stringify(incoming) + ")"));
-  console.log('Native Obsidian: remote configuration persisted, finalized change pushed, remote contribution pulled, pending story and working change preserved, history refreshed.');
+  console.log('Native Obsidian: VCS tracking used, finalized change pushed, remote contribution pulled, pending story and working change preserved, history refreshed.');
   console.log(output);
 } finally { c.close(); }

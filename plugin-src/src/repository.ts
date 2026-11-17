@@ -27,6 +27,22 @@ export async function snapshotWorkspace(ctx: GitContext, signal?: AbortSignal): 
   const root = ctx.workspaceRoot!;
   await withRepositoryMutation(ctx, async () => { if (signal?.aborted) throw new Error('Snapshot cancelled'); await jj(root, ['util','snapshot'], signal, true); });
 }
+/** Skip automatic snapshots when this note matches its last recorded version. */
+export async function snapshotNote(ctx: GitContext, signal?: AbortSignal): Promise<boolean> {
+  if (ctx.backend !== 'jj') return false;
+  return withRepositoryMutation(ctx, async () => {
+    if (signal?.aborted) throw new Error('Snapshot cancelled');
+    const sha = (await jj(ctx.workspaceRoot!, ['log','-G','-r','@','-T','commit_id'], signal)).trim();
+    const [tree, hash] = await Promise.all([
+      gitRead(ctx.root, ['--literal-pathspecs','ls-tree','-z',sha,'--',ctx.rel], signal),
+      gitRead(ctx.root, ['hash-object','--no-filters','--',ctx.abs], signal),
+    ]);
+    const stored = tree.match(/^\d+ blob ([0-9a-f]+)\t/)?.[1];
+    if (stored === hash.trim()) return false;
+    await jj(ctx.workspaceRoot!, ['util','snapshot'], signal, true);
+    return true;
+  });
+}
 export async function resolveRepository(app: App, file: TFile, signal?: AbortSignal): Promise<GitContext> {
   const abs = absPathOf(app, file), dir = path.dirname(abs);
   let workspaceRoot: string;
@@ -52,7 +68,7 @@ const fields = (c = 'self.') => `"sha" => ${c}commit_id(), "changeId" => ${c}cha
 function records(out: string): CommitInfo[] { return out.split(/\r?\n/).filter(Boolean).map(line => { const c = JSON.parse(line); return {...c, date:c.operationDate || c.date, sha:String(c.sha), changeId:String(c.changeId), shortSha:String(c.sha).slice(0,8), subject:c.subject || '(no description)', path:'', kind:'commit'}; }); }
 export async function repositoryHead(ctx: GitContext, signal?: AbortSignal): Promise<string> {
   if (ctx.backend === 'jj') {
-    await snapshotWorkspace(ctx, signal);
+    await snapshotNote(ctx, signal);
     return (await jj(ctx.workspaceRoot!, ['log','-G','-r','@','-T','commit_id'], signal)).trim();
   }
   try { return await resolveRefAsync(ctx.root,'HEAD',signal); }
@@ -62,12 +78,24 @@ export async function repositoryLog(ctx: GitContext, head: string, limit: number
   const wc = workcopy(ctx.rel);
   if (!head) return [wc];
   const log = await fileLogAsync(ctx.root,ctx.rel,limit,{head,signal});
-  if (ctx.backend !== 'jj') return [wc,...log];
+  if (ctx.backend !== 'jj') {
+    const changed = await gitRead(ctx.root, ['--literal-pathspecs','diff','--no-ext-diff','--no-textconv','--name-only','-z',head,'--',ctx.rel], signal);
+    if (log.length && !changed) {
+      Object.assign(wc, { currentSha: head, headCommit: log[0] });
+      return [wc,...log.slice(1)];
+    }
+    return [wc,...log];
+  }
   const ids = [...new Set([head,...log.map(c=>c.sha)])];
   const meta = records(await jj(ctx.workspaceRoot!, ['log','-G','-r',ids.join('|'),'-T',`json({${fields()}}) ++ "\\n"`],signal));
   const current = meta.find(c=>c.sha===head)!;
   Object.assign(wc,{changeId:current.changeId,currentSha:head,subject:current.subject === '(no description)' ? 'Workcopy' : current.subject});
-  return [wc,...log.filter(c=>c.sha!==head).map(c=>({...c,...meta.find(m=>m.sha===c.sha),path:c.path}))];
+  const history = log.filter(c=>c.sha!==head).map(c=>({...c,...meta.find(m=>m.sha===c.sha),path:c.path}));
+  const changed = await jj(ctx.workspaceRoot!, ['diff','-r',head,'--summary','--',`root-file:${JSON.stringify(ctx.rel)}`], signal);
+  if (history.length && !changed.trim()) {
+    wc.headCommit = history.shift();
+  }
+  return [wc,...history];
 }
 export async function revisionInfo(ctx: GitContext, sha: string, signal?: AbortSignal): Promise<CommitInfo> {
   if(sha.startsWith('-')) throw new Error('Invalid revision.');
@@ -79,6 +107,27 @@ export async function revisionInfo(ctx: GitContext, sha: string, signal?: AbortS
 export async function resolveRevision(ctx: GitContext, ref: string, signal?: AbortSignal): Promise<string> {
   if (ctx.backend !== 'jj') return resolveRefAsync(ctx.root,ref,signal);
   return (await revisionInfo(ctx,ref==='HEAD' ? '@-' : ref==='HEAD~1' ? '@--' : ref,signal)).sha;
+}
+/** Pin HEAD for a dirty note, or HEAD's direct parent for a clean note. */
+export async function previousReviewBase(ctx: GitContext, signal?: AbortSignal, workingText?: string): Promise<{ sha: string; label: string }> {
+  const head = await resolveRevision(ctx, 'HEAD', signal);
+  const status = ctx.backend === 'jj'
+    ? await jj(ctx.workspaceRoot!, ['diff', '-r', '@', '--summary', '--', `root-file:${JSON.stringify(ctx.rel)}`], signal)
+    : await gitRead(ctx.root, ['--literal-pathspecs', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', ctx.rel], signal);
+  let dirty = !!status.trim();
+  if (!dirty && workingText !== undefined) {
+    const base = await readBaseAtAsync(ctx.root, ctx.rel, head, signal);
+    const normalize = (text: string): string => text.replace(/\r\n?/g, '\n');
+    dirty = normalize(base.text) !== normalize(workingText);
+  }
+  if (dirty) return { sha: head, label: 'HEAD' };
+  try {
+    const sha = await resolveRevision(ctx, ctx.backend === 'jj' ? `${head}-` : `${head}^`, signal);
+    return { sha, label: 'HEAD~1' };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new Error('HEAD has no single previous commit to compare against. Choose a version explicitly.');
+  }
 }
 export async function readRevision(ctx: GitContext, commit: CommitInfo, signal?: AbortSignal): Promise<{text:string;path:string;renamedFrom:string|null}> {
   if (commit.absent) return {text:'',path:commit.path,renamedFrom:null};
@@ -94,7 +143,8 @@ export async function readRevision(ctx: GitContext, commit: CommitInfo, signal?:
 export async function evolution(ctx: GitContext, parent: CommitInfo, limit: number, signal?: AbortSignal): Promise<{commits:CommitInfo[];hasMore:boolean}> {
   if (ctx.backend !== 'jj') return {commits:[],hasMore:false};
   const start = parent.kind==='workcopy' ? parent.currentSha! : parent.sha;
-  const entries = records(await jj(ctx.workspaceRoot!, ['evolog','-G','-r',start,'-n',String(limit+1),'-T',`json({${fields('self.commit().')}, "predecessors" => predecessors.map(|c| c.commit_id()), "operationDate" => operation.time().end().local().format("%b %d, %H:%M:%S")}) ++ "\\n"`],signal));
+  // Imported Git commits have no associated operation. Commit timestamps exist for both origins.
+  const entries = records(await jj(ctx.workspaceRoot!, ['evolog','-G','-r',start,'-n',String(limit+1),'-T',`json({${fields('self.commit().')}}) ++ "\\n"`],signal));
   const versions:CommitInfo[] = [];
   let last: string | undefined;
   let previous:CommitInfo|undefined, trackedPath=parent.path || ctx.rel;

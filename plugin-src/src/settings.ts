@@ -16,10 +16,9 @@
  * method without parentheses on purpose. Do not "fix" that — see check-invariant.mjs.
  */
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import type { Plugin } from 'obsidian';
-import { DEFAULT_AI, AI_MODELS, AI_PROMPTS, mergeAi } from './ai.ts';
+import type { Plugin, DropdownComponent } from 'obsidian';
+import { DEFAULT_AI, AI_MODELS, AI_PROMPTS, aiEfforts, mergeAi } from './ai.ts';
 import type { AiSettings, AiPurpose, AiProvider } from './ai.ts';
-import type { RemoteTarget } from './repositoryRemote.ts';
 
 /**
  * The five diff colors.
@@ -69,20 +68,22 @@ export interface LiveGitDiffSettings {
   baseRef: string;
   /** How many commits the picker lists. */
   logLimit: number;
+  pendingChangesView: 'tree' | 'list';
   /** Verbose console logging. Warnings and errors are always on regardless. */
   debug: boolean;
   ai: AiSettings;
-  remoteTargets: Record<string, RemoteTarget>;
+  comparisonDefaultsVersion: number;
 }
 
 export const DEFAULT_SETTINGS: LiveGitDiffSettings = {
   colors: { insBg: '', delBg: '', insRail: '', delRail: '' },
-  baseRefMode: 'head',
+  baseRefMode: 'file-prev',
   baseRef: 'main',
   logLimit: 50,
+  pendingChangesView: 'tree',
   debug: false,
   ai: mergeAi(DEFAULT_AI),
-  remoteTargets: {},
+  comparisonDefaultsVersion: 1,
 };
 
 /** CSS custom property backing each color. Must match styles.css. */
@@ -167,7 +168,6 @@ export interface SettingsHost extends Plugin {
   saveSettings(): Promise<void>;
   repositoryCache?: { serialize(): unknown };
   resetHistoryCache?(): Promise<void>;
-  configureRemote?(): Promise<void>;
 }
 
 /**
@@ -188,17 +188,19 @@ const pendingSaves = new WeakMap<SettingsHost, Promise<void>>();
 /** Merge stored config over the defaults, tolerating a partial/older data.json. */
 export function mergeSettings(loaded: unknown): LiveGitDiffSettings {
   const l = (loaded || {}) as Partial<LiveGitDiffSettings>;
-  const { repositoryHistoryCache: _cache, ...config } = l as Partial<LiveGitDiffSettings> & { repositoryHistoryCache?: unknown };
+  const { repositoryHistoryCache: _cache, remoteTargets: _remoteTargets, ...config } = l as Partial<LiveGitDiffSettings> & { repositoryHistoryCache?: unknown; remoteTargets?: unknown };
   return {
     ...DEFAULT_SETTINGS,
     ...config,
+    // Move the former default to the new automatic mode once. Explicit custom
+    // refs and HEAD~1 are retained; subsequent user choices of HEAD are retained.
+    baseRefMode: !l.comparisonDefaultsVersion && l.baseRefMode === 'head' ? 'file-prev' : l.baseRefMode || DEFAULT_SETTINGS.baseRefMode,
+    comparisonDefaultsVersion: 1,
+    pendingChangesView: l.pendingChangesView === 'list' ? 'list' : 'tree',
     // Nested object: a spread alone would replace the whole colors block with a
     // partial one from an older data.json and leave the new keys undefined.
     colors: { ...DEFAULT_SETTINGS.colors, ...(l.colors || {}) },
     ai: mergeAi(l.ai),
-    remoteTargets: Object.fromEntries(Object.entries(l.remoteTargets && typeof l.remoteTargets === 'object' ? l.remoteTargets : {})
-      .filter(([, target]) => target && typeof target.remote === 'string' && typeof target.branch === 'string')
-      .map(([key, target]) => [key, { remote: target.remote, branch: target.branch }])),
   };
 }
 
@@ -214,25 +216,40 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    if (this.plugin.configureRemote) new Setting(containerEl).setName('Remote').addButton(button => button
-      .setButtonText('Configure').onClick(() => this.plugin.configureRemote!()));
-
     new Setting(containerEl).setName('AI assistants').setHeading();
     for (const purpose of ['description', 'explain'] as AiPurpose[]) {
       const task = this.plugin.settings.ai[purpose];
       new Setting(containerEl).setName(purpose === 'description' ? 'Change description' : 'Explain').setHeading();
       new Setting(containerEl).setName('Agent').addDropdown(dropdown => dropdown
         .addOptions({ copilot: 'GitHub Copilot', codex: 'OpenAI Codex', claude: 'Claude Code' }).setValue(task.provider)
-        .onChange(async value => { task.provider = value as AiProvider; task.model = ''; task.executable = ''; await this.plugin.saveSettings(); this.display(); }));
+        .onChange(async value => { task.provider = value as AiProvider; task.model = ''; task.effort = ''; task.executable = ''; await this.plugin.saveSettings(); this.display(); }));
       new Setting(containerEl).setName('CLI path').addText(text => text.setPlaceholder(task.provider).setValue(task.executable)
         .onChange(async value => { task.executable = value.trim(); await this.plugin.saveSettings(); }));
+      let effortDropdown: DropdownComponent | undefined;
+      let effortSetting: Setting | undefined;
+      const updateEffort = (): void => {
+        const levels = aiEfforts(task.provider, task.model);
+        if (!levels.includes(task.effort)) task.effort = '';
+        if (effortDropdown) {
+          effortDropdown.selectEl.replaceChildren();
+          effortDropdown.addOption('', 'Agent default');
+          for (const level of levels) effortDropdown.addOption(level, ({ none: 'None', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Maximum', ultra: 'Ultra' } as Record<string, string>)[level] || level);
+          effortDropdown.setValue(task.effort).setDisabled(!levels.length);
+        }
+        effortSetting?.setDesc(levels.length ? 'Optional. Available levels depend on the selected model.' : 'No effort override is known for this model. The CLI default will be used.');
+      };
       new Setting(containerEl).setName('Model').addText(text => {
-        text.setPlaceholder('Agent default').setValue(task.model).onChange(async value => { task.model = value.trim(); await this.plugin.saveSettings(); });
+        text.setPlaceholder('Agent default').setValue(task.model).onChange(async value => { task.model = value.trim(); updateEffort(); await this.plugin.saveSettings(); });
         const id = `change-review-model-${purpose}`;
         text.inputEl.setAttribute('list', id);
         const choices = containerEl.createEl('datalist', { attr: { id } });
         for (const model of AI_MODELS[task.provider]) choices.createEl('option', { value: model });
       });
+      effortSetting = new Setting(containerEl).setName('Reasoning effort').addDropdown(dropdown => {
+        effortDropdown = dropdown;
+        dropdown.onChange(async value => { task.effort = value; await this.plugin.saveSettings(); });
+      });
+      updateEffort();
       new Setting(containerEl).setName('Prompt').addTextArea(text => {
         text.inputEl.rows = 5; text.inputEl.addClass('lgd-ai-prompt');
         text.setValue(task.prompt).onChange(async value => { task.prompt = value; await this.plugin.saveSettings(); });
@@ -286,8 +303,8 @@ export class LiveGitDiffSettingTab extends PluginSettingTab {
     if (this.plugin.settings.baseRefMode === 'file-prev') {
       const note = containerEl.createEl('p', { cls: 'lgd-settings-note' });
       note.setText(
-        'The commit before the most recent one that touched this file — i.e. "what changed ' +
-        'in the last edit to this document", regardless of what else was committed since.'
+        'Compare this note with HEAD when it has uncommitted changes, or with HEAD~1 ' +
+        'when it is clean. HEAD~1 is the direct parent of HEAD.'
       );
     }
 

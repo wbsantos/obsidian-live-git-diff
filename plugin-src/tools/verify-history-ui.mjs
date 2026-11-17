@@ -50,7 +50,7 @@ export class Menu {
   addSeparator() {}
   showAtMouseEvent() { Menu.last = this; }
 }
-export function setIcon(el) { el.textContent = '↔'; }
+export function setIcon(el,name) { el.dataset.icon=name; el.textContent = '↔'; }
 export class WorkspaceLeaf {}
 `;
 const entry = `
@@ -68,12 +68,14 @@ const commits = Array.from({length:12}, (_,i) => ({sha:String(12-i), shortSha:St
   subject:i===0 ? 'Improve sidebar history selection and comparisons' : 'Revision '+(12-i),
   author:'History QA', path:'note.md', date:'Nov 12, 2026', relative:'today'}));
 const files = new Map(['note.md', 'other.md'].map(path => [path,new TFile(path)]));
-let active = files.get('note.md'), opening = null, pending = null, fail = false;
-const calls = [], cache = new HistoryCache({ head:async()=> 'HEAD', log:async()=>[{kind:"workcopy",sha:"workcopy",shortSha:"Workcopy",subject:"Workcopy",path:"note.md",date:"",relative:"Live document"},...commits] });
+let active = files.get('note.md'), opening = null, pending = null, fail = false, merged = false;
+const calls = [], cache = new HistoryCache({ head:async()=> 'HEAD', log:async()=>[{kind:"workcopy",sha:"workcopy",shortSha:"Workcopy",subject:"Workcopy",path:"note.md",date:"",relative:"Live document",headCommit:merged?commits[0]:undefined},...commits.slice(merged?1:0)] });
 const host = {
   settings:{logLimit:20}, historyCache:cache,
   historyActiveFile:()=> active,
   historyReviewState:()=> ({openingFile:opening, error:null, active:null}),
+  navigationState:()=>({back:false,forward:false}),navigationBack(){},navigationForward(){},
+  openRepository:async()=>calls.push({kind:'repository'}),
   compareHistory:async(filePath, versions)=> {
     calls.push({filePath, shas:versions.map(c=>c.sha)});
     if (fail) throw new Error('QA comparison failed');
@@ -97,6 +99,10 @@ function doubleClick(sha) {
 const filter = value => { const el=contentEl.querySelector('input');el.value=value;el.dispatchEvent(new Event('input')); };
 async function run() {
   await view.onOpen(); await view.setFile(files.get('note.md')); await paint();
+  const heading=contentEl.querySelector('.lgd-history-heading'),repo=heading.querySelector('[aria-label="Repository history"]');
+  check('File and repository histories have different icons',view.getIcon()==='history' && repo.dataset.icon==='git-branch');
+  check('Repository navigation precedes the file title beside the navigation arrows',Array.from(heading.children).indexOf(repo)===2 && Array.from(heading.children).indexOf(repo)<Array.from(heading.children).indexOf(contentEl.querySelector('.lgd-history-file')));
+  check('File history entries use the link cursor',getComputedStyle(row('12')).cursor==='pointer');
   check('Workcopy is initially selected and has no compare icon', selected()==='workcopy' && ![...contentEl.querySelectorAll('.lgd-history-compare')].some(b=>!b.hidden));
   row('12').click();check('plain click forms a pair with Workcopy', selected()==='12,workcopy');
   row('10').click();check('third click replaces historical target', selected()==='10,workcopy');
@@ -117,6 +123,10 @@ async function run() {
   active=files.get('other.md');view.updateActiveFile();check('different note shows follow action',!contentEl.querySelector('.lgd-history-follow').hidden);
   const stale=context('10');count=calls.length;contentEl.querySelector('.lgd-history-follow').click();await turn();stale[0].callback();
   check('stale menu cannot compare another note',calls.length===count && view.controller.state.file.path==='other.md');
+  merged=true;await view.controller.refresh();await paint();
+  check('Clean Workcopy and HEAD appear as one live version with commit details',row('workcopy').textContent.includes('Workcopy · HEAD') && row('workcopy').textContent.includes(commits[0].subject) && !row('12'));
+  view.controller.setSelection(['workcopy','11']);icon('11').click();await turn();
+  check('Combined Workcopy and HEAD retains live comparisons',calls.at(-1).shas.join(',')==='11,workcopy');
   await view.onClose();
   const report=document.getElementById('report');report.textContent=JSON.stringify({results,passed:results.length});report.dataset.complete='true';
 }

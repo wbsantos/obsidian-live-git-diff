@@ -23,6 +23,8 @@ interface HistoryView {
 }
 interface RepositoryView { leaf: Leaf; getViewType(): string; setRoute(route: RepositoryRoute): Promise<void>; updateNavigation(): void }
 interface TestPlugin {
+  updateActions(): void;
+  openRepository(file?: TFile): Promise<void>;
   navigateRepository(route: RepositoryRoute): Promise<void>;
   openHistory(file: TFile): Promise<void>;
   openRepositoryFile(context: GitContext, relative: string, revision?: string): Promise<void>;
@@ -35,19 +37,59 @@ const notices: string[] = [];
 const require = createRequire(import.meta.url);
 const source = buildSync({ stdin: { contents: `export { default as Plugin } from './main.ts';
   export { GitHistoryView } from './historyView.ts'; export { GitRepositoryView } from './repositoryView.ts';
+  export { registerFileMenus } from './contextMenus.ts';
   export { persistSettings, mergeSettings } from './settings.ts';`, resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) },
 bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', external: ['lgd:worker'] }).outputFiles[0].text;
 const module = { exports: {} };
 new Function('require', 'module', 'exports', source)((id: string) => id === 'obsidian'
   ? { Plugin: PluginStub, MarkdownView, TFile, TFolder, Component: class {}, ItemView: class {}, PluginSettingTab: class {},
-    Modal: class {}, Setting: class {}, Notice: class { constructor(message: string) { notices.push(message); } hide() {} } } : require(id), module, module.exports);
-const { Plugin, GitHistoryView, GitRepositoryView, persistSettings, mergeSettings } = module.exports as {
+    Modal: class {}, Setting: class {}, setIcon() {}, setTooltip() {}, Notice: class { constructor(message: string) { notices.push(message); } hide() {} } } : require(id), module, module.exports);
+const { Plugin, GitHistoryView, GitRepositoryView, persistSettings, mergeSettings, registerFileMenus } = module.exports as {
   Plugin: new (app: unknown) => TestPlugin;
   GitHistoryView: { prototype: HistoryView }; GitRepositoryView: { prototype: RepositoryView };
   persistSettings(host: PersistHost): Promise<void>; mergeSettings(value: unknown): Record<string, unknown>;
+  registerFileMenus(plugin: unknown, host: unknown): void;
 };
 const turn = () => new Promise<void>(resolve => setImmediate(resolve));
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; }
+
+test('note header keeps file history and replaces Pending changes with repository history for that note', async () => {
+  const actions: {icon:string;title:string;callback:()=>void}[]=[];
+  const file=new TFile('Stories/note.md');
+  const view=Object.assign(new MarkdownView(),{file,leaf:{},containerEl:{contains:()=>true},addAction(icon:string,title:string,callback:()=>void){
+    actions.push({icon,title,callback});return {remove(){},addClass(){},setAttr(){}};
+  }});
+  const plugin=new Plugin({workspace:{getLeavesOfType:()=>[{view}]}});
+  let opened:TFile|undefined;plugin.openRepository=async target=>{opened=target;};
+  plugin.updateActions();
+  assert.equal(actions.find(action=>action.title==='VCS History')?.icon,'history');
+  assert.equal(actions.find(action=>action.title==='Repository history')?.icon,'git-branch');
+  assert.equal(actions.some(action=>action.title==='Pending changes'),false);
+  actions.find(action=>action.title==='Repository history')!.callback();await turn();
+  assert.equal(opened,file);
+});
+
+test('file and folder menus offer VCS Pending Changes for the clicked target', async () => {
+  const callbacks = new Map<string, (...args: any[]) => void>();
+  const targets: unknown[] = [];
+  const plugin = { app: { workspace: { on: (event: string, callback: (...args: any[]) => void) => callbacks.set(event, callback),
+    onLayoutReady() {} } }, registerEvent() {}, register() {} };
+  registerFileMenus(plugin, { openChanges: async (target: unknown) => { targets.push(target); } });
+  const clicked = [new TFile('note.md'), new TFolder('folder')];
+  for (const target of clicked) {
+    const items: Array<{ title: string; click?: () => void }> = [];
+    const menu = { addItem(callback: (item: unknown) => void) {
+      const state: { title: string; click?: () => void } = { title: '' };
+      const item = { setSection: () => item, setTitle: (title: string) => { state.title = title; return item; },
+        setIcon: () => item, onClick: (click: () => void) => { state.click = click; return item; } };
+      callback(item); items.push(state);
+    } };
+    callbacks.get('file-menu')!(menu, target);
+    const action = items.find(item => item.title === 'VCS Pending Changes');
+    assert.ok(action); action.click!();
+  }
+  assert.deepEqual(targets, clicked);
+});
 
 function setup() {
   const vaultRoot = path.resolve('repository-navigation-fixture');
@@ -151,9 +193,11 @@ test('a failed cache/settings save cannot poison the next persistence request', 
   await assert.rejects(failure, /disk full/); await recovery; assert.equal(writes, 2);
 });
 
-test('remote settings retain valid targets and tolerate old or malformed data', () => {
-  assert.deepEqual(mergeSettings({}).remoteTargets, {});
-  assert.deepEqual(mergeSettings({ remoteTargets: { repo: { remote: 'origin', branch: 'main', extra: true },
-    empty: null, invalid: { remote: 42 }, text: 'bad' } }).remoteTargets,
-  { repo: { remote: 'origin', branch: 'main' } });
+test('legacy remote overrides are discarded and the previous-version comparison becomes the default once', () => {
+  assert.equal(mergeSettings({}).remoteTargets, undefined);
+  assert.equal(mergeSettings({ remoteTargets: { repo: { remote: 'other', branch: 'wrong' } } }).remoteTargets, undefined);
+  assert.equal(mergeSettings({}).baseRefMode, 'file-prev');
+  assert.equal(mergeSettings({baseRefMode:'head'}).baseRefMode, 'file-prev');
+  assert.equal(mergeSettings({baseRefMode:'head',comparisonDefaultsVersion:1}).baseRefMode, 'head');
+  assert.equal(mergeSettings({baseRefMode:'custom',baseRef:'main'}).baseRefMode, 'custom');
 });

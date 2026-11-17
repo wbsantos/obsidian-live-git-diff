@@ -2,16 +2,22 @@ import { ItemView, Menu, Notice, Scope, WorkspaceLeaf, setIcon } from 'obsidian'
 import type { GitContext } from './git.ts';
 import { snapshotWorkspace } from './repository.ts';
 import { createChange, getChangeDetails, getRepositoryStatus } from './repositoryManager.ts';
+import { errorMessage } from './errors.ts';
+import { FILE_HISTORY_ICON, REPOSITORY_HISTORY_ICON } from './icons.ts';
+import { repositorySyncState } from './repositoryRemote.ts';
+import type { RepositorySyncState } from './repositoryRemote.ts';
 import type { RepositoryChange, RepositoryFile, RepositoryPage, RepositoryStatus } from './repositoryManager.ts';
 
 export const REPOSITORY_VIEW_TYPE = 'live-git-diff-repository';
+export { REPOSITORY_HISTORY_ICON } from './icons.ts';
 export type RepositoryRoute =
   | { kind: 'log'; context: GitContext; path?: string }
   | { kind: 'details'; context: GitContext; sha: string }
   | { kind: 'changes'; context: GitContext; paths?: string[] };
 
 export interface RepositoryViewHost {
-  settings: { logLimit: number };
+  settings: { logLimit: number; pendingChangesView?: 'tree' | 'list' };
+  saveSettings?(): Promise<void>;
   loadRepositoryHistory(context: GitContext, path: string | undefined, offset: number, limit: number, signal?: AbortSignal): Promise<RepositoryPage>;
   navigateRepository(route: RepositoryRoute): Promise<void>;
   openRepositoryFile(context: GitContext, path: string, revision?: string): Promise<void>;
@@ -23,7 +29,6 @@ export interface RepositoryViewHost {
   generateDescription?(context: GitContext, paths: string[], token: string, signal: AbortSignal): Promise<string>;
   explainRepository?(context: GitContext, options: { sha?: string; paths?: string[]; token?: string }): Promise<void>;
   syncRepository?(context: GitContext, action: 'push' | 'pull'): Promise<void>;
-  configureRemote?(context: GitContext): Promise<void>;
 }
 
 interface VisitState {
@@ -55,13 +60,15 @@ export class GitRepositoryView extends ItemView {
   private closed = false;
   private loading = false;
   private mutating = false;
-  private remoteAction: 'push' | 'pull' | 'configure' | null = null;
+  private remoteAction: 'push' | 'pull' | null = null;
   private error = '';
   private changes: RepositoryChange[] = [];
   private anchor: string | undefined;
   private hasMore = false;
   private details: { change: RepositoryChange; files: RepositoryFile[] } | null = null;
   private status: RepositoryStatus | null = null;
+  private pendingCount = 0;
+  private syncState: RepositorySyncState = { synced: [], warning: '' };
   private body: HTMLElement | null = null;
   private footer: HTMLElement | null = null;
   private back: HTMLButtonElement | null = null;
@@ -72,6 +79,7 @@ export class GitRepositoryView extends ItemView {
   private more: HTMLButtonElement | null = null;
   private aiJob: AbortController | null = null;
   private aiButton: HTMLButtonElement | null = null;
+  private folderSelections = new Map<HTMLInputElement, readonly RepositoryFile[]>();
 
   constructor(leaf: WorkspaceLeaf, host: RepositoryViewHost) {
     super(leaf); this.host = host;
@@ -85,7 +93,7 @@ export class GitRepositoryView extends ItemView {
   get currentRoute(): RepositoryRoute | null { return this.route; }
   getViewType(): string { return REPOSITORY_VIEW_TYPE; }
   getDisplayText(): string { return 'Repository'; }
-  getIcon(): string { return 'git-branch'; }
+  getIcon(): string { return REPOSITORY_HISTORY_ICON; }
   async onOpen(): Promise<void> { this.closed = false; this.contentEl.addClass('lgd-repository'); this.render(); }
   async onClose(): Promise<void> { this.rememberScroll(); this.closed = true; this.job?.abort(); this.aiJob?.abort(); this.generation++; }
 
@@ -107,6 +115,7 @@ export class GitRepositoryView extends ItemView {
     }
     this.state = state;
     this.changes = []; this.anchor = undefined; this.details = null; this.status = null; this.hasMore = false; this.error = '';
+    this.pendingCount = 0; this.syncState = { synced: [], warning: '' };
     await this.loadRoute(false, route.kind === 'changes' ? route.paths : undefined);
   }
   async refresh(): Promise<void> { if (!this.mutating) { this.rememberScroll(); await this.loadRoute(false); } }
@@ -118,7 +127,7 @@ export class GitRepositoryView extends ItemView {
   private rememberScroll(): void { if (this.state && this.body) this.state.scroll = this.body.scrollTop; }
   private async run(action: () => void | Promise<void>): Promise<void> {
     try { await action(); }
-    catch (error) { if (!this.closed) { this.error = String((error as Error).message || error); this.updateFooter(); } }
+    catch (error) { if (!this.closed) { this.error = errorMessage(error); this.updateFooter(); } }
   }
   private navigate(route: RepositoryRoute): void { if (!this.mutating) void this.run(() => this.host.navigateRepository(route)); }
   private actionButton(parent: HTMLElement, icon: string, label: string, action: () => void): HTMLButtonElement {
@@ -155,6 +164,12 @@ export class GitRepositoryView extends ItemView {
           if (!hasMore) break;
         }
         this.changes = accumulated; this.hasMore = hasMore; this.anchor = anchor;
+        const [pending, sync] = await Promise.all([
+          getRepositoryStatus(route.context, job.signal),
+          repositorySyncState(route.context, accumulated.map(change => change.sha), job.signal),
+        ]);
+        if (!current()) return;
+        this.pendingCount = pending.files.length; this.syncState = sync;
         if (append && !restarted) state.pages++;
       } else if (route.kind === 'details') {
         const result = await getChangeDetails(route.context, route.sha, job.signal);
@@ -173,7 +188,7 @@ export class GitRepositoryView extends ItemView {
         }
         state.initialized = true;
       }
-    } catch (error) { if (current() && !job.signal.aborted) this.error = String((error as Error).message || error); }
+    } catch (error) { if (current() && !job.signal.aborted) this.error = errorMessage(error); }
     finally {
       if (current()) { this.loading = false; this.render(); }
     }
@@ -187,11 +202,11 @@ export class GitRepositoryView extends ItemView {
     this.back = this.actionButton(heading, 'arrow-left', 'Back', () => this.host.navigationBack());
     this.forward = this.actionButton(heading, 'arrow-right', 'Forward', () => this.host.navigationForward());
     const route = this.route;
-    const title = route?.kind === 'changes' ? 'Pending changes' : route?.kind === 'details' ? 'Change details' : route?.path ? route.path.split('/').pop()! : 'Repository history';
+    const title = route?.kind === 'changes' ? 'VCS Pending Changes' : route?.kind === 'details' ? 'Change details' : route?.path ? route.path.split('/').pop()! : 'Repository history';
     heading.createDiv({ cls: 'lgd-repository-title', text: title, attr: { title: route?.kind === 'log' && route.path ? route.path : title } });
     if (route) {
-      if (route.kind !== 'log' || route.path) this.actionButton(heading, 'history', 'Repository history', () => this.navigate({ kind: 'log', context: route.context }));
-      if (route.kind !== 'changes') this.actionButton(heading, 'git-commit-horizontal', 'Pending changes', () => this.navigate({ kind: 'changes', context: route.context }));
+      if (route.kind !== 'log' || route.path) this.actionButton(heading, REPOSITORY_HISTORY_ICON, 'Repository history', () => this.navigate({ kind: 'log', context: route.context }));
+      if (route.kind !== 'changes') this.actionButton(heading, 'git-commit-horizontal', 'VCS Pending Changes', () => this.navigate({ kind: 'changes', context: route.context }));
       if (route.kind === 'changes' && route.context.backend === 'jj') this.actionButton(heading, 'camera', 'Snapshot working copy', () => { void this.snapshot(); });
       if (this.host.syncRepository) {
         this.actionButton(heading, 'download', 'Pull', () => { void this.remote('pull'); }).disabled = this.loading || this.mutating;
@@ -203,6 +218,20 @@ export class GitRepositoryView extends ItemView {
       heading.oncontextmenu = location.oncontextmenu = event => this.remoteMenu(event);
     }
     if (route?.kind === 'log' || route?.kind === 'changes') {
+      if (route.kind === 'changes') {
+        const layout = root.createDiv({ cls: 'lgd-repository-layout' });
+        const label = layout.createEl('label', { text: 'View' });
+        const select = label.createEl('select', { cls: 'dropdown', attr: { 'aria-label': 'Pending files view' } });
+        select.createEl('option', { text: 'File Tree', attr: { value: 'tree' } });
+        select.createEl('option', { text: 'File List', attr: { value: 'list' } });
+        select.value = this.host.settings.pendingChangesView || 'tree';
+        select.disabled = this.loading || this.mutating;
+        select.onchange = () => {
+          this.host.settings.pendingChangesView = select.value === 'list' ? 'list' : 'tree';
+          this.renderBody(); this.updateSelection();
+          if (this.host.saveSettings) void this.run(() => this.host.saveSettings!());
+        };
+      }
       this.query = root.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: route.kind === 'log' ? 'Filter loaded changes' : 'Filter files', attr: { 'aria-label': route.kind === 'log' ? 'Filter loaded changes' : 'Filter files' } });
       this.query.value = this.state?.query || '';
       this.query.oninput = () => { if (this.state) this.state.query = this.query!.value; this.renderBody(); };
@@ -225,13 +254,25 @@ export class GitRepositoryView extends ItemView {
     const body = this.body, route = this.route, state = this.state;
     if (!body) return;
     const scroll = body.scrollTop; body.empty();
+    this.folderSelections.clear();
     const query = state?.query.trim().toLocaleLowerCase() || '';
     if (route?.kind === 'log') {
       body.setAttr('role', 'list'); body.setAttr('aria-label', 'Repository changes');
+      if (this.pendingCount) {
+        const row = body.createDiv({ cls: 'lgd-repository-history-row', attr: { role: 'listitem' } });
+        const pending = row.createEl('button', { cls: 'lgd-repository-change', attr: { type: 'button', 'data-sync': 'pending' } });
+        pending.createDiv({ cls: 'lgd-history-subject', text: 'Uncommitted changes' });
+        pending.createDiv({ cls: 'lgd-history-meta', text: `${this.pendingCount} pending ${this.pendingCount === 1 ? 'file' : 'files'} · Open VCS Pending Changes` });
+        pending.onclick = () => this.navigate({ kind: 'changes', context: route.context });
+      }
+      const synced = new Set(this.syncState.synced);
       const changes = this.changes.filter(change => [change.subject, change.sha, change.changeId || '', change.author, change.date].some(value => value.toLocaleLowerCase().includes(query)));
       for (const change of changes) {
         const row = body.createDiv({ cls: 'lgd-repository-history-row', attr: { role: 'listitem' } });
-        const button = row.createEl('button', { cls: 'lgd-repository-change', attr: { type: 'button' } });
+        const remote = this.syncState.remote;
+        const sync = synced.has(change.sha) ? 'synced' : 'unsynced';
+        const description = this.syncState.warning || (sync === 'synced' ? `Synced with ${remote}` : `Not synced with ${remote}`);
+        const button = row.createEl('button', { cls: 'lgd-repository-change', attr: { type: 'button', 'data-sync': sync, title: description, 'aria-label': `${change.subject || '(no description)'} · ${description}` } });
         button.createDiv({ cls: 'lgd-history-subject', text: change.subject || '(no description)' });
         button.createDiv({ cls: 'lgd-history-meta', text: `${(change.changeId || change.shortSha).slice(0, 10)} · ${change.author || 'Unknown author'}` });
         button.createDiv({ cls: 'lgd-history-date', text: displayDate(change.date), attr: { title: change.date } });
@@ -246,7 +287,7 @@ export class GitRepositoryView extends ItemView {
           menu.showAtMouseEvent(event);
         };
       }
-      if (!changes.length) this.empty(this.loading ? 'Loading changes…' : query ? 'No loaded changes match.' : this.error ? '' : 'No changes.');
+      if (!changes.length && !this.pendingCount) this.empty(this.loading ? 'Loading changes…' : query ? 'No loaded changes match.' : this.error ? '' : 'No changes.');
     } else if (route?.kind === 'details' && this.details) {
       body.removeAttribute('role'); body.removeAttribute('aria-label');
       const { change, files } = this.details;
@@ -281,32 +322,47 @@ export class GitRepositoryView extends ItemView {
 
   private renderFiles(container: HTMLElement, files: RepositoryFile[], selecting: boolean, route: RepositoryRoute): void {
     const root: FileTree = { folders: new Map(), files: [], path: '' };
+    const flat = selecting && this.host.settings.pendingChangesView === 'list';
     for (const file of files) {
       let node = root;
-      const parts = file.path.split('/'); parts.pop();
+      const parts = flat ? [] : file.path.split('/').slice(0, -1);
       for (const part of parts) {
         if (!node.folders.has(part)) node.folders.set(part, { folders: new Map(), files: [], path: node.path ? `${node.path}/${part}` : part });
         node = node.folders.get(part)!;
       }
       node.files.push(file);
     }
-    const tree = container.createDiv({ cls: 'lgd-repository-tree', attr: { role: 'group', 'aria-label': selecting ? 'Pending files' : 'Affected files' } });
+    const tree = container.createDiv({ cls: flat ? 'lgd-repository-tree lgd-repository-list' : 'lgd-repository-tree', attr: { role: 'group', 'aria-label': selecting ? 'Pending files' : 'Affected files' } });
     const renderNode = (parent: HTMLElement, node: FileTree): void => {
       for (const [name, child] of [...node.folders].sort(([a], [b]) => a.localeCompare(b))) {
         const group = parent.createEl('details', { cls: 'lgd-repository-folder' });
         group.open = !this.state?.collapsed.has(child.path);
         group.ontoggle = () => { if (group.open) this.state?.collapsed.delete(child.path); else this.state?.collapsed.add(child.path); };
         const summary = group.createEl('summary');
+        const descendants = (selecting ? this.status?.files || [] : files).filter(file => file.path.startsWith(child.path + '/'));
+        if (selecting) {
+          const all = descendants.length > 0 && descendants.every(file => this.state?.selected.has(file.path));
+          const some = descendants.some(file => this.state?.selected.has(file.path));
+          const checkbox = summary.createEl('input', { type: 'checkbox', attr: { 'aria-label': `Include folder ${child.path}`, title: 'Include all files in this folder, including filtered files' } });
+          checkbox.checked = all; checkbox.indeterminate = some && !all; checkbox.disabled = this.mutating;
+          this.folderSelections.set(checkbox, descendants);
+          checkbox.onclick = event => {
+            event.preventDefault(); event.stopPropagation();
+            if (this.mutating || this.route !== route) return;
+            const all = descendants.every(file => this.state?.selected.has(file.path));
+            for (const file of descendants) { if (all) this.state?.selected.delete(file.path); else this.state?.selected.add(file.path); }
+            this.renderBody(); this.updateSelection();
+          };
+        }
         const icon = summary.createSpan({ cls: 'lgd-repository-folder-icon' }); setIcon(icon, 'folder');
         summary.createSpan({ text: name });
         summary.oncontextmenu = event => {
           event.preventDefault(); event.stopPropagation(); const menu = new Menu();
-          menu.addItem(item => item.setTitle('VCS History').setIcon('history').onClick(() => this.navigate({ kind: 'log', context: route.context, path: child.path })));
+          menu.addItem(item => item.setTitle('VCS History').setIcon(REPOSITORY_HISTORY_ICON).onClick(() => this.navigate({ kind: 'log', context: route.context, path: child.path })));
           if (this.host.explainRepository) menu.addItem(item => item.setTitle('Explain').setIcon('sparkles').onClick(() => this.run(() => this.host.explainRepository!(route.context,
-            { sha: route.kind === 'details' ? route.sha : undefined, paths: files.filter(file => file.path.startsWith(child.path + '/')).map(file => file.path), token: selecting ? this.status?.token : undefined }))));
+            { sha: route.kind === 'details' ? route.sha : undefined, paths: descendants.map(file => file.path), token: selecting ? this.status?.token : undefined }))));
           if (selecting) {
             menu.addSeparator();
-            const descendants = files.filter(file => file.path.startsWith(child.path + '/'));
             const all = descendants.every(file => this.state?.selected.has(file.path));
             menu.addItem(item => item.setTitle(all ? 'Deselect folder' : 'Select folder').setIcon(all ? 'square' : 'square-check').onClick(() => {
               if (this.mutating || this.route !== route) return;
@@ -318,8 +374,8 @@ export class GitRepositoryView extends ItemView {
         };
         renderNode(group.createDiv({ cls: 'lgd-repository-folder-content' }), child);
       }
-      for (const file of [...node.files].sort((a, b) => a.path.localeCompare(b.path))) {
-        const row = parent.createDiv({ cls: 'lgd-repository-file' });
+      for (const file of [...node.files].sort((a, b) => flat ? a.path.split('/').pop()!.localeCompare(b.path.split('/').pop()!) || a.path.localeCompare(b.path) : a.path.localeCompare(b.path))) {
+        const row = parent.createDiv({ cls: 'lgd-repository-file', attr: { title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path } });
         if (selecting) {
           const checkbox = row.createEl('input', { type: 'checkbox', attr: { 'aria-label': `Include ${file.path}` } });
           checkbox.checked = !!this.state?.selected.has(file.path); checkbox.disabled = this.mutating;
@@ -332,7 +388,7 @@ export class GitRepositoryView extends ItemView {
         if (file.oldPath) row.createDiv({ cls: 'lgd-repository-old-path', text: file.oldPath });
         row.oncontextmenu = event => {
           event.preventDefault(); event.stopPropagation(); const menu = new Menu();
-          menu.addItem(item => item.setTitle('VCS History').setIcon('history').onClick(() => this.run(() => this.host.openRepositoryFile(route.context, file.path, revision))));
+          menu.addItem(item => item.setTitle('VCS History').setIcon(FILE_HISTORY_ICON).onClick(() => this.run(() => this.host.openRepositoryFile(route.context, file.path, revision))));
           if (this.host.explainRepository) menu.addItem(item => item.setTitle('Explain').setIcon('sparkles').onClick(() => this.run(() => this.host.explainRepository!(route.context,
             { sha: revision, paths: [file.path], token: selecting ? this.status?.token : undefined }))));
           const folder = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : undefined;
@@ -379,20 +435,32 @@ export class GitRepositoryView extends ItemView {
     this.selectionLabel?.setText(`${count} / ${total} files`);
     const all = this.contentEl.querySelector<HTMLInputElement>('.lgd-repository-selection input');
     if (all) { all.checked = total > 0 && count === total; all.indeterminate = count > 0 && count < total; all.disabled = this.mutating || this.loading || !total; }
+    for (const [checkbox, files] of this.folderSelections) {
+      const selected = files.filter(file => this.state?.selected.has(file.path)).length;
+      checkbox.checked = files.length > 0 && selected === files.length;
+      checkbox.indeterminate = selected > 0 && selected < files.length;
+      checkbox.disabled = this.mutating || this.loading;
+    }
     if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count || !this.state?.description.trim();
     if (this.aiButton) this.aiButton.disabled = !this.aiJob && (this.mutating || this.loading || !count);
   }
   private updateFooter(): void {
     const route = this.route;
-    const remoteStatus = this.remoteAction === 'push' ? 'Pushing…' : this.remoteAction === 'pull' ? 'Pulling…' : this.remoteAction === 'configure' ? 'Remote settings…' : '';
-    const text = this.error || (remoteStatus || (this.aiJob ? 'Generating description…' : this.mutating ? 'Saving…' : this.loading ? 'Loading…' : route?.kind === 'log' ? `${this.changes.length} changes` : route?.kind === 'details' && this.details ? `${this.details.files.length} files` : ''));
-    this.footer?.setText(text); this.footer?.toggleClass('lgd-error', !!this.error);
+    const remoteStatus = this.remoteAction === 'push' ? 'Pushing…' : this.remoteAction === 'pull' ? 'Pulling…' : '';
+    const text = this.error || (remoteStatus || (this.aiJob ? 'Generating description…' : this.mutating ? 'Saving…' : this.loading ? 'Loading…' : route?.kind === 'log' ? `${this.changes.length} commits · ${this.syncState.warning || this.syncState.remote || 'No upstream'}` : route?.kind === 'details' && this.details ? `${this.details.files.length} files` : ''));
+    this.footer?.setText(this.error ? `Error: ${this.error}` : text); this.footer?.toggleClass('lgd-error', !!this.error); this.footer?.toggle(!!text);
+    if (this.error && this.footer) {
+      this.footer.setAttr('role', 'alert');
+      const copy = this.footer.createEl('button', { cls: 'lgd-repository-error-copy', text: 'Copy error', attr: { type: 'button' } });
+      const detail = this.error;
+      copy.onclick = () => { void this.contentEl.ownerDocument.defaultView!.navigator.clipboard.writeText(detail).catch(() => new Notice('Unable to copy the error. Select and copy its text.')); };
+    } else this.footer?.setAttr('role', 'status');
     this.body?.setAttr('aria-busy', String(this.loading || this.mutating));
     if (this.more) this.more.disabled = this.loading || this.mutating;
     this.updateSelection();
   }
   private setMutationDisabled(): void {
-    if (this.mutating) for (const input of Array.from(this.contentEl.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement>('button,input,textarea'))) input.disabled = true;
+    if (this.mutating) for (const input of Array.from(this.contentEl.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('button,input,textarea,select'))) input.disabled = true;
     this.updateNavigation(); this.updateFooter();
     if (this.aiJob && this.aiButton) this.aiButton.disabled = false;
   }
@@ -406,7 +474,7 @@ export class GitRepositoryView extends ItemView {
     try {
       const description = await this.host.generateDescription(route.context, [...state.selected], status.token, job.signal);
       if (!job.signal.aborted && !this.closed && this.route === route) state.description = description;
-    } catch (error) { if (!job.signal.aborted && this.route === route) this.error = (error as Error).message; }
+    } catch (error) { if (!job.signal.aborted && this.route === route) this.error = errorMessage(error); }
     finally {
       if (this.aiJob === job) { this.aiJob = null; this.mutating = false; if (!this.closed) this.render(); }
     }
@@ -423,7 +491,7 @@ export class GitRepositoryView extends ItemView {
       await this.host.repositoryChanged(route.context);
       if (!this.closed) new Notice('Change created.');
     } catch (error) {
-      if (!this.closed && this.route === route) this.error = saved ? `Change created. Refresh failed: ${(error as Error).message || error}` : String((error as Error).message || error);
+      if (!this.closed && this.route === route) this.error = saved ? `Change created. Refresh failed: ${errorMessage(error)}` : errorMessage(error);
     } finally {
       this.mutating = false;
       if (!this.closed) {
@@ -439,40 +507,33 @@ export class GitRepositoryView extends ItemView {
     try {
       await snapshotWorkspace(route.context); await this.host.repositoryChanged(route.context);
       if (!this.closed) new Notice('Snapshot saved.');
-    } catch (error) { if (!this.closed && this.route === route) this.error = String((error as Error).message || error); }
+    } catch (error) { if (!this.closed && this.route === route) this.error = errorMessage(error); }
     finally {
       this.mutating = false;
       if (!this.closed) { if (this.route === route && !this.error) await this.loadRoute(false); else this.render(); }
     }
   }
   private remoteMenu(event: MouseEvent): void {
-    if (!this.route || (!this.host.syncRepository && !this.host.configureRemote)) return;
+    if (!this.route || !this.host.syncRepository) return;
     event.preventDefault(); event.stopPropagation();
     const menu = new Menu(), disabled = this.loading || this.mutating;
-    if (this.host.syncRepository) {
-      menu.addItem(item => item.setTitle('Pull').setIcon('download').setDisabled(disabled).onClick(() => this.remote('pull')));
-      menu.addItem(item => item.setTitle('Push').setIcon('upload').setDisabled(disabled).onClick(() => this.remote('push')));
-    }
-    if (this.host.configureRemote) {
-      if (this.host.syncRepository) menu.addSeparator();
-      menu.addItem(item => item.setTitle('Remote settings').setIcon('settings-2').setDisabled(disabled).onClick(() => this.remote('configure')));
-    }
+    menu.addItem(item => item.setTitle('Pull').setIcon('download').setDisabled(disabled).onClick(() => this.remote('pull')));
+    menu.addItem(item => item.setTitle('Push').setIcon('upload').setDisabled(disabled).onClick(() => this.remote('push')));
     menu.showAtMouseEvent(event);
   }
-  private async remote(action: 'push' | 'pull' | 'configure'): Promise<void> {
+  private async remote(action: 'push' | 'pull'): Promise<void> {
     const route = this.route;
     if (this.closed || this.loading || this.mutating || !route) return;
-    if (action === 'configure' ? !this.host.configureRemote : !this.host.syncRepository) return;
+    if (!this.host.syncRepository) return;
     this.rememberScroll(); this.mutating = true; this.remoteAction = action; this.error = ''; this.setMutationDisabled();
     try {
-      if (action === 'configure') await this.host.configureRemote!(route.context);
-      else await this.host.syncRepository!(route.context, action);
+      await this.host.syncRepository(route.context, action);
     } catch (error) {
-      if (!this.closed && this.route === route) this.error = String((error as Error).message || error);
+      if (!this.closed && this.route === route) this.error = errorMessage(error);
     } finally {
       this.mutating = false; this.remoteAction = null;
       if (!this.closed) {
-        if (this.route === route && action !== 'configure') {
+        if (this.route === route) {
           const operationError = this.error;
           await this.loadRoute(false);
           if (operationError && this.route === route) { this.error = operationError; this.updateFooter(); }

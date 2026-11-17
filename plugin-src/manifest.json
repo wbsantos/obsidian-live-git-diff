@@ -1,7 +1,7 @@
 {
   "id": "live-git-diff",
   "name": "Change Review",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "minAppVersion": "1.7.2",
   "description": "Review notes, browse Git and Jujutsu history, create selected changes, and summarize with your AI CLI.",
   "author": "Jessica Kosturko",

@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import type { ExecFileException } from 'child_process';
 import { createHash } from 'crypto';
 import * as path from 'path';
 import type { App, TFile } from 'obsidian';
@@ -14,11 +15,22 @@ export interface RepositoryStatus { files: RepositoryFile[]; token: string; desc
 export interface RepositoryPage { changes: RepositoryChange[]; hasMore: boolean; anchor?: string }
 export interface RepositoryHistoryOptions { path?: string; offset: number; limit: number; anchor?: string }
 
+class RepositoryCommandError extends Error {
+  readonly exitCode: number | string | undefined;
+  readonly details: string;
+  constructor(binary: string, error: ExecFileException, stdout: string, stderr: string) {
+    const details = [...new Set([stderr.trim(), stdout.trim()].filter(Boolean))].join('\n');
+    super(details || `${binary} failed (${error.code ?? 'no exit code'}). ${error.message.trim()}`);
+    this.exitCode = error.code ?? undefined;
+    this.details = details;
+  }
+}
+
 function command(binary: string, cwd: string, args: string[], signal?: AbortSignal, input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(binary, args, { cwd, encoding: 'utf8', windowsHide: true, timeout: 60_000,
       maxBuffer: 64 * 1024 * 1024, signal, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
-    (error, out, err) => error ? reject(new Error(String(err || error.message).trim())) : resolve(out));
+    (error, out, err) => error ? reject(new RepositoryCommandError(binary, error, out, err)) : resolve(out));
     // stdin pathspecs avoid Windows' command-line length limit and quote filenames exactly.
     child.stdin?.on('error', () => {});
     child.stdin?.end(input);
@@ -49,7 +61,7 @@ export async function resolveRepositoryDirectory(app: App, vaultPath: string, si
 async function head(ctx: GitContext, signal?: AbortSignal): Promise<string> {
   // rev-parse --quiet has the same empty result for an unborn and a detached unborn HEAD.
   try { return (await git(ctx, ['rev-parse', '--verify', '--quiet', 'HEAD'], signal)).trim(); }
-  catch (error) { if (signal?.aborted) throw error; if (/^Command failed:/.test(String((error as Error).message))) return ''; throw error; }
+  catch (error) { if (signal?.aborted) throw error; if (error instanceof RepositoryCommandError && error.exitCode === 1 && !error.details) return ''; throw error; }
 }
 
 /** A complete immutable query anchor, including other branches and detached HEAD. */
@@ -95,7 +107,7 @@ export async function listRepositoryHistory(ctx: GitContext, options: Repository
   if (ctx.backend === 'jj') {
     if (!/^jj:[0-9a-f]+$/.test(anchor)) throw new Error('Invalid repository state.');
     // JJ has no skip option. Its bounded prefix is cached by the caller, while the operation pins paging.
-    changes = jjChanges(await jj(ctx, ['--at-operation', anchor.slice(3), 'log', '-G', '-r', 'all() ~ root()',
+    changes = jjChanges(await jj(ctx, ['--at-operation', anchor.slice(3), 'log', '-G', '-r', '(all() ~ root()) ~ @',
       '-n', String(offset + limit + 1), '-T', jjTemplate, ...(scope ? ['--', `root:${JSON.stringify(scope)}`] : [])], signal)).slice(offset);
   } else {
     if (!/^git:(?:[0-9a-f]{40,64}(?:,[0-9a-f]{40,64})*)?$/.test(anchor)) throw new Error('Invalid repository state.');
@@ -233,8 +245,23 @@ export async function changePatch(ctx: GitContext, sha: string, file: Repository
 export async function pendingPatch(ctx: GitContext, file: RepositoryFile, signal?: AbortSignal): Promise<string> {
   validPath(file.path); if (file.oldPath) validPath(file.oldPath);
   if (ctx.backend === 'jj') return jj(ctx, ['diff', '--git', '-r', '@', '--', `root-file:${JSON.stringify(file.path)}`, ...(file.oldPath ? [`root-file:${JSON.stringify(file.oldPath)}`] : [])], signal);
+  // A newly added file may have staged content and newer unstaged edits. Diffing it
+  // against /dev/null captures the actual working file in both cases.
+  if (file.status === 'A') return untrackedPatch(ctx, file.path, signal);
   const current = await head(ctx, signal);
-  // With no parent, a selected added file is committed from disk, including edits after staging.
-  if (!current && file.status === 'A') return '';
   return git(ctx, ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=3', ...(current ? [current] : ['--cached']), '--', file.path, ...(file.oldPath ? [file.oldPath] : [])], signal);
+}
+
+/** A read-only patch from Git, including untracked files outside the Obsidian vault. */
+function untrackedPatch(ctx: GitContext, filePath: string, signal?: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile('git', ['--literal-pathspecs', '-C', ctx.root, 'diff', '--no-index', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=3', '--', '/dev/null', filePath],
+      { cwd: ctx.root, encoding: 'utf8', windowsHide: true, timeout: 60_000, maxBuffer: 64 * 1024 * 1024, signal },
+      (error, out, err) => {
+        // Git intentionally exits 1 when --no-index finds a difference.
+        if (error && error.code !== 1) reject(new RepositoryCommandError('git', error, out, err));
+        else resolve(out || 'Added binary or unsupported file; content omitted.');
+      });
+    child.stdin?.on('error', () => {}); child.stdin?.end();
+  });
 }

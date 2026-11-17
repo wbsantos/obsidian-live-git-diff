@@ -3,6 +3,7 @@ import { resolveRepository, WORKCOPY } from './repository.ts';
 import type { CommitInfo, GitContext } from './git.ts';
 import { HistoryCache, HistoryController, historyStatus } from './history.ts';
 import type { HistoryState } from './history.ts';
+import { FILE_HISTORY_ICON, REPOSITORY_HISTORY_ICON } from './icons.ts';
 
 export const HISTORY_VIEW_TYPE = 'live-git-diff-history';
 export interface HistoryReviewState {
@@ -69,7 +70,7 @@ export class GitHistoryView extends ItemView {
   }
   getViewType(): string { return HISTORY_VIEW_TYPE; }
   getDisplayText(): string { return 'File History'; }
-  getIcon(): string { return 'history'; }
+  getIcon(): string { return FILE_HISTORY_ICON; }
   async onOpen(): Promise<void> {
     const root = this.contentEl; root.empty(); root.addClass('lgd-history');
     const heading = root.createDiv({ cls: 'lgd-history-heading' });
@@ -81,18 +82,18 @@ export class GitHistoryView extends ItemView {
       setIcon(this.forwardEl, 'arrow-right'); this.forwardEl.onclick = () => this.host.navigationForward?.();
       this.updateNavigation();
     }
-    this.contextEl = heading.createSpan({ cls: 'lgd-history-context', attr: { role: 'status', 'aria-live': 'polite' } });
-    this.fileTitleEl = heading.createDiv({ cls: 'lgd-history-file', text: 'File History' });
-    this.refreshEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-refresh', attr: { type: 'button', 'aria-label': 'Refresh history', title: 'Refresh history' } });
-    setIcon(this.refreshEl, 'refresh-cw'); this.refreshEl.onclick = () => { void this.controller.refresh(); };
     if (this.host.openRepository) {
       const repo = heading.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': 'Repository history', title: 'Repository history' } });
-      setIcon(repo, 'git-branch'); repo.onclick = () => {
+      setIcon(repo, REPOSITORY_HISTORY_ICON); repo.onclick = () => {
         const context = this.controller.state.entry?.context;
         if (context && this.host.openRepositoryHistory) void this.host.openRepositoryHistory(context);
         else void this.host.openRepository?.();
       };
     }
+    this.contextEl = heading.createSpan({ cls: 'lgd-history-context', attr: { role: 'status', 'aria-live': 'polite' } });
+    this.fileTitleEl = heading.createDiv({ cls: 'lgd-history-file', text: 'File History' });
+    this.refreshEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-refresh', attr: { type: 'button', 'aria-label': 'Refresh history', title: 'Refresh history' } });
+    setIcon(this.refreshEl, 'refresh-cw'); this.refreshEl.onclick = () => { void this.controller.refresh(); };
     this.followEl = heading.createEl('button', { cls: 'clickable-icon lgd-history-follow', attr: { type: 'button', 'aria-label': 'Show history for active note', title: 'Show history for active note' } });
     setIcon(this.followEl, 'locate-fixed');
     this.followEl.onclick = () => { const file = this.host.historyActiveFile(); if (file) void (this.host.openHistory ? this.host.openHistory(file) : this.setFile(file)); };
@@ -288,9 +289,9 @@ export class GitHistoryView extends ItemView {
       }
       const selected = state.selected.some(item => item.sha === commit.sha);
       const content = row.querySelector<HTMLButtonElement>('.lgd-history-commit')!;
-      row.querySelector<HTMLElement>('.lgd-history-subject')!.setText(commit.kind==='workcopy' ? 'Workcopy' : commit.absent ? 'File absent at this snapshot' : commit.subject);
-      row.querySelector<HTMLElement>('.lgd-history-meta')!.setText(commit.kind==='workcopy' ? (commit.changeId ? `@ · ${commit.changeId.slice(0,8)} · ${commit.currentSha?.slice(0,8)}` : 'Live document') : `${commit.changeId ? commit.changeId.slice(0,8)+' · ' : ''}${commit.shortSha} · ${commit.author || 'Unknown author'}`);
-      row.querySelector<HTMLElement>('.lgd-history-date')!.setText(commit.kind==='workcopy' ? 'Live document' : `${commit.snapshot ? 'Snapshot · ' : ''}${commit.date} · ${commit.relative}`);
+      row.querySelector<HTMLElement>('.lgd-history-subject')!.setText(commit.kind==='workcopy' ? (commit.headCommit ? 'Workcopy · HEAD' : 'Workcopy') : commit.absent ? 'File absent at this snapshot' : commit.subject);
+      row.querySelector<HTMLElement>('.lgd-history-meta')!.setText(commit.headCommit ? `${commit.headCommit.shortSha} · ${commit.headCommit.subject}` : commit.kind==='workcopy' ? (commit.changeId ? `@ · ${commit.changeId.slice(0,8)} · ${commit.currentSha?.slice(0,8)}` : 'Live document') : `${commit.changeId ? commit.changeId.slice(0,8)+' · ' : ''}${commit.shortSha} · ${commit.author || 'Unknown author'}`);
+      row.querySelector<HTMLElement>('.lgd-history-date')!.setText(commit.headCommit ? `${commit.headCommit.author || 'Unknown author'} · ${commit.headCommit.date} · Live document` : commit.kind==='workcopy' ? 'Live document' : `${commit.snapshot ? 'Snapshot · ' : ''}${commit.date} · ${commit.relative}`);
       content.disabled = state.unavailable;
       content.setAttr('aria-selected', String(selected)); row.toggleClass('is-selected', selected);
       row.querySelector<HTMLButtonElement>('.lgd-history-compare')!.hidden = !selected || state.selected.length!==2 || !state.file?.path.toLowerCase().endsWith('.md');
