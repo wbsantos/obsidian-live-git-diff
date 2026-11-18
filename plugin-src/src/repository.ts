@@ -140,7 +140,7 @@ export async function readRevision(ctx: GitContext, commit: CommitInfo, signal?:
     return {text:'',path:rel,renamedFrom:null};
   }
 }
-export async function evolution(ctx: GitContext, parent: CommitInfo, limit: number, signal?: AbortSignal): Promise<{commits:CommitInfo[];hasMore:boolean}> {
+export async function evolution(ctx: GitContext, parent: CommitInfo, limit: number, signal?: AbortSignal, workcopyText?: string): Promise<{commits:CommitInfo[];hasMore:boolean}> {
   if (ctx.backend !== 'jj') return {commits:[],hasMore:false};
   const start = parent.kind==='workcopy' ? parent.currentSha! : parent.sha;
   // Imported Git commits have no associated operation. Commit timestamps exist for both origins.
@@ -162,7 +162,11 @@ export async function evolution(ctx: GitContext, parent: CommitInfo, limit: numb
       if (listing.trim()) throw error;
       item.absent=true;item.path=trackedPath;text='\0absent';
     }
-    if (text !== last && (parent.kind==='workcopy' || item.sha!==start)) versions.push({...item,snapshot:true,groupId:parent.sha});
+    // The parent already represents this version unless the live buffer has newer edits.
+    // Still seed `last` so unrelated saves of the same note are skipped.
+    const represented = item.sha===start && (parent.kind!=='workcopy' || workcopyText===undefined ||
+      text.replace(/\r\n?/g,'\n')===workcopyText.replace(/\r\n?/g,'\n'));
+    if (text !== last && !represented) versions.push({...item,snapshot:true,groupId:parent.sha});
     last=text;
     previous=item;
   }

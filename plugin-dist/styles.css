@@ -288,10 +288,68 @@ body.theme-dark {
 }
 
 .lgd-header {
+  box-sizing: border-box;
   flex: 0 0 auto;
   padding: 10px 16px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+}
+.lgd-header-content { min-width: 0; }
+.lgd-header .lgd-swap[hidden] { display: none; }
+
+/* The live panel belongs to the comparison and disappears when the review closes. */
+.view-content.lgd-live-review {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.lgd-live-review > .markdown-source-view,
+.lgd-live-review > .markdown-reading-view {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.view-content.lgd-view,
+.view-content.lgd-live-review { position: relative; }
+
+/* Overview overlays the outer margin, leaving native scrollbar and text widths intact. */
+.lgd-change-map {
+  position: absolute;
+  width: 10px;
+  z-index: 5;
+  cursor: pointer;
+  background: var(--background-modifier-hover);
+  border-radius: 2px;
+}
+.lgd-change-map-viewport {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--text-faint);
+  border-radius: 2px;
+  pointer-events: none;
+}
+button.lgd-change-map-marker {
+  position: absolute;
+  left: 1px;
+  width: 8px;
+  min-width: 0;
+  min-height: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  box-shadow: none;
+  cursor: pointer;
+}
+button.lgd-change-map-marker.is-addition { background: var(--lgd-ins-rail); }
+button.lgd-change-map-marker.is-deletion { background: var(--lgd-del-rail); }
+button.lgd-change-map-marker:hover,
+button.lgd-change-map-marker:focus-visible {
+  outline: 2px solid var(--text-normal);
+  outline-offset: 1px;
+  z-index: 1;
 }
 
 .lgd-title {
@@ -585,7 +643,9 @@ body.theme-dark {
 .lgd-repository-parents { display:flex; flex-wrap:wrap; gap:6px; }
 .lgd-repository button.lgd-repository-parent { height:auto; padding:2px 6px; font-family:var(--font-monospace); font-size:var(--font-ui-smaller); color:var(--text-muted); }
 .lgd-repository-tree,.lgd-repository-list { min-width:0; }
-.lgd-repository-layout { display:flex; justify-content:flex-end; margin-bottom:6px; }
+.lgd-repository-filter-row { display:flex; align-items:center; gap:8px; min-width:0; }
+.lgd-repository-filter-row .lgd-history-filter { flex:1; min-width:0; }
+.lgd-repository-layout { flex:none; }
 .lgd-repository-layout label { display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:var(--font-ui-small); }
 .lgd-view .lgd-properties.metadata-container { display:block; margin:0 0 12px; }
 .lgd-properties .metadata-property-key-input { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -604,7 +664,10 @@ body.theme-dark {
 .lgd-repository-folder-content { margin-inline-start:12px; padding-inline-start:8px; border-inline-start:1px solid var(--background-modifier-border); }
 .lgd-repository-file { display:flex; flex-wrap:wrap; align-items:center; gap:6px; min-width:0; padding:2px 4px; border-radius:var(--radius-s); }
 .lgd-repository-file > input { flex:none; margin:0; }
-.lgd-repository button.lgd-repository-filename { display:block; flex:1; height:auto; min-width:0; padding:5px 3px; text-align:start; color:var(--text-normal); background:transparent; box-shadow:none; border:0; border-radius:var(--radius-s); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lgd-repository button.lgd-repository-filename { display:flex; align-items:baseline; gap:6px; flex:1; height:auto; min-width:0; padding:5px 3px; text-align:start; color:var(--text-normal); background:transparent; box-shadow:none; border:0; border-radius:var(--radius-s); overflow:hidden; white-space:nowrap; }
+.lgd-repository .lgd-repository-list button.lgd-repository-filename { justify-content:flex-start; }
+.lgd-repository-filename-text { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lgd-repository-file-path { flex:0 1000 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-faint); font-size:var(--font-ui-smaller); }
 .lgd-repository-status { flex:none; width:18px; text-align:center; color:var(--text-muted); font-family:var(--font-monospace); font-size:var(--font-ui-smaller); }
 .lgd-repository-status[data-status="A"],.lgd-repository-status[data-status="?"] { color:var(--text-success); }
 .lgd-repository-status[data-status="D"],.lgd-repository-status[data-status="U"] { color:var(--text-error); }

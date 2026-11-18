@@ -3,12 +3,14 @@ import { CLS, ATTR_ROW } from './panes.ts';
 import { unwrapCharMarks, applyRowMarks } from './charmarks.ts';
 import type { Session } from './session.ts';
 import { renderProperties } from './properties.ts';
+import { ComparisonHeader } from './comparisonHeader.ts';
 export const VIEW_TYPE = 'live-git-diff-base';
 export interface BaseViewHost {
   session: Session | null; sync: { enabled: boolean; attach(): void }; closeReview(): void;
   snapshotClosed?(view: GitBaseView): void;
   swapSides?(): void;
   presentationWarning?(): string | null;
+  comparisonRendered?(): void;
 }
 
 /** Historical DOM is reused while the note/commit/options remain fixed. */
@@ -23,8 +25,7 @@ export class GitBaseView extends ItemView {
   private renderKey = '';
   private generation = 0;
   private component: Component | null = null;
-  private statusEl: HTMLElement | null = null;
-  private syncBadgeEl: HTMLElement | null = null;
+  header: ComparisonHeader | null = null;
   private sizer: HTMLElement | null = null;
   constructor(leaf: WorkspaceLeaf, host: BaseViewHost, side: 'a' | 'b' = 'a') { super(leaf); this.host = host; this.side = side; }
   getViewType(): string { return VIEW_TYPE; }
@@ -38,14 +39,11 @@ export class GitBaseView extends ItemView {
     this.addAction('x', 'Close comparison', () => this.host.closeReview());
     await this.render();
   }
-  updateSyncBadge(): void { this.syncBadgeEl?.setText(this.host.sync.enabled ? ' · Scroll sync on' : ' · Scroll sync off'); }
+  updateSyncBadge(): void { this.header?.updateSync(this.host.sync.enabled); }
   updateStatus(): void {
     const s = this.host.session;
-    if (!s || !this.statusEl) return;
-    const simplified = s.rows.some(row => row.simplified);
-    this.statusEl.setText(s.error || (s.status === 'updating' ? 'Updating comparison…' :
-      `${s.counts.changed} changed blocks${simplified ? ' · Some details simplified' : ''}${this.host.presentationWarning?.() ? ' · ' + this.host.presentationWarning() : ''}`));
-    this.statusEl.toggleClass('lgd-error', !!s.error);
+    if (!s || !this.header) return;
+    this.header.update(s, this.side, this.host.sync.enabled, this.host.presentationWarning?.());
     this.bodyEl?.setAttr('aria-busy', String(s.status === 'updating'));
     if (s.status !== 'ready') for (const entry of this.cache.values()) {
       entry.element.removeClass(CLS.mod, CLS.del, CLS.ins); unwrapCharMarks(entry.content); entry.note.setText('');
@@ -62,26 +60,12 @@ export class GitBaseView extends ItemView {
       this.component = new Component(); this.component.load();
       const root = this.contentEl; root.empty(); root.addClass('lgd-view'); root.dataset.lgdSide = this.side;
       this.cache.clear(); this.blockEls.clear();
-      const header = root.createDiv({ cls: 'lgd-header' });
-      header.createDiv({ cls: 'lgd-title', text: s.fileName });
-      const sub = header.createDiv({ cls: 'lgd-sub' });
-      const commit = endpoint.kind === 'commit' ? endpoint.commit : null;
-      sub.createSpan({ cls: 'lgd-sha', text: endpoint.kind === 'commit' ? `${this.side === 'a' ? 'Base' : 'Compared'} ${endpoint.sha.slice(0, 7)} · ${endpoint.label}` : 'Current document' });
-      if (commit) {
-        sub.createSpan({ cls: 'lgd-subject', text: ' · ' + commit.subject });
-        sub.createSpan({ cls: 'lgd-age', text: ' · ' + commit.relative, attr: { title: commit.date } });
-      }
-      if (endpoint.path !== s.rel) sub.createSpan({ cls: 'lgd-renamed', text: ' · Historical path: ' + endpoint.path });
-      if (s.endpoints[1].kind === 'commit') {
-        const swap = header.createEl('button', { text: 'Swap sides', cls: 'lgd-swap' });
-        swap.addEventListener('click', () => this.host.swapSides?.());
-      }
-      this.statusEl = header.createDiv({ cls: 'lgd-sub', attr: { role: 'status', 'aria-live': 'polite' } });
-      this.syncBadgeEl = header.createDiv({ cls: 'lgd-sync' }); this.updateSyncBadge();
+      this.header = new ComparisonHeader(root, () => this.host.swapSides?.());
       this.bodyEl = root.createDiv({ cls: 'lgd-body markdown-preview-view markdown-rendered' });
       this.sizer = this.bodyEl.createDiv({ cls: 'markdown-preview-sizer markdown-preview-section' });
     }
     this.updateStatus();
+    this.host.comparisonRendered?.();
     if (s.status !== 'ready' || !this.sizer || !this.component) return;
     const references = this.side === 'a' ? s.baseReferences : s.currentReferences;
     const sourcePath = s.filePath.replace(/[^/]+$/, '__live_git_diff_history__.md');
@@ -125,19 +109,24 @@ export class GitBaseView extends ItemView {
     if (!this.endPadEl?.isConnected) this.endPadEl = this.sizer.createDiv({ cls: CLS.endpad });
     this.endPadEl.style.height = '60vh';
     this.host.sync.attach();
+    this.host.comparisonRendered?.();
   }
   async onClose(): Promise<void> {
     this.generation++; this.component?.unload(); this.component = null;
-    this.bodyEl = null; this.cache.clear(); this.blockEls.clear();
+    this.bodyEl = null; this.header = null; this.cache.clear(); this.blockEls.clear();
     this.host.snapshotClosed?.(this);
   }
   scrollToLine(line: number): void {
-    if (!this.bodyEl) return;
+    const offset = this.offsetForLine(line);
+    if (this.bodyEl && offset !== null) this.bodyEl.scrollTop = offset;
+  }
+  offsetForLine(line: number): number | null {
+    if (!this.bodyEl) return null;
     const rows = this.side === 'a' ? this.host.session?.baseRows : this.host.session?.noteRows;
     const row = rows?.find(r => r[this.side]!.lineEnd >= line) || rows?.at(-1);
     const block = row?.[this.side], el = row && this.blockEls.get(row.idx);
-    if (!block || !el) return;
+    if (!block || !el) return null;
     const fraction = Math.max(0, Math.min(1, (line - block.lineStart) / (block.lineEnd - block.lineStart + 1)));
-    this.bodyEl.scrollTop += el.getBoundingClientRect().top - this.bodyEl.getBoundingClientRect().top + fraction * el.offsetHeight;
+    return this.bodyEl.scrollTop + el.getBoundingClientRect().top - this.bodyEl.getBoundingClientRect().top + fraction * el.offsetHeight;
   }
 }

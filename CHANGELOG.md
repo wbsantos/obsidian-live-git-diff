@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] - 2026-11-17
 
+- Omit the current Jujutsu snapshot from File History when it matches Workcopy, retaining earlier changes and snapshots that differ from unsaved editor content.
+- Add clickable change maps beside both comparison scrollbars, including navigation to additions and removals absent from one side.
+- Show temporary version details above the live note during comparison and match header heights across both panes as details wrap.
 - Render historical note metadata as read-only Obsidian properties in comparisons.
 - Add persistent File Tree / File List views to Pending changes, retaining full paths in tooltips.
 - Combine unchanged Workcopy and HEAD versions in File History while preserving live comparisons.

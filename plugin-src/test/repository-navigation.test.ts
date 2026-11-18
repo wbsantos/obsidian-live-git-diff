@@ -11,6 +11,41 @@ class TFile { path: string; constructor(path: string) { this.path = path; } get 
 class TFolder { path: string; constructor(path: string) { this.path = path; } }
 class MarkdownView {}
 class PluginStub { app: unknown; constructor(app: unknown) { this.app = app; } }
+class MenuStub {
+  static latest: MenuStub;
+  items: Array<{ title: string; disabled: boolean; click?: () => void }> = [];
+  constructor() { MenuStub.latest = this; }
+  addItem(callback: (item: unknown) => void) {
+    const state: { title: string; disabled: boolean; click?: () => void } = { title: '', disabled: false };
+    const item = { setTitle: (title: string) => { state.title = title; return item; }, setIcon: () => item,
+      setDisabled: (disabled: boolean) => { state.disabled = disabled; return item; },
+      onClick: (click: () => void) => { state.click = click; return item; } };
+    callback(item); this.items.push(state);
+  }
+  addSeparator() {}
+  showAtMouseEvent() {}
+}
+class TestElement {
+  children: TestElement[] = [];
+  attrs: Record<string, string>;
+  cls: string;
+  text: string;
+  scrollTop = 0;
+  oncontextmenu?: (event: any) => void;
+  onclick?: () => void;
+  ownerDocument = { defaultView: { navigator: { clipboard: { writeText: async () => {} } } } };
+  constructor(options: any = {}) { this.cls = options.cls || ''; this.text = options.text || ''; this.attrs = options.attr || {}; }
+  createDiv(options?: any) { return this.add(options); }
+  createEl(_tag: string, options?: any) { return this.add(options); }
+  createSpan(options?: any) { return this.add(options); }
+  add(options?: any) { const child = new TestElement(options); this.children.push(child); return child; }
+  empty() { this.children = []; }
+  setAttr(name: string, value: string) { this.attrs[name] = value; }
+  removeAttribute(name: string) { delete this.attrs[name]; }
+  find(cls: string): TestElement | undefined {
+    return this.cls.split(' ').includes(cls) ? this : this.children.map(child => child.find(cls)).find(Boolean);
+  }
+}
 interface Leaf { view: { getViewType(): string }; setViewState(state: unknown): Promise<void> }
 interface FileState { path: string; historicalHead?: string }
 interface HistoryView {
@@ -42,7 +77,7 @@ const source = buildSync({ stdin: { contents: `export { default as Plugin } from
 bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external', external: ['lgd:worker'] }).outputFiles[0].text;
 const module = { exports: {} };
 new Function('require', 'module', 'exports', source)((id: string) => id === 'obsidian'
-  ? { Plugin: PluginStub, MarkdownView, TFile, TFolder, Component: class {}, ItemView: class {}, PluginSettingTab: class {},
+  ? { Plugin: PluginStub, MarkdownView, TFile, TFolder, Menu: MenuStub, Component: class {}, ItemView: class {}, PluginSettingTab: class {},
     Modal: class {}, Setting: class {}, setIcon() {}, setTooltip() {}, Notice: class { constructor(message: string) { notices.push(message); } hide() {} } } : require(id), module, module.exports);
 const { Plugin, GitHistoryView, GitRepositoryView, persistSettings, mergeSettings, registerFileMenus } = module.exports as {
   Plugin: new (app: unknown) => TestPlugin;
@@ -89,6 +124,52 @@ test('file and folder menus offer VCS Pending Changes for the clicked target', a
     assert.ok(action); action.click!();
   }
   assert.deepEqual(targets, clicked);
+});
+
+test('repository history offers partial sync only for known unsynced changes', () => {
+  const context = { root: 'repo', abs: 'repo', rel: '', backend: 'git' } as GitContext;
+  const repo = Object.assign(Object.create(GitRepositoryView.prototype), {
+    body: new TestElement(), route: { kind: 'log', context }, state: { query: '' },
+    changes: [{ sha: 'a', shortSha: 'a', subject: 'Local', author: '', date: '' },
+      { sha: 'b', shortSha: 'b', subject: 'Synced', author: '', date: '' }],
+    syncState: { synced: ['b'], remote: 'origin/main' }, pendingCount: 0, loading: false, mutating: false,
+    host: { syncRepository() {} }, folderSelections: new Map(),
+    remote: (action: string, sha: string) => { calls.push([action, sha]); },
+  });
+  const calls: string[][] = [];
+  const event = { preventDefault() {} };
+  repo.renderBody();
+  repo.body.children[0].oncontextmenu(event);
+  MenuStub.latest.items.find(item => item.title === 'Sync up to here')!.click!();
+  assert.deepEqual(calls, [['push', 'a']]);
+  repo.body.children[1].oncontextmenu(event);
+  assert.equal(MenuStub.latest.items.some(item => item.title === 'Sync up to here'), false);
+  repo.mutating = true;
+  repo.renderBody(); repo.body.children[0].oncontextmenu(event);
+  assert.equal(MenuStub.latest.items.find(item => item.title === 'Sync up to here')!.disabled, true);
+  repo.mutating = false;
+  repo.syncState.warning = 'Remote status unavailable';
+  repo.renderBody(); repo.body.children[0].oncontextmenu(event);
+  assert.equal(MenuStub.latest.items.some(item => item.title === 'Sync up to here'), false);
+});
+
+test('pending file rows show the filename followed by the containing path', () => {
+  const context = { root: 'repo', abs: 'repo', rel: '', backend: 'git' } as GitContext;
+  const opened: string[] = [];
+  const repo = Object.assign(Object.create(GitRepositoryView.prototype), {
+    body: new TestElement(), route: { kind: 'changes', context }, state: { query: '', selected: new Set(), collapsed: new Set() },
+    status: { files: [{ path: 'Notes/Archive/note.md', status: 'R', oldPath: 'old.md' }, { path: 'root.md', status: 'M' }] },
+    loading: false, mutating: false, host: { settings: { pendingChangesView: 'list' },
+      openRepositoryFile: async (_context: GitContext, path: string) => { opened.push(path); } },
+    folderSelections: new Map(),
+  });
+  repo.renderBody();
+  const tree = repo.body.children[0], row = tree.children[0], button = row.find('lgd-repository-filename')!;
+  assert.equal(button.find('lgd-repository-filename-text')!.text, 'note.md');
+  assert.equal(button.find('lgd-repository-file-path')!.text, 'Notes/Archive');
+  assert.equal(row.find('lgd-repository-old-path'), undefined);
+  assert.equal(tree.children[1].find('lgd-repository-file-path'), undefined);
+  button.onclick!(); assert.deepEqual(opened, ['Notes/Archive/note.md']);
 });
 
 function setup() {

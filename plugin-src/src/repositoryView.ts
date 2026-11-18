@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, Scope, WorkspaceLeaf, setIcon } from 'obsidian';
+import { ItemView, Menu, Notice, Scope, WorkspaceLeaf, setIcon, type ViewStateResult } from 'obsidian';
 import type { GitContext } from './git.ts';
 import { snapshotWorkspace } from './repository.ts';
 import { createChange, getChangeDetails, getRepositoryStatus } from './repositoryManager.ts';
@@ -28,7 +28,7 @@ export interface RepositoryViewHost {
   repositoryChanged(context: GitContext): Promise<void>;
   generateDescription?(context: GitContext, paths: string[], token: string, signal: AbortSignal): Promise<string>;
   explainRepository?(context: GitContext, options: { sha?: string; paths?: string[]; token?: string }): Promise<void>;
-  syncRepository?(context: GitContext, action: 'push' | 'pull'): Promise<void>;
+  syncRepository?(context: GitContext, action: 'push' | 'pull', revision?: string): Promise<void>;
 }
 
 interface VisitState {
@@ -96,6 +96,11 @@ export class GitRepositoryView extends ItemView {
   getIcon(): string { return REPOSITORY_HISTORY_ICON; }
   async onOpen(): Promise<void> { this.closed = false; this.contentEl.addClass('lgd-repository'); this.render(); }
   async onClose(): Promise<void> { this.rememberScroll(); this.closed = true; this.job?.abort(); this.aiJob?.abort(); this.generation++; }
+  getState(): Record<string, unknown> { return this.route ? { route: this.route } : {}; }
+  async setState(state: { route?: RepositoryRoute } | null, result: ViewStateResult): Promise<void> {
+    await super.setState(state, result);
+    if (state?.route) await this.setRoute(state.route);
+  }
 
   async setRoute(route: RepositoryRoute): Promise<void> {
     this.aiJob?.abort();
@@ -218,8 +223,12 @@ export class GitRepositoryView extends ItemView {
       heading.oncontextmenu = location.oncontextmenu = event => this.remoteMenu(event);
     }
     if (route?.kind === 'log' || route?.kind === 'changes') {
+      const filter = route.kind === 'changes' ? root.createDiv({ cls: 'lgd-repository-filter-row' }) : root;
+      this.query = filter.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: route.kind === 'log' ? 'Filter loaded changes' : 'Filter files', attr: { 'aria-label': route.kind === 'log' ? 'Filter loaded changes' : 'Filter files' } });
+      this.query.value = this.state?.query || '';
+      this.query.oninput = () => { if (this.state) this.state.query = this.query!.value; this.renderBody(); };
       if (route.kind === 'changes') {
-        const layout = root.createDiv({ cls: 'lgd-repository-layout' });
+        const layout = filter.createDiv({ cls: 'lgd-repository-layout' });
         const label = layout.createEl('label', { text: 'View' });
         const select = label.createEl('select', { cls: 'dropdown', attr: { 'aria-label': 'Pending files view' } });
         select.createEl('option', { text: 'File Tree', attr: { value: 'tree' } });
@@ -232,9 +241,6 @@ export class GitRepositoryView extends ItemView {
           if (this.host.saveSettings) void this.run(() => this.host.saveSettings!());
         };
       }
-      this.query = root.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: route.kind === 'log' ? 'Filter loaded changes' : 'Filter files', attr: { 'aria-label': route.kind === 'log' ? 'Filter loaded changes' : 'Filter files' } });
-      this.query.value = this.state?.query || '';
-      this.query.oninput = () => { if (this.state) this.state.query = this.query!.value; this.renderBody(); };
     }
     this.body = root.createDiv({ cls: 'lgd-repository-body' });
     this.body.addEventListener('keydown', event => this.moveFocus(event));
@@ -281,6 +287,9 @@ export class GitRepositoryView extends ItemView {
           event.preventDefault();
           const menu = new Menu();
           menu.addItem(item => item.setTitle('Change details').setIcon('git-commit-horizontal').onClick(() => this.navigate({ kind: 'details', context: route.context, sha: change.sha })));
+          if (this.host.syncRepository && this.syncState.remote && !this.syncState.warning && sync === 'unsynced')
+            menu.addItem(item => item.setTitle('Sync up to here').setIcon('upload').setDisabled(this.loading || this.mutating)
+              .onClick(() => this.remote('push', change.sha)));
           if (this.host.explainRepository) menu.addItem(item => item.setTitle('Explain').setIcon('sparkles')
             .onClick(() => this.run(() => this.host.explainRepository!(route.context, { sha: change.sha }))));
           menu.addItem(item => item.setTitle('Copy change ID').setIcon('copy').onClick(() => this.run(() => body.ownerDocument.defaultView!.navigator.clipboard.writeText(change.changeId || change.sha))));
@@ -381,11 +390,14 @@ export class GitRepositoryView extends ItemView {
           checkbox.checked = !!this.state?.selected.has(file.path); checkbox.disabled = this.mutating;
           checkbox.onchange = () => { if (checkbox.checked) this.state?.selected.add(file.path); else this.state?.selected.delete(file.path); this.updateSelection(); };
         }
-        const name = row.createEl('button', { cls: 'lgd-repository-filename', text: file.path.split('/').pop(), attr: { type: 'button', title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path } });
+        const name = row.createEl('button', { cls: 'lgd-repository-filename', attr: { type: 'button', title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path } });
+        name.createSpan({ cls: 'lgd-repository-filename-text', text: file.path.split('/').pop() });
+        const folderPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+        if (selecting && folderPath) name.createSpan({ cls: 'lgd-repository-file-path', text: folderPath });
         const revision = route.kind === 'details' ? route.sha : undefined;
         name.onclick = () => { if (!this.mutating) void this.run(() => this.host.openRepositoryFile(route.context, file.path, revision)); };
         row.createSpan({ cls: 'lgd-repository-status', text: file.status[0] === '?' ? 'A' : file.status[0], attr: { title: statusName(file.status), 'aria-label': statusName(file.status), 'data-status': file.status[0] } });
-        if (file.oldPath) row.createDiv({ cls: 'lgd-repository-old-path', text: file.oldPath });
+        if (file.oldPath && !selecting) row.createDiv({ cls: 'lgd-repository-old-path', text: file.oldPath });
         row.oncontextmenu = event => {
           event.preventDefault(); event.stopPropagation(); const menu = new Menu();
           menu.addItem(item => item.setTitle('VCS History').setIcon(FILE_HISTORY_ICON).onClick(() => this.run(() => this.host.openRepositoryFile(route.context, file.path, revision))));
@@ -521,13 +533,13 @@ export class GitRepositoryView extends ItemView {
     menu.addItem(item => item.setTitle('Push').setIcon('upload').setDisabled(disabled).onClick(() => this.remote('push')));
     menu.showAtMouseEvent(event);
   }
-  private async remote(action: 'push' | 'pull'): Promise<void> {
+  private async remote(action: 'push' | 'pull', revision?: string): Promise<void> {
     const route = this.route;
     if (this.closed || this.loading || this.mutating || !route) return;
     if (!this.host.syncRepository) return;
     this.rememberScroll(); this.mutating = true; this.remoteAction = action; this.error = ''; this.setMutationDisabled();
     try {
-      await this.host.syncRepository(route.context, action);
+      await this.host.syncRepository(route.context, action, revision);
     } catch (error) {
       if (!this.closed && this.route === route) this.error = errorMessage(error);
     } finally {

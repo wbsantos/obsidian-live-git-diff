@@ -183,23 +183,30 @@ async function protectUntrackedJjFiles(ctx: GitContext, affected: string[], sign
 }
 
 /** Pushes only committed/finalized changes. Explicit non-forced refspecs ignore push.default and mirror settings. */
-export async function pushRepository(ctx: GitContext, target: RemoteTarget, signal?: AbortSignal): Promise<RemoteResult> {
+export async function pushRepository(ctx: GitContext, target: RemoteTarget, signal?: AbortSignal, revision?: string): Promise<RemoteResult> {
   return withRepositoryMutation(ctx, async () => {
     await validateTarget(ctx, target, signal);
+    if (revision && !/^[0-9a-f]{40,64}$/.test(revision)) throw new Error('Invalid change identifier.');
     let sha: string;
+    let keepLocalBookmark = false;
     if (ctx.backend === 'jj') {
       await jj(ctx, ['util', 'snapshot'], signal, true);
-      sha = await workingParent(ctx, signal);
-      if (/^0+$/.test(sha)) throw new Error('Create a change before pushing.');
+      const tip = await workingParent(ctx, signal);
+      if (/^0+$/.test(tip)) throw new Error('Create a change before pushing.');
+      sha = revision || tip;
+      if (!await isAncestor(ctx, sha, tip, signal)) throw new Error('The selected change is not an ancestor of the latest finalized change.');
       const local = (await bookmarks(ctx, signal)).find(ref => ref.name === target.branch && !ref.remote);
       if (local?.conflict) throw divergent();
-      if (local?.sha && !await isAncestor(ctx, local.sha, sha, signal)) throw new Error('The selected branch is not an ancestor of the latest finalized change.');
+      if (local?.sha && !await isAncestor(ctx, local.sha, tip, signal)) throw new Error('The selected branch is not an ancestor of the latest finalized change.');
+      keepLocalBookmark = !!local?.sha && await isAncestor(ctx, sha, local.sha, signal);
       const conflicts = await jj(ctx, ['log', '-G', '-r', `ancestors(${sha}) & conflicts()`, '-n', '1', '-T', 'commit_id'], signal);
       if (conflicts) throw new Error('Resolve conflicts before pushing.');
     } else {
       await gitBranch(ctx, signal);
-      sha = await gitHead(ctx, signal);
-      if (!sha) throw new Error('Create a change before pushing.');
+      const tip = await gitHead(ctx, signal);
+      if (!tip) throw new Error('Create a change before pushing.');
+      sha = revision || tip;
+      if (!await isAncestor(ctx, sha, tip, signal)) throw new Error('The selected change is not an ancestor of the current branch.');
     }
     // JJ's native push permits rewrites. Git transport guarantees a fast-forward at the server,
     // including races after our checks, while still using JJ's backing Git store and credentials.
@@ -208,7 +215,7 @@ export async function pushRepository(ctx: GitContext, target: RemoteTarget, sign
     if (ctx.backend === 'jj') {
       try {
         await jj(ctx, ['git', 'import']);
-        await jj(ctx, ['bookmark', 'set', target.branch, '-r', sha], undefined, true);
+        if (!keepLocalBookmark) await jj(ctx, ['bookmark', 'set', target.branch, '-r', sha], undefined, true);
         const refs = await bookmarks(ctx);
         if (refs.some(ref => ref.name === target.branch && ref.remote === target.remote))
           await jj(ctx, ['bookmark', 'track', exact(target.branch), '--remote', exact(target.remote)], undefined, true);

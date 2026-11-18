@@ -378,7 +378,7 @@ async function readRevision(ctx, commit, signal) {
     return { text: "", path: rel, renamedFrom: null };
   }
 }
-async function evolution(ctx, parent, limit, signal) {
+async function evolution(ctx, parent, limit, signal, workcopyText) {
   if (ctx.backend !== "jj") return { commits: [], hasMore: false };
   const start = parent.kind === "workcopy" ? parent.currentSha : parent.sha;
   const entries = records(await jj(ctx.workspaceRoot, ["evolog", "-G", "-r", start, "-n", String(limit + 1), "-T", `json({${fields("self.commit().")}}) ++ "\\n"`], signal));
@@ -409,7 +409,8 @@ async function evolution(ctx, parent, limit, signal) {
       item.path = trackedPath;
       text = "\0absent";
     }
-    if (text !== last && (parent.kind === "workcopy" || item.sha !== start)) versions.push({ ...item, snapshot: true, groupId: parent.sha });
+    const represented = item.sha === start && (parent.kind !== "workcopy" || workcopyText === void 0 || text.replace(/\r\n?/g, "\n") === workcopyText.replace(/\r\n?/g, "\n"));
+    if (text !== last && !represented) versions.push({ ...item, snapshot: true, groupId: parent.sha });
     last = text;
     previous = item;
   }
@@ -1091,23 +1092,30 @@ async function protectUntrackedJjFiles(ctx, affected, signal) {
       throw new Error("Incoming changes overlap untracked or ignored files. Move or record those files before pulling.");
   }
 }
-async function pushRepository(ctx, target, signal) {
+async function pushRepository(ctx, target, signal, revision) {
   return withRepositoryMutation(ctx, async () => {
     await validateTarget(ctx, target, signal);
+    if (revision && !/^[0-9a-f]{40,64}$/.test(revision)) throw new Error("Invalid change identifier.");
     let sha;
+    let keepLocalBookmark = false;
     if (ctx.backend === "jj") {
       await jj3(ctx, ["util", "snapshot"], signal, true);
-      sha = await workingParent(ctx, signal);
-      if (/^0+$/.test(sha)) throw new Error("Create a change before pushing.");
+      const tip = await workingParent(ctx, signal);
+      if (/^0+$/.test(tip)) throw new Error("Create a change before pushing.");
+      sha = revision || tip;
+      if (!await isAncestor(ctx, sha, tip, signal)) throw new Error("The selected change is not an ancestor of the latest finalized change.");
       const local = (await bookmarks(ctx, signal)).find((ref) => ref.name === target.branch && !ref.remote);
       if (local == null ? void 0 : local.conflict) throw divergent();
-      if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, sha, signal)) throw new Error("The selected branch is not an ancestor of the latest finalized change.");
+      if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, tip, signal)) throw new Error("The selected branch is not an ancestor of the latest finalized change.");
+      keepLocalBookmark = !!(local == null ? void 0 : local.sha) && await isAncestor(ctx, sha, local.sha, signal);
       const conflicts = await jj3(ctx, ["log", "-G", "-r", `ancestors(${sha}) & conflicts()`, "-n", "1", "-T", "commit_id"], signal);
       if (conflicts) throw new Error("Resolve conflicts before pushing.");
     } else {
       await gitBranch(ctx, signal);
-      sha = await gitHead(ctx, signal);
-      if (!sha) throw new Error("Create a change before pushing.");
+      const tip = await gitHead(ctx, signal);
+      if (!tip) throw new Error("Create a change before pushing.");
+      sha = revision || tip;
+      if (!await isAncestor(ctx, sha, tip, signal)) throw new Error("The selected change is not an ancestor of the current branch.");
     }
     await git2(ctx, [
       "-c",
@@ -1124,7 +1132,7 @@ async function pushRepository(ctx, target, signal) {
     if (ctx.backend === "jj") {
       try {
         await jj3(ctx, ["git", "import"]);
-        await jj3(ctx, ["bookmark", "set", target.branch, "-r", sha], void 0, true);
+        if (!keepLocalBookmark) await jj3(ctx, ["bookmark", "set", target.branch, "-r", sha], void 0, true);
         const refs = await bookmarks(ctx);
         if (refs.some((ref) => ref.name === target.branch && ref.remote === target.remote))
           await jj3(ctx, ["bookmark", "track", exact(target.branch), "--remote", exact(target.remote)], void 0, true);
@@ -1261,6 +1269,13 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     (_a = this.job) == null ? void 0 : _a.abort();
     (_b = this.aiJob) == null ? void 0 : _b.abort();
     this.generation++;
+  }
+  getState() {
+    return this.route ? { route: this.route } : {};
+  }
+  async setState(state, result) {
+    await super.setState(state, result);
+    if (state == null ? void 0 : state.route) await this.setRoute(state.route);
   }
   async setRoute(route) {
     var _a, _b;
@@ -1435,8 +1450,15 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       heading.oncontextmenu = location.oncontextmenu = (event) => this.remoteMenu(event);
     }
     if ((route == null ? void 0 : route.kind) === "log" || (route == null ? void 0 : route.kind) === "changes") {
+      const filter = route.kind === "changes" ? root.createDiv({ cls: "lgd-repository-filter-row" }) : root;
+      this.query = filter.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: route.kind === "log" ? "Filter loaded changes" : "Filter files", attr: { "aria-label": route.kind === "log" ? "Filter loaded changes" : "Filter files" } });
+      this.query.value = ((_a = this.state) == null ? void 0 : _a.query) || "";
+      this.query.oninput = () => {
+        if (this.state) this.state.query = this.query.value;
+        this.renderBody();
+      };
       if (route.kind === "changes") {
-        const layout = root.createDiv({ cls: "lgd-repository-layout" });
+        const layout = filter.createDiv({ cls: "lgd-repository-layout" });
         const label = layout.createEl("label", { text: "View" });
         const select = label.createEl("select", { cls: "dropdown", attr: { "aria-label": "Pending files view" } });
         select.createEl("option", { text: "File Tree", attr: { value: "tree" } });
@@ -1450,12 +1472,6 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
           if (this.host.saveSettings) void this.run(() => this.host.saveSettings());
         };
       }
-      this.query = root.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: route.kind === "log" ? "Filter loaded changes" : "Filter files", attr: { "aria-label": route.kind === "log" ? "Filter loaded changes" : "Filter files" } });
-      this.query.value = ((_a = this.state) == null ? void 0 : _a.query) || "";
-      this.query.oninput = () => {
-        if (this.state) this.state.query = this.query.value;
-        this.renderBody();
-      };
     }
     this.body = root.createDiv({ cls: "lgd-repository-body" });
     this.body.addEventListener("keydown", (event) => this.moveFocus(event));
@@ -1508,6 +1524,8 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
           event.preventDefault();
           const menu = new import_obsidian.Menu();
           menu.addItem((item) => item.setTitle("Change details").setIcon("git-commit-horizontal").onClick(() => this.navigate({ kind: "details", context: route.context, sha: change2.sha })));
+          if (this.host.syncRepository && this.syncState.remote && !this.syncState.warning && sync === "unsynced")
+            menu.addItem((item) => item.setTitle("Sync up to here").setIcon("upload").setDisabled(this.loading || this.mutating).onClick(() => this.remote("push", change2.sha)));
           if (this.host.explainRepository) menu.addItem((item) => item.setTitle("Explain").setIcon("sparkles").onClick(() => this.run(() => this.host.explainRepository(route.context, { sha: change2.sha }))));
           menu.addItem((item) => item.setTitle("Copy change ID").setIcon("copy").onClick(() => this.run(() => body.ownerDocument.defaultView.navigator.clipboard.writeText(change2.changeId || change2.sha))));
           menu.showAtMouseEvent(event);
@@ -1656,13 +1674,16 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
             this.updateSelection();
           };
         }
-        const name = row.createEl("button", { cls: "lgd-repository-filename", text: file.path.split("/").pop(), attr: { type: "button", title: file.oldPath ? `${file.oldPath} \u2192 ${file.path}` : file.path } });
+        const name = row.createEl("button", { cls: "lgd-repository-filename", attr: { type: "button", title: file.oldPath ? `${file.oldPath} \u2192 ${file.path}` : file.path } });
+        name.createSpan({ cls: "lgd-repository-filename-text", text: file.path.split("/").pop() });
+        const folderPath = file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : "";
+        if (selecting && folderPath) name.createSpan({ cls: "lgd-repository-file-path", text: folderPath });
         const revision = route.kind === "details" ? route.sha : void 0;
         name.onclick = () => {
           if (!this.mutating) void this.run(() => this.host.openRepositoryFile(route.context, file.path, revision));
         };
         row.createSpan({ cls: "lgd-repository-status", text: file.status[0] === "?" ? "A" : file.status[0], attr: { title: statusName(file.status), "aria-label": statusName(file.status), "data-status": file.status[0] } });
-        if (file.oldPath) row.createDiv({ cls: "lgd-repository-old-path", text: file.oldPath });
+        if (file.oldPath && !selecting) row.createDiv({ cls: "lgd-repository-old-path", text: file.oldPath });
         row.oncontextmenu = (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -1854,7 +1875,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     menu.addItem((item) => item.setTitle("Push").setIcon("upload").setDisabled(disabled).onClick(() => this.remote("push")));
     menu.showAtMouseEvent(event);
   }
-  async remote(action) {
+  async remote(action, revision) {
     const route = this.route;
     if (this.closed || this.loading || this.mutating || !route) return;
     if (!this.host.syncRepository) return;
@@ -1864,7 +1885,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     this.error = "";
     this.setMutationDisabled();
     try {
-      await this.host.syncRepository(route.context, action);
+      await this.host.syncRepository(route.context, action, revision);
     } catch (error2) {
       if (!this.closed && this.route === route) this.error = errorMessage(error2);
     } finally {
@@ -3275,6 +3296,52 @@ async function renderProperties(app, source, container, sourcePath, component) {
   }
 }
 
+// src/comparisonHeader.ts
+var ComparisonHeader = class {
+  constructor(container, swapSides) {
+    this.versionKey = "";
+    this.element = container.createDiv({ cls: "lgd-header" });
+    this.content = this.element.createDiv({ cls: "lgd-header-content" });
+    this.title = this.content.createDiv({ cls: "lgd-title" });
+    this.version = this.content.createDiv({ cls: "lgd-sub" });
+    this.swap = this.content.createEl("button", { text: "Swap sides", cls: "lgd-swap" });
+    this.swap.onclick = swapSides;
+    this.status = this.content.createDiv({ cls: "lgd-sub", attr: { role: "status", "aria-live": "polite" } });
+    this.sync = this.content.createDiv({ cls: "lgd-sync" });
+  }
+  update(session, side, synced, warning) {
+    const endpoint = session.endpoints[side === "a" ? 0 : 1];
+    const key = JSON.stringify([session.fileName, session.rel, endpoint, side]);
+    if (key !== this.versionKey) {
+      this.versionKey = key;
+      this.title.setText(session.fileName);
+      this.version.empty();
+      const commit = endpoint.kind === "commit" ? endpoint.commit : null;
+      this.version.createSpan({ cls: "lgd-sha", text: endpoint.kind === "commit" ? `${side === "a" ? "Base" : "Compared"} ${endpoint.sha.slice(0, 7)} \xB7 ${endpoint.label}` : "Workcopy \xB7 Live document" });
+      if (commit) {
+        this.version.createSpan({ cls: "lgd-subject", text: " \xB7 " + commit.subject });
+        this.version.createSpan({ cls: "lgd-age", text: " \xB7 " + commit.relative, attr: { title: commit.date } });
+      }
+      if (endpoint.path !== session.rel && endpoint.kind === "commit")
+        this.version.createSpan({ cls: "lgd-renamed", text: " \xB7 Historical path: " + endpoint.path });
+      this.swap.hidden = session.endpoints[1].kind !== "commit";
+    }
+    const simplified = session.rows.some((row) => row.simplified);
+    const text = session.error || (session.status === "updating" ? "Updating comparison\u2026" : `${session.counts.changed} changed blocks${simplified ? " \xB7 Some details simplified" : ""}${warning ? " \xB7 " + warning : ""}`);
+    if (this.status.textContent !== text) this.status.setText(text);
+    this.status.toggleClass("lgd-error", !!session.error);
+    this.updateSync(synced);
+  }
+  updateSync(synced) {
+    const text = synced ? " \xB7 Scroll sync on" : " \xB7 Scroll sync off";
+    if (this.sync.textContent !== text) this.sync.setText(text);
+  }
+  naturalHeight() {
+    const style = this.element.ownerDocument.defaultView.getComputedStyle(this.element);
+    return this.content.getBoundingClientRect().height + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  }
+};
+
 // src/baseView.ts
 var VIEW_TYPE = "live-git-diff-base";
 var GitBaseView = class extends import_obsidian4.ItemView {
@@ -3289,8 +3356,7 @@ var GitBaseView = class extends import_obsidian4.ItemView {
     this.renderKey = "";
     this.generation = 0;
     this.component = null;
-    this.statusEl = null;
-    this.syncBadgeEl = null;
+    this.header = null;
     this.sizer = null;
     this.host = host;
     this.side = side;
@@ -3318,15 +3384,13 @@ var GitBaseView = class extends import_obsidian4.ItemView {
   }
   updateSyncBadge() {
     var _a;
-    (_a = this.syncBadgeEl) == null ? void 0 : _a.setText(this.host.sync.enabled ? " \xB7 Scroll sync on" : " \xB7 Scroll sync off");
+    (_a = this.header) == null ? void 0 : _a.updateSync(this.host.sync.enabled);
   }
   updateStatus() {
     var _a, _b, _c;
     const s = this.host.session;
-    if (!s || !this.statusEl) return;
-    const simplified = s.rows.some((row) => row.simplified);
-    this.statusEl.setText(s.error || (s.status === "updating" ? "Updating comparison\u2026" : `${s.counts.changed} changed blocks${simplified ? " \xB7 Some details simplified" : ""}${((_b = (_a = this.host).presentationWarning) == null ? void 0 : _b.call(_a)) ? " \xB7 " + this.host.presentationWarning() : ""}`));
-    this.statusEl.toggleClass("lgd-error", !!s.error);
+    if (!s || !this.header) return;
+    this.header.update(s, this.side, this.host.sync.enabled, (_b = (_a = this.host).presentationWarning) == null ? void 0 : _b.call(_a));
     (_c = this.bodyEl) == null ? void 0 : _c.setAttr("aria-busy", String(s.status === "updating"));
     if (s.status !== "ready") for (const entry of this.cache.values()) {
       entry.element.removeClass(CLS.mod, CLS.del, CLS.ins);
@@ -3335,7 +3399,7 @@ var GitBaseView = class extends import_obsidian4.ItemView {
     }
   }
   async render() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const s = this.host.session, generation = ++this.generation;
     if (!s) {
       this.contentEl.empty();
@@ -3355,30 +3419,15 @@ var GitBaseView = class extends import_obsidian4.ItemView {
       root.dataset.lgdSide = this.side;
       this.cache.clear();
       this.blockEls.clear();
-      const header = root.createDiv({ cls: "lgd-header" });
-      header.createDiv({ cls: "lgd-title", text: s.fileName });
-      const sub = header.createDiv({ cls: "lgd-sub" });
-      const commit = endpoint.kind === "commit" ? endpoint.commit : null;
-      sub.createSpan({ cls: "lgd-sha", text: endpoint.kind === "commit" ? `${this.side === "a" ? "Base" : "Compared"} ${endpoint.sha.slice(0, 7)} \xB7 ${endpoint.label}` : "Current document" });
-      if (commit) {
-        sub.createSpan({ cls: "lgd-subject", text: " \xB7 " + commit.subject });
-        sub.createSpan({ cls: "lgd-age", text: " \xB7 " + commit.relative, attr: { title: commit.date } });
-      }
-      if (endpoint.path !== s.rel) sub.createSpan({ cls: "lgd-renamed", text: " \xB7 Historical path: " + endpoint.path });
-      if (s.endpoints[1].kind === "commit") {
-        const swap = header.createEl("button", { text: "Swap sides", cls: "lgd-swap" });
-        swap.addEventListener("click", () => {
-          var _a2, _b2;
-          return (_b2 = (_a2 = this.host).swapSides) == null ? void 0 : _b2.call(_a2);
-        });
-      }
-      this.statusEl = header.createDiv({ cls: "lgd-sub", attr: { role: "status", "aria-live": "polite" } });
-      this.syncBadgeEl = header.createDiv({ cls: "lgd-sync" });
-      this.updateSyncBadge();
+      this.header = new ComparisonHeader(root, () => {
+        var _a2, _b2;
+        return (_b2 = (_a2 = this.host).swapSides) == null ? void 0 : _b2.call(_a2);
+      });
       this.bodyEl = root.createDiv({ cls: "lgd-body markdown-preview-view markdown-rendered" });
       this.sizer = this.bodyEl.createDiv({ cls: "markdown-preview-sizer markdown-preview-section" });
     }
     this.updateStatus();
+    (_c = (_b = this.host).comparisonRendered) == null ? void 0 : _c.call(_b);
     if (s.status !== "ready" || !this.sizer || !this.component) return;
     const references = this.side === "a" ? s.baseReferences : s.currentReferences;
     const sourcePath = s.filePath.replace(/[^/]+$/, "__live_git_diff_history__.md");
@@ -3396,7 +3445,7 @@ var GitBaseView = class extends import_obsidian4.ItemView {
         this.cache.set(block.sourceStart, entry);
         if (block.type === "properties") {
           entry.rendered = renderProperties(this.app, block.text, content, sourcePath, this.component);
-        } else if (block.type === "reference" || ((_b = block.conservative) == null ? void 0 : _b.startsWith("Plugin-generated content"))) {
+        } else if (block.type === "reference" || ((_d = block.conservative) == null ? void 0 : _d.startsWith("Plugin-generated content"))) {
           content.createEl("pre").createEl("code", { text: block.text });
         } else {
           entry.rendered = import_obsidian4.MarkdownRenderer.render(this.app, block.text + (references ? "\n\n" + references : ""), content, sourcePath, this.component);
@@ -3411,7 +3460,7 @@ var GitBaseView = class extends import_obsidian4.ItemView {
       entry.element.removeClass(CLS.mod, CLS.del, CLS.ins, CLS.same);
       entry.element.toggleClass(CLS.nblock, this.side === "b");
       entry.element.addClass(CLS[row.kind]);
-      const oppositeRows = ((_c = row.tableRows) == null ? void 0 : _c.filter((change2) => change2.kind === (this.side === "a" ? "ins" : "del")).length) || 0;
+      const oppositeRows = ((_e = row.tableRows) == null ? void 0 : _e.filter((change2) => change2.kind === (this.side === "a" ? "ins" : "del")).length) || 0;
       const tableNote = oppositeRows ? `${oppositeRows} ${oppositeRows === 1 ? "row" : "rows"} ${this.side === "a" ? "added in the compared version" : "removed from the base version"}.` : "";
       entry.note.setText([row.structural || block.conservative, tableNote, row.simplified ? "Details simplified; this block is still marked as changed." : ""].filter(Boolean).join(" "));
       unwrapCharMarks(entry.content);
@@ -3422,9 +3471,10 @@ var GitBaseView = class extends import_obsidian4.ItemView {
         batchStart = performance.now();
       }
     }
-    if (!((_d = this.endPadEl) == null ? void 0 : _d.isConnected)) this.endPadEl = this.sizer.createDiv({ cls: CLS.endpad });
+    if (!((_f = this.endPadEl) == null ? void 0 : _f.isConnected)) this.endPadEl = this.sizer.createDiv({ cls: CLS.endpad });
     this.endPadEl.style.height = "60vh";
     this.host.sync.attach();
+    (_h = (_g = this.host).comparisonRendered) == null ? void 0 : _h.call(_g);
   }
   async onClose() {
     var _a, _b, _c;
@@ -3432,19 +3482,24 @@ var GitBaseView = class extends import_obsidian4.ItemView {
     (_a = this.component) == null ? void 0 : _a.unload();
     this.component = null;
     this.bodyEl = null;
+    this.header = null;
     this.cache.clear();
     this.blockEls.clear();
     (_c = (_b = this.host).snapshotClosed) == null ? void 0 : _c.call(_b, this);
   }
   scrollToLine(line) {
+    const offset = this.offsetForLine(line);
+    if (this.bodyEl && offset !== null) this.bodyEl.scrollTop = offset;
+  }
+  offsetForLine(line) {
     var _a, _b;
-    if (!this.bodyEl) return;
+    if (!this.bodyEl) return null;
     const rows = this.side === "a" ? (_a = this.host.session) == null ? void 0 : _a.baseRows : (_b = this.host.session) == null ? void 0 : _b.noteRows;
     const row = (rows == null ? void 0 : rows.find((r) => r[this.side].lineEnd >= line)) || (rows == null ? void 0 : rows.at(-1));
     const block = row == null ? void 0 : row[this.side], el = row && this.blockEls.get(row.idx);
-    if (!block || !el) return;
+    if (!block || !el) return null;
     const fraction = Math.max(0, Math.min(1, (line - block.lineStart) / (block.lineEnd - block.lineStart + 1)));
-    this.bodyEl.scrollTop += el.getBoundingClientRect().top - this.bodyEl.getBoundingClientRect().top + fraction * el.offsetHeight;
+    return this.bodyEl.scrollTop + el.getBoundingClientRect().top - this.bodyEl.getBoundingClientRect().top + fraction * el.offsetHeight;
   }
 };
 
@@ -3509,7 +3564,7 @@ var HistoryCache = class {
   }
 };
 var HistoryController = class {
-  constructor(cache, resolve3, pageSize, changed) {
+  constructor(cache, resolve3, pageSize, changed, workcopyText) {
     this.state = { file: null, loading: false, error: null, selected: [], hint: null, unavailable: false };
     this.epoch = 0;
     this.request = 0;
@@ -3518,6 +3573,7 @@ var HistoryController = class {
     this.resolve = resolve3;
     this.pageSize = pageSize;
     this.changed = changed;
+    this.workcopyText = workcopyText;
   }
   async setFile(file) {
     var _a, _b;
@@ -3632,7 +3688,7 @@ var HistoryController = class {
     this.emit();
   }
   async expand(sha, refresh = false, more = false) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const entry = this.state.entry, file = this.state.file, epoch = this.epoch;
     if (!entry || entry.context.backend !== "jj" || this.closed) return;
     const parent = entry.commits.find((c) => c.sha === sha);
@@ -3650,13 +3706,14 @@ var HistoryController = class {
     this.state = { ...this.state, expanded: { ...this.state.expanded, [sha]: pending } };
     this.emit();
     try {
-      const result = await evolution(entry.context, parent, limit, this.cache.signal);
-      if (this.closed || epoch !== this.epoch || file !== this.state.file || ((_b = this.state.expanded) == null ? void 0 : _b[sha]) !== pending) return;
+      const liveText = parent.kind === "workcopy" && file ? await ((_b = this.workcopyText) == null ? void 0 : _b.call(this, file.path)) : void 0;
+      const result = await evolution(entry.context, parent, limit, this.cache.signal, liveText);
+      if (this.closed || epoch !== this.epoch || file !== this.state.file || ((_c = this.state.expanded) == null ? void 0 : _c[sha]) !== pending) return;
       for (const pinned of this.state.selected.filter((c) => c.groupId === sha)) if (!result.commits.some((c) => c.sha === pinned.sha)) result.commits.push(pinned);
       this.state = { ...this.state, expanded: { ...this.state.expanded, [sha]: { ...result, loading: false, limit } } };
       this.emit();
     } catch (error2) {
-      if (this.closed || epoch !== this.epoch || file !== this.state.file || ((_c = this.state.expanded) == null ? void 0 : _c[sha]) !== pending) return;
+      if (this.closed || epoch !== this.epoch || file !== this.state.file || ((_d = this.state.expanded) == null ? void 0 : _d[sha]) !== pending) return;
       this.state = { ...this.state, expanded: { ...this.state.expanded, [sha]: { ...pending, loading: false, error: String(error2) } } };
       this.emit();
     }
@@ -3740,7 +3797,10 @@ var GitHistoryView = class extends import_obsidian5.ItemView {
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof import_obsidian5.TFile)) return Promise.reject(new Error("The note is no longer available."));
       return resolveRepository(this.app, current, signal);
-    }, () => host.settings.logLimit, (state) => this.renderState(state));
+    }, () => host.settings.logLimit, (state) => this.renderState(state), (filePath) => {
+      var _a, _b;
+      return (_b = (_a = host.historyWorkcopyText) == null ? void 0 : _a.call(host, filePath)) != null ? _b : Promise.resolve(void 0);
+    });
     this.scope = new import_obsidian5.Scope(this.app.scope);
     this.scope.register(["Mod"], "Enter", (event) => {
       if (!this.contentEl.contains(this.contentEl.ownerDocument.activeElement) || event.isComposing) return;
@@ -4555,6 +4615,205 @@ function topmostVisible(container, els) {
   }
   return null;
 }
+
+// src/changeMapModel.ts
+function changeMarkers(rows, side) {
+  var _a, _b;
+  const nextLine = /* @__PURE__ */ new Map();
+  let next = 0;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const block = rows[i][side];
+    if (block) next = block.lineStart;
+    nextLine.set(i, next);
+  }
+  const markers = [];
+  let previousEnd = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i], block = row[side];
+    const line = (_a = block == null ? void 0 : block.lineStart) != null ? _a : Math.max(previousEnd, nextLine.get(i) || 0);
+    if (row.kind !== "same") markers.push({
+      row: row.idx,
+      kind: row.kind,
+      lineStart: line,
+      lineEnd: (_b = block == null ? void 0 : block.lineEnd) != null ? _b : line,
+      missing: !block
+    });
+    if (block) previousEnd = block.lineEnd + 1;
+  }
+  return markers;
+}
+
+// src/changeMap.ts
+var ChangeMap = class {
+  constructor(pane) {
+    this.session = null;
+    this.markers = [];
+    this.lineCount = 1;
+    this.frame = null;
+    this.onScroll = () => this.updateViewport();
+    this.onWheel = (event) => {
+      event.preventDefault();
+      this.pane.scroller.scrollTop += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? this.pane.scroller.clientHeight : 1);
+    };
+    this.pane = pane;
+    this.win = pane.container.ownerDocument.defaultView;
+    this.element = pane.container.createDiv({ cls: "lgd-change-map", attr: {
+      role: "navigation",
+      "aria-label": `Change map: ${pane.side === "a" ? "base version" : "compared version"}`
+    } });
+    this.viewport = this.element.createDiv({ cls: "lgd-change-map-viewport", attr: { "aria-hidden": "true" } });
+    this.element.onclick = (event) => {
+      if (event.target.closest("button")) return;
+      const rect = this.element.getBoundingClientRect();
+      pane.scroller.scrollTop = clamp((event.clientY - rect.top) / Math.max(1, rect.height), 0, 1) * pane.scroller.scrollHeight - pane.scroller.clientHeight / 2;
+    };
+    this.element.addEventListener("wheel", this.onWheel, { passive: false });
+    pane.scroller.addEventListener("scroll", this.onScroll, { passive: true });
+    this.observer = new ResizeObserver(() => this.refresh());
+    for (const el of new Set([pane.container, pane.scroller, pane.content].filter((el2) => !!el2))) this.observer.observe(el);
+  }
+  update(session, pane) {
+    this.pane = pane;
+    if (this.session !== session) {
+      this.session = session;
+      for (const { button } of this.markers) button.remove();
+      this.lineCount = (pane.side === "a" ? session.baseText : session.currentText).split("\n").length;
+      this.markers = changeMarkers(session.rows, pane.side).map((marker) => {
+        const label = `${marker.kind === "ins" ? "Added" : marker.kind === "del" ? "Removed" : "Modified"} block \xB7 line ${marker.lineStart + 1}`;
+        const color = marker.kind === "del" || marker.kind === "mod" && pane.side === "a" ? "deletion" : "addition";
+        const button = this.element.createEl("button", { cls: `lgd-change-map-marker is-${color}`, attr: {
+          type: "button",
+          title: label,
+          "aria-label": label,
+          "data-row-index": String(marker.row)
+        } });
+        button.onclick = (event) => {
+          event.stopPropagation();
+          this.pane.navigate(marker);
+        };
+        return { marker, button };
+      });
+    }
+    this.refresh();
+  }
+  /** Geometry work is coalesced; scrolling only moves the small viewport indicator. */
+  refresh() {
+    if (this.frame !== null) return;
+    this.frame = this.win.requestAnimationFrame(() => {
+      var _a, _b;
+      this.frame = null;
+      const { container, scroller } = this.pane;
+      const box = scroller.getBoundingClientRect(), root = container.getBoundingClientRect();
+      this.element.style.top = `${box.top - root.top}px`;
+      this.element.style.right = `${Math.max(0, root.right - box.right) + Math.max(12, scroller.offsetWidth - scroller.clientWidth)}px`;
+      this.element.style.height = `${scroller.clientHeight}px`;
+      const height = Math.max(1, scroller.scrollHeight), track = scroller.clientHeight;
+      for (const { marker, button } of this.markers) {
+        const range = this.pane.range(marker);
+        const top = (_a = range == null ? void 0 : range.top) != null ? _a : marker.lineStart / this.lineCount * height;
+        const bottom = (_b = range == null ? void 0 : range.bottom) != null ? _b : (marker.lineEnd + (marker.missing ? 0 : 1)) / this.lineCount * height;
+        const pixels = clamp(Math.max(4, (bottom - top) / height * track), 4, Math.max(4, track));
+        button.style.top = `${clamp(top / height * track, 0, Math.max(0, track - pixels))}px`;
+        button.style.height = `${pixels}px`;
+      }
+      this.updateViewport();
+    });
+  }
+  updateViewport() {
+    const { scroller } = this.pane;
+    const height = Math.max(1, scroller.scrollHeight);
+    this.viewport.style.top = `${clamp(scroller.scrollTop / height * 100, 0, 100)}%`;
+    this.viewport.style.height = `${Math.min(100, scroller.clientHeight / height * 100)}%`;
+  }
+  destroy() {
+    if (this.frame !== null) this.win.cancelAnimationFrame(this.frame);
+    this.observer.disconnect();
+    this.pane.scroller.removeEventListener("scroll", this.onScroll);
+    this.element.removeEventListener("wheel", this.onWheel);
+    this.element.remove();
+  }
+};
+
+// src/comparisonChrome.ts
+var ComparisonChrome = class {
+  constructor() {
+    this.live = null;
+    this.maps = /* @__PURE__ */ new Map();
+    this.headers = [];
+    this.observer = null;
+    this.frame = null;
+  }
+  update(session, liveContainer, headers, panes, synced, warning) {
+    var _a, _b, _c;
+    if (!session) {
+      this.reset();
+      return;
+    }
+    if (((_a = this.live) == null ? void 0 : _a.container) !== liveContainer) {
+      this.removeLive();
+      if (liveContainer) {
+        liveContainer.addClass("lgd-live-review");
+        const header = new ComparisonHeader(liveContainer, () => {
+        });
+        liveContainer.prepend(header.element);
+        this.live = { container: liveContainer, header };
+      }
+    }
+    (_b = this.live) == null ? void 0 : _b.header.update(session, "b", synced, warning);
+    const nextHeaders = [...headers, ...this.live ? [this.live.header] : []];
+    if (nextHeaders.length !== this.headers.length || nextHeaders.some((header, i) => header !== this.headers[i])) {
+      for (const header of this.headers) header.element.style.removeProperty("min-height");
+      this.headers = nextHeaders;
+      (_c = this.observer) == null ? void 0 : _c.disconnect();
+      this.observer = new ResizeObserver(() => this.refresh());
+      for (const header of this.headers) this.observer.observe(header.content);
+    }
+    const active = new Set(panes.map((pane) => pane.scroller));
+    for (const [scroller, map] of this.maps) if (!active.has(scroller)) {
+      map.destroy();
+      this.maps.delete(scroller);
+    }
+    for (const pane of panes) {
+      let map = this.maps.get(pane.scroller);
+      if (!map) {
+        map = new ChangeMap(pane);
+        this.maps.set(pane.scroller, map);
+      }
+      map.update(session, pane);
+    }
+    this.refresh();
+  }
+  refresh() {
+    if (this.frame !== null || !this.headers.length && !this.maps.size) return;
+    this.frame = window.requestAnimationFrame(() => {
+      this.frame = null;
+      const height = Math.ceil(Math.max(0, ...this.headers.map((header) => header.naturalHeight())));
+      for (const header of this.headers) {
+        const value = `${height}px`;
+        if (header.element.style.minHeight !== value) header.element.style.minHeight = value;
+      }
+      for (const map of this.maps.values()) map.refresh();
+    });
+  }
+  removeLive() {
+    var _a, _b;
+    (_a = this.live) == null ? void 0 : _a.header.element.remove();
+    (_b = this.live) == null ? void 0 : _b.container.removeClass("lgd-live-review");
+    this.live = null;
+  }
+  reset() {
+    var _a;
+    if (this.frame !== null) window.cancelAnimationFrame(this.frame);
+    this.frame = null;
+    (_a = this.observer) == null ? void 0 : _a.disconnect();
+    this.observer = null;
+    for (const header of this.headers) header.element.style.removeProperty("min-height");
+    this.headers = [];
+    this.removeLive();
+    for (const map of this.maps.values()) map.destroy();
+    this.maps.clear();
+  }
+};
 
 // src/scrollModel.ts
 function noteScrollTarget(rows, line, resolve3) {
@@ -5484,6 +5743,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.explainRequest = 0;
     this.remoteJobs = /* @__PURE__ */ new Map();
     this.historicalContext = null;
+    this.comparisonChrome = new ComparisonChrome();
     this.worker = new ComparisonWorker();
     this.revisions = new RevisionGate();
     this.editors = /* @__PURE__ */ new Set();
@@ -6050,7 +6310,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       if (!this.disposed) new import_obsidian9.Notice(error2.message, 1e4);
     }
   }
-  async syncRepository(context, action) {
+  async syncRepository(context, action, revision) {
     var _a, _b, _c;
     if (this.remoteJobs.has(context.root)) throw new Error("A remote operation is already running.");
     const job = new AbortController();
@@ -6061,7 +6321,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       if (job.signal.aborted || this.disposed) return;
       progress = new import_obsidian9.Notice(`${action === "push" ? "Pushing to" : "Pulling from"} ${target.remote}/${target.branch}\u2026`, 0);
       started = true;
-      const result = await (action === "push" ? pushRepository : pullRepository)(context, target, job.signal);
+      const result = action === "push" ? await pushRepository(context, target, job.signal, revision) : await pullRepository(context, target, job.signal);
       if (!this.disposed) new import_obsidian9.Notice(result.message);
     } finally {
       progress == null ? void 0 : progress.hide();
@@ -6219,6 +6479,12 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     });
     return (view == null ? void 0 : view.getMode()) === "source" ? view.editor.getValue() : void 0;
   }
+  async historyWorkcopyText(filePath) {
+    const live = this.liveNoteText(filePath);
+    if (live !== void 0) return live;
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    return file instanceof import_obsidian9.TFile ? this.app.vault.read(file) : void 0;
+  }
   editorAttached(view) {
     this.editors.add(view);
     queueMicrotask(() => {
@@ -6243,11 +6509,16 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     }
   }
   editorGeometryChanged() {
+    this.comparisonChrome.refresh();
+  }
+  comparisonRendered() {
+    this.updateComparisonChrome();
   }
   editorTablePresentationIssue(view, message) {
     if (message) this.tableIssues.set(view, message);
     else this.tableIssues.delete(view);
     for (const snapshot of this.snapshotViews()) snapshot.updateStatus();
+    this.updateComparisonChrome();
   }
   presentationWarning() {
     return this.tableIssues.size ? "Unable to highlight some table changes." : null;
@@ -6268,6 +6539,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       const reviewing = !!s && !this.isHistoricalPair() && editorPath(view) === s.filePath && this.isReviewEditor(view);
       publish(view, (s == null ? void 0 : s.status) === "ready" && !s.error && reviewing ? { filePath: s.filePath, revision: s.revision, text: s.currentText, rows: s.rows } : null, reviewing);
     }
+    this.updateComparisonChrome();
   }
   invalidate() {
     this.worker.cancel();
@@ -6500,6 +6772,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
   }
   closeReview(closingLeaf) {
     var _a, _b, _c, _d;
+    this.comparisonChrome.reset();
     this.historicalContext = null;
     this.opening++;
     this.openingFile = null;
@@ -6566,6 +6839,85 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     var _a;
     return ((_a = this.baseView()) == null ? void 0 : _a.blockEls.get(index)) || null;
   }
+  updateComparisonChrome() {
+    var _a, _b, _c, _d;
+    const session = this.session, snapshots = this.snapshotViews();
+    const live = (session == null ? void 0 : session.endpoints[1].kind) === "worktree" && ((_a = this.reviewLeaf) == null ? void 0 : _a.view) instanceof import_obsidian9.MarkdownView && ((_b = this.reviewLeaf.view.file) == null ? void 0 : _b.path) === session.filePath ? this.reviewLeaf.view.contentEl : null;
+    const panes = [];
+    if ((session == null ? void 0 : session.status) === "ready" && !session.error) {
+      for (const view of snapshots) if (view.bodyEl) {
+        const scroller = view.bodyEl;
+        panes.push({
+          side: view.side,
+          container: view.contentEl,
+          scroller,
+          content: scroller.firstElementChild,
+          range: (marker) => {
+            const element = view.blockEls.get(marker.row) || view.spacerEls.get(marker.row);
+            if (!element) {
+              const top2 = view.offsetForLine(marker.lineStart);
+              return top2 === null ? null : { top: top2, bottom: top2 };
+            }
+            const rect = element.getBoundingClientRect();
+            const top = rect.top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+            return { top, bottom: top + rect.height };
+          },
+          navigate: (marker) => this.navigateComparisonChange(view.side, marker)
+        });
+      }
+      const note = live && this.notePane();
+      if (note) {
+        const editor = note.editorView, scroller = note.scroller;
+        panes.push({
+          side: "b",
+          container: live,
+          scroller,
+          content: (editor == null ? void 0 : editor.contentDOM) || scroller.querySelector(".markdown-preview-sizer"),
+          range: (marker) => {
+            if (!editor) return null;
+            const doc = editor.state.doc;
+            const first = editor.lineBlockAt(doc.line(Math.min(doc.lines, marker.lineStart + 1)).from);
+            const last = editor.lineBlockAt(doc.line(Math.min(doc.lines, marker.lineEnd + 1)).from);
+            const offset = editor.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
+            return { top: first.top + offset, bottom: (marker.missing ? first.top : last.bottom) + offset };
+          },
+          navigate: (marker) => this.navigateComparisonChange("b", marker)
+        });
+      }
+    }
+    this.comparisonChrome.update(
+      session,
+      live,
+      snapshots.flatMap((view) => view.header ? [view.header] : []),
+      panes,
+      (_d = (_c = this.sync) == null ? void 0 : _c.enabled) != null ? _d : true,
+      this.presentationWarning()
+    );
+  }
+  navigateComparisonChange(side, marker) {
+    var _a, _b, _c;
+    const row = (_a = this.session) == null ? void 0 : _a.rows[marker.row];
+    if (marker.missing && this.sync.enabled && row) {
+      if (side === "b" && row.a) {
+        (_b = this.baseView()) == null ? void 0 : _b.scrollToLine(row.a.lineStart);
+        this.sync.syncBaseToNote();
+        return;
+      }
+      if (side === "a" && row.b) {
+        this.scrollComparedToLine(row.b.lineStart);
+        return;
+      }
+    }
+    if (side === "a") (_c = this.baseView()) == null ? void 0 : _c.scrollToLine(marker.lineStart);
+    else this.scrollComparedToLine(marker.lineStart);
+  }
+  scrollComparedToLine(line) {
+    const note = this.notePane();
+    if (note == null ? void 0 : note.editorView) scrollEditorToLine(note.editorView, line);
+    else if (note == null ? void 0 : note.scrollToLine) note.scrollToLine(line);
+    else if (note == null ? void 0 : note.view.setEphemeralState) note.view.setEphemeralState({ line: Math.round(line) });
+    else if (note) this.sync.applyNoteScroll(note.view, line);
+  }
   noteLineInfo(element) {
     if (element.closest('.lgd-view[data-lgd-side="b"]') && element.dataset.lineStart !== void 0)
       return { lineStart: Number(element.dataset.lineStart), lineEnd: Number(element.dataset.lineEnd) };
@@ -6630,6 +6982,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
   toggleSync() {
     this.sync.enabled = !this.sync.enabled;
     for (const view of this.snapshotViews()) view.updateSyncBadge();
+    this.updateComparisonChrome();
   }
   rerenderPreviews() {
     var _a, _b;

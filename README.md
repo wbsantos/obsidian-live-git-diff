@@ -25,6 +25,8 @@ The historical version is read-only; the current note retains Obsidian's editing
 - Lists are compared by item, including continuations. Tables highlight changed rows and cells, including Obsidian's native table editor.
 - Visible text, formatting, links and structure count as changes. Equivalent Markdown spelling and table padding do not.
 - Scroll synchronization keeps corresponding content together; toggle it from the command palette.
+- Change maps beside both scrollbars show where the documents differ. Click a marker to jump to that change, or click the map to move through the document.
+- Both panes show version details while comparing. The live note's temporary header matches the historical header's height and disappears when the comparison closes.
 - Compare two historical versions without opening an editable working copy. **Swap sides** reverses their order.
 - **Close comparison**, or close either participating tab, to end the review. Other note tabs stay open.
 
@@ -40,7 +42,7 @@ When the file matches HEAD, **Workcopy · HEAD** combines the live version and t
 
 Right-click a version to compare it with Workcopy or another selected version, open its **Change details**, request an **Explain**, or clear selections. Preparing a pair does not replace an existing comparison until you apply it. Reopening the same file history retains its selection, filter and scroll position.
 
-In a Jujutsu workspace, expand a change to see its earlier snapshots. The current Workcopy change starts expanded. The timeline filters out snapshots that did not alter this note's content; a later return to earlier content still appears as another event. Collapsing a change clears any selected snapshots beneath it.
+In a Jujutsu workspace, expand a change to see its earlier snapshots. The current Workcopy change starts expanded. Its current snapshot is omitted when it matches the live Workcopy; unsaved editor changes keep the saved snapshot available for comparison. The timeline filters out snapshots that did not alter this note's content; a later return to earlier content still appears as another event. Collapsing a change clears any selected snapshots beneath it.
 
 Automatic Jujutsu snapshots run after **15 seconds** without relevant saves, when history or comparisons need a current repository state, and during normal Obsidian shutdown. Closing waits for the snapshot, even with no note or review open. Automatic save monitoring applies to notes with a history panel or comparison open; shutdown also covers Jujutsu workspaces used during this session.
 

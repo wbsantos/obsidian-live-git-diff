@@ -17,6 +17,7 @@ export interface HistoryViewHost {
   compareHistory(filePath: string, commits: readonly CommitInfo[]): void | Promise<void>;
   historyReviewState(): HistoryReviewState;
   historyActiveFile(): TFile | null;
+  historyWorkcopyText?(filePath: string): Promise<string | undefined>;
   historyViewClosed?(): void;
   openChangeDetails?(context: GitContext, sha: string): Promise<void>;
   openRepository?(): Promise<void>;
@@ -60,7 +61,7 @@ export class GitHistoryView extends ItemView {
       const current = this.app.vault.getAbstractFileByPath(file.path);
       if (!(current instanceof TFile)) return Promise.reject(new Error('The note is no longer available.'));
       return resolveRepository(this.app, current, signal);
-    }, () => host.settings.logLimit, state => this.renderState(state));
+    }, () => host.settings.logLimit, state => this.renderState(state), filePath => host.historyWorkcopyText?.(filePath) ?? Promise.resolve(undefined));
     this.scope = new Scope(this.app.scope);
     this.scope.register(['Mod'], 'Enter', event => {
       if (!this.contentEl.contains(this.contentEl.ownerDocument.activeElement) || event.isComposing) return;

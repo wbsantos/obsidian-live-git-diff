@@ -84,9 +84,11 @@ export class HistoryController {
   private resolve: HistoryResolver;
   private pageSize: () => number;
   private changed: (state: HistoryState) => void;
+  private workcopyText?: (filePath: string) => Promise<string | undefined>;
   constructor(cache: HistoryCache, resolve: HistoryResolver, pageSize: () => number,
-    changed: (state: HistoryState) => void) {
+    changed: (state: HistoryState) => void, workcopyText?: (filePath: string) => Promise<string | undefined>) {
     this.cache = cache; this.resolve = resolve; this.pageSize = pageSize; this.changed = changed;
+    this.workcopyText = workcopyText;
   }
   async setFile(file: HistoryFile | null): Promise<void> {
     if (this.closed || (!this.state.unavailable && (file?.path || null) === (this.state.file?.path || null) && file?.historicalHead === this.state.file?.historicalHead)) return;
@@ -186,7 +188,8 @@ export class HistoryController {
     const pending={commits:old?.commits || [],loading:true,limit,hasMore:false};
     this.state={...this.state,expanded:{...this.state.expanded,[sha]:pending}};this.emit();
     try {
-      const result=await evolution(entry.context,parent,limit,this.cache.signal);
+      const liveText=parent.kind==='workcopy' && file ? await this.workcopyText?.(file.path) : undefined;
+      const result=await evolution(entry.context,parent,limit,this.cache.signal,liveText);
       if(this.closed || epoch!==this.epoch || file!==this.state.file || this.state.expanded?.[sha]!==pending) return;
       for(const pinned of this.state.selected.filter(c=>c.groupId===sha)) if(!result.commits.some(c=>c.sha===pinned.sha))result.commits.push(pinned);
       this.state={...this.state,expanded:{...this.state.expanded,[sha]:{...result,loading:false,limit}}};this.emit();

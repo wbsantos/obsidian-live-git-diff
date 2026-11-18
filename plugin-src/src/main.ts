@@ -23,7 +23,10 @@ import { registerFileMenus } from './contextMenus.ts';
 import { sessionFromRows, errorSession, RevisionGate } from './session.ts';
 import type { Row, Session, Revision } from './session.ts';
 import { ComparisonWorker } from './workerClient.ts';
-import { editorPath, publish, reviewExtension } from './editor.ts';
+import { editorPath, publish, reviewExtension, scrollEditorToLine } from './editor.ts';
+import { ComparisonChrome } from './comparisonChrome.ts';
+import type { ChangeMapPane } from './changeMap.ts';
+import type { ChangeMarker } from './changeMapModel.ts';
 import { ScrollSync } from './sync.ts';
 import { ViewZones } from './viewzones.ts';
 import { CharMarkLayer, unwrapCharMarks } from './charmarks.ts';
@@ -53,6 +56,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   zones!: ViewZones;
   sync!: ScrollSync;
   private marks!: CharMarkLayer;
+  private comparisonChrome = new ComparisonChrome();
   private worker = new ComparisonWorker();
   private revisions = new RevisionGate();
   private editors = new Set<EditorView>();
@@ -480,7 +484,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     try { await this.syncRepository(await this.remoteContext(), action); }
     catch (error) { if (!this.disposed) new Notice((error as Error).message, 10_000); }
   }
-  async syncRepository(context: GitContext, action: 'push' | 'pull'): Promise<void> {
+  async syncRepository(context: GitContext, action: 'push' | 'pull', revision?: string): Promise<void> {
     if (this.remoteJobs.has(context.root)) throw new Error('A remote operation is already running.');
     const job = new AbortController(); this.remoteJobs.set(context.root, job);
     let progress: Notice | undefined, started = false;
@@ -489,7 +493,9 @@ export default class LiveGitDiffPlugin extends Plugin {
       if (job.signal.aborted || this.disposed) return;
       progress = new Notice(`${action === 'push' ? 'Pushing to' : 'Pulling from'} ${target.remote}/${target.branch}…`, 0);
       started = true;
-      const result = await (action === 'push' ? pushRepository : pullRepository)(context, target, job.signal);
+      const result = action === 'push'
+        ? await pushRepository(context, target, job.signal, revision)
+        : await pullRepository(context, target, job.signal);
       if (!this.disposed) new Notice(result.message);
     } finally {
       progress?.hide(); this.remoteJobs.delete(context.root);
@@ -615,6 +621,12 @@ export default class LiveGitDiffPlugin extends Plugin {
       .map(leaf => leaf.view).find((view): view is MarkdownView => view instanceof MarkdownView && view.file?.path === filePath && view.getMode() === 'source');
     return view?.getMode() === 'source' ? view.editor.getValue() : undefined;
   }
+  async historyWorkcopyText(filePath: string): Promise<string | undefined> {
+    const live = this.liveNoteText(filePath);
+    if (live !== undefined) return live;
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    return file instanceof TFile ? this.app.vault.read(file) : undefined;
+  }
   editorAttached(view: EditorView): void {
     this.editors.add(view);
     queueMicrotask(() => { if (!this.disposed && this.editors.has(view)) { this.publishEditorMarks(); this.sync?.attach(); } });
@@ -629,10 +641,12 @@ export default class LiveGitDiffPlugin extends Plugin {
       this.preferredEditor = view; this.requestUpdate();
     }
   }
-  editorGeometryChanged(): void { /* Anchors are measured on demand. */ }
+  editorGeometryChanged(): void { this.comparisonChrome.refresh(); }
+  comparisonRendered(): void { this.updateComparisonChrome(); }
   editorTablePresentationIssue(view: EditorView, message: string | null): void {
     if (message) this.tableIssues.set(view, message); else this.tableIssues.delete(view);
     for (const snapshot of this.snapshotViews()) snapshot.updateStatus();
+    this.updateComparisonChrome();
   }
   presentationWarning(): string | null { return this.tableIssues.size ? 'Unable to highlight some table changes.' : null; }
   private isReviewEditor(view: EditorView): boolean {
@@ -654,6 +668,7 @@ export default class LiveGitDiffPlugin extends Plugin {
       publish(view, s?.status === 'ready' && !s.error && reviewing
         ? { filePath: s.filePath, revision: s.revision, text: s.currentText, rows: s.rows } : null, reviewing);
     }
+    this.updateComparisonChrome();
   }
   private invalidate(): Revision | null {
     this.worker.cancel(); if (this.timer) clearTimeout(this.timer); this.timer = null;
@@ -793,6 +808,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     for (const view of this.snapshotViews()) await view.render();
   }
   closeReview(closingLeaf?: WorkspaceLeaf): void {
+    this.comparisonChrome.reset();
     this.historicalContext = null;
     this.opening++; this.openingFile = null; this.creating = false; this.gitJob?.abort(); this.gitJob = null; this.revisions.close(); this.worker.dispose();
     if (this.timer) clearTimeout(this.timer); this.timer = null;
@@ -832,6 +848,67 @@ export default class LiveGitDiffPlugin extends Plugin {
   baseView(): GitBaseView | null { return this.snapshotViews().find(view => view.side === 'a') || null; }
   basePane(): HTMLElement | null { return this.baseView()?.bodyEl || null; }
   baseElFor(index: number): HTMLElement | null { return this.baseView()?.blockEls.get(index) || null; }
+  private updateComparisonChrome(): void {
+    const session = this.session, snapshots = this.snapshotViews();
+    const live = session?.endpoints[1].kind === 'worktree' && this.reviewLeaf?.view instanceof MarkdownView
+      && this.reviewLeaf.view.file?.path === session.filePath ? this.reviewLeaf.view.contentEl : null;
+    const panes: ChangeMapPane[] = [];
+    if (session?.status === 'ready' && !session.error) {
+      for (const view of snapshots) if (view.bodyEl) {
+        const scroller = view.bodyEl;
+        panes.push({ side: view.side, container: view.contentEl, scroller, content: scroller.firstElementChild as HTMLElement | null,
+          range: marker => {
+            const element = view.blockEls.get(marker.row) || view.spacerEls.get(marker.row);
+            if (!element) {
+              const top = view.offsetForLine(marker.lineStart);
+              return top === null ? null : { top, bottom: top };
+            }
+            const rect = element.getBoundingClientRect();
+            const top = rect.top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+            return { top, bottom: top + rect.height };
+          },
+          navigate: marker => this.navigateComparisonChange(view.side, marker),
+        });
+      }
+      const note = live && this.notePane();
+      if (note) {
+        const editor = note.editorView, scroller = note.scroller;
+        panes.push({ side: 'b', container: live, scroller,
+          content: editor?.contentDOM || scroller.querySelector<HTMLElement>('.markdown-preview-sizer'),
+          range: marker => {
+            if (!editor) return null; // Reading mode virtualizes off-screen blocks: keep stable source-line estimates.
+            const doc = editor.state.doc;
+            const first = editor.lineBlockAt(doc.line(Math.min(doc.lines, marker.lineStart + 1)).from);
+            const last = editor.lineBlockAt(doc.line(Math.min(doc.lines, marker.lineEnd + 1)).from);
+            const offset = editor.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
+            return { top: first.top + offset, bottom: (marker.missing ? first.top : last.bottom) + offset };
+          },
+          navigate: marker => this.navigateComparisonChange('b', marker),
+        });
+      }
+    }
+    this.comparisonChrome.update(session, live, snapshots.flatMap(view => view.header ? [view.header] : []), panes,
+      this.sync?.enabled ?? true, this.presentationWarning());
+  }
+  private navigateComparisonChange(side: 'a' | 'b', marker: ChangeMarker): void {
+    const row = this.session?.rows[marker.row];
+    // On an absent side, the other document holds the actual change being requested.
+    if (marker.missing && this.sync.enabled && row) {
+      if (side === 'b' && row.a) { this.baseView()?.scrollToLine(row.a.lineStart); this.sync.syncBaseToNote(); return; }
+      if (side === 'a' && row.b) { this.scrollComparedToLine(row.b.lineStart); return; }
+    }
+    if (side === 'a') this.baseView()?.scrollToLine(marker.lineStart);
+    else this.scrollComparedToLine(marker.lineStart);
+  }
+  private scrollComparedToLine(line: number): void {
+    const note = this.notePane();
+    if (note?.editorView) scrollEditorToLine(note.editorView, line);
+    else if (note?.scrollToLine) note.scrollToLine(line);
+    // Explicit navigation must wait for unmeasured Reading-mode sections to render.
+    // The public ephemeral-state API retries that jump; continuous sync stays on applyScroll.
+    else if (note?.view.setEphemeralState) note.view.setEphemeralState({ line: Math.round(line) });
+    else if (note) this.sync.applyNoteScroll(note.view, line);
+  }
   noteLineInfo(element: HTMLElement): { lineStart: number; lineEnd: number } | undefined {
     if (element.closest('.lgd-view[data-lgd-side="b"]') && element.dataset.lineStart !== undefined)
       return { lineStart: Number(element.dataset.lineStart), lineEnd: Number(element.dataset.lineEnd) };
@@ -880,7 +957,11 @@ export default class LiveGitDiffPlugin extends Plugin {
       }
     }
   }
-  toggleSync(): void { this.sync.enabled = !this.sync.enabled; for (const view of this.snapshotViews()) view.updateSyncBadge(); }
+  toggleSync(): void {
+    this.sync.enabled = !this.sync.enabled;
+    for (const view of this.snapshotViews()) view.updateSyncBadge();
+    this.updateComparisonChrome();
+  }
   private rerenderPreviews(): void {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;

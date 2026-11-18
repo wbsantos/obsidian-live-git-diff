@@ -112,6 +112,49 @@ for (const [backend, colocate] of cases) {
     } finally { f.clean(); }
   });
 
+  test(`Partial push publishes only through the selected change and preserves later work (${label})`, async () => {
+    const f = fixture(backend, colocate);
+    try {
+      f.write('first.md', 'First review\n');
+      await createChange(f.ctx, ['first.md'], 'First review', (await getRepositoryStatus(f.ctx)).token);
+      const first = backend === 'jj' ? f.jj('log', '-G', '-r', '@-', '-T', 'commit_id') : f.git('rev-parse', 'HEAD');
+      f.write('second.md', 'Second review\n');
+      await createChange(f.ctx, ['second.md'], 'Second review', (await getRepositoryStatus(f.ctx)).token);
+      const second = backend === 'jj' ? f.jj('log', '-G', '-r', '@-', '-T', 'commit_id') : f.git('rev-parse', 'HEAD');
+      if (backend === 'jj') f.jj('bookmark', 'set', 'main', '-r', second);
+      f.write('pending.md', 'Pending work\n');
+      await pushRepository(f.ctx, target, undefined, first);
+      assert.equal(f.remoteHead(), first);
+      assert.equal(backend === 'jj' ? f.jj('log', '-G', '-r', '@-', '-T', 'commit_id') : f.git('rev-parse', 'HEAD'), second);
+      if (backend === 'jj') assert.equal(f.jj('log', '-G', '-r', 'main', '-T', 'commit_id'), second);
+      assert.equal(f.read('pending.md'), 'Pending work\n');
+      const state = await repositorySyncState(f.ctx, [first, second]);
+      assert.deepEqual(state.synced, [first]);
+      await pushRepository(f.ctx, target);
+      assert.equal(f.remoteHead(), second);
+    } finally { f.clean(); }
+  });
+
+  test(`Partial push rejects unrelated and stale changes without overwriting the remote (${label})`, async () => {
+    const f = fixture(backend, colocate);
+    try {
+      f.write('first.md', 'First review\n');
+      await createChange(f.ctx, ['first.md'], 'First review', (await getRepositoryStatus(f.ctx)).token);
+      const first = backend === 'jj' ? f.jj('log', '-G', '-r', '@-', '-T', 'commit_id') : f.git('rev-parse', 'HEAD');
+      f.write('second.md', 'Second review\n');
+      await createChange(f.ctx, ['second.md'], 'Second review', (await getRepositoryStatus(f.ctx)).token);
+      const second = backend === 'jj' ? f.jj('log', '-G', '-r', '@-', '-T', 'commit_id') : f.git('rev-parse', 'HEAD');
+      await pushRepository(f.ctx, target, undefined, second);
+      f.peer('pull', '--ff-only');
+      const unrelated = f.publish('other.md', 'Other branch\n');
+      f.run('git', ['--git-dir', backend === 'jj' && !colocate ? f.ctx.root : path.join(f.local, '.git'), 'fetch', 'origin']);
+      await assert.rejects(pushRepository(f.ctx, target, undefined, unrelated), /not an ancestor/i);
+      await assert.rejects(pushRepository(f.ctx, target, undefined, first), /rejected|non-fast-forward|fetch first|not an ancestor/i);
+      await assert.rejects(pushRepository(f.ctx, target, undefined, 'HEAD'), /Invalid change identifier/);
+      assert.equal(f.remoteHead(), unrelated);
+    } finally { f.clean(); }
+  });
+
   test(`Pull fast-forwards and preserves disjoint pending edits (${label})`, async () => {
     const f = fixture(backend, colocate);
     try {

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const output = path.resolve(root, '../.npm-cache/repository-ui');
+const output = path.resolve(process.env.LGD_UI_QA_OUTPUT || path.join(root, '../.npm-cache/repository-ui'));
 const executable = process.argv[2];
 assert.ok(executable && fs.existsSync(executable), 'Provide a Chromium executable.');
 fs.mkdirSync(output, { recursive: true });
@@ -134,6 +134,10 @@ async function run(){
   const changeLayout=value=>{const select=get('[aria-label="Pending files view"]');select.value=value;select.dispatchEvent(new Event('change'));};
   changeLayout('list');await turn();
   check('File List flattens folders while preserving every file and selection',!get('.lgd-repository-folder') && all('.lgd-repository-file').length===4 && all('.lgd-repository-file input:checked').length===2);
+  check('File List filenames start immediately after their checkboxes',all('.lgd-repository-filename').every(button=>{
+    const name=button.querySelector('.lgd-repository-filename-text');
+    return Math.abs(name.getBoundingClientRect().left-button.getBoundingClientRect().left-parseFloat(getComputedStyle(button).paddingLeft))<1;
+  }));
   check('File List keeps directory paths in tooltips',all('.lgd-repository-filename').every(button=>files.some(file=>button.title.includes(file.path))));
   check('File List preserves description and persists preference',get('textarea').value==='Review checkout flow' && host.settings.pendingChangesView==='list' && qa.preferenceSaves===1);
   input(get('input[type="search"]'),'Stories/');check('File List still filters by directory',all('.lgd-repository-file').length===2);
@@ -293,7 +297,7 @@ const bundle = await build({stdin:{contents:entry,resolveDir:root},bundle:true,w
 const baseCss=`*{box-sizing:border-box}body{font:14px system-ui;margin:24px;background:var(--background-primary);color:var(--text-normal)}
 :root{--background-primary:#fff;--background-secondary:#f7f7f7;--text-normal:#262626;--text-muted:#686868;--text-faint:#aaa;--background-modifier-border:#ddd;--background-modifier-hover:#eee;--background-modifier-active-hover:#e9e6f4;--interactive-accent:#7655bb;--interactive-accent-hover:#6748a8;--text-on-accent:white;--text-success:#248342;--text-warning:#af7818;--text-error:#c33;--font-ui-smaller:12px;--font-ui-small:13px;--font-monospace:monospace;--radius-s:4px}
 body.dark{--background-primary:#202020;--background-secondary:#252525;--text-normal:#ddd;--text-muted:#aaa;--text-faint:#666;--background-modifier-border:#444;--background-modifier-hover:#333;--background-modifier-active-hover:#393144;--text-success:#6dc884;--text-warning:#e0b25b}
-#shell{width:340px;border:1px solid var(--background-modifier-border);background:var(--background-secondary)}#panel{height:820px}.clickable-icon{display:flex;align-items:center;justify-content:center;border:0;background:transparent;cursor:pointer;font-size:19px;width:24px;padding:2px}input,textarea{padding:6px;border:1px solid var(--background-modifier-border);border-radius:4px;background:var(--background-primary);color:var(--text-normal)}#report{white-space:pre-wrap;font-size:11px;max-width:640px}button{font:inherit}button:disabled{opacity:.5}.mod-cta{background:var(--interactive-accent);color:var(--text-on-accent);padding:8px;border:0;border-radius:4px}
+#shell{width:340px;border:1px solid var(--background-modifier-border);background:var(--background-secondary)}#panel{height:820px}.clickable-icon{display:flex;align-items:center;justify-content:center;border:0;background:transparent;cursor:pointer;font-size:19px;width:24px;padding:2px}input,textarea{padding:6px;border:1px solid var(--background-modifier-border);border-radius:4px;background:var(--background-primary);color:var(--text-normal)}#report{white-space:pre-wrap;font-size:11px;max-width:640px}button{font:inherit;justify-content:center}button:disabled{opacity:.5}.mod-cta{background:var(--interactive-accent);color:var(--text-on-accent);padding:8px;border:0;border-radius:4px}
 `;
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const profile=fs.mkdtempSync(path.join(output,'profile-'));

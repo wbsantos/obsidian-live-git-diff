@@ -9,7 +9,7 @@ import { resolveRepository, repositoryHead, repositoryLog, evolution, snapshotWo
 
 for(const colocate of [true,false]) test(`JJ snapshots retain change identity and filter unrelated saves (colocated=${colocate})`, async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lgd-jj-'));
-  const jj=(...args:string[])=>execFileSync('jj',['--no-pager','--color=never','--config','user.name="QA"','--config','user.email="qa@localhost"','-R',dir,...args],{encoding:'utf8',windowsHide:true}).trim();
+  const jj=(...args:string[])=>execFileSync('jj',['--no-pager','--color=never','--config','user.name="QA"','--config','user.email="qa@localhost"','-R',dir,...args],{cwd:dir,encoding:'utf8',windowsHide:true}).trim();
   try {
     execFileSync('jj',['git','init',...(colocate ? [] : ['--no-colocate']),dir],{windowsHide:true});
     fs.writeFileSync(path.join(dir,'note.md'),'one\n');jj('util','snapshot');
@@ -22,12 +22,21 @@ for(const colocate of [true,false]) test(`JJ snapshots retain change identity an
     const head=await repositoryHead(ctx), log=await repositoryLog(ctx,head,30);
     assert.equal(log[0].kind,'workcopy');assert.equal(log[0].currentSha,head);
     const evo=await evolution(ctx,log[0],30);
-    assert.ok(evo.commits.length>=3);
-    assert.equal(evo.commits.filter(c=>!c.absent).length,3);
+    assert.ok(evo.commits.length>=2);
+    assert.equal(evo.commits.filter(c=>!c.absent).length,2);
+    assert.ok(evo.commits.every(c=>c.sha!==head),'the live Workcopy is not repeated as a snapshot');
+    assert.deepEqual(evo.commits.filter(c=>!c.absent).map(c=>jj('--ignore-working-copy','file','show','-r',c.sha,c.path)),['two','one']);
+    const unsaved=await evolution(ctx,log[0],30,undefined,'unsaved live edits\n');
+    assert.equal(unsaved.commits[0].sha,head,'keep the saved snapshot when the live buffer has unsaved edits');
+    const firstPage=await evolution(ctx,log[0],1,undefined,'three\r\n');
+    assert.deepEqual(firstPage.commits,[]);
+    assert.equal(firstPage.hasMore,true,'the omitted Workcopy must not hide older pages');
     const change=log[0].changeId;
     fs.writeFileSync(path.join(dir,'note.md'),'four\n');await snapshotWorkspace(ctx);
     const next=await repositoryLog(ctx,await repositoryHead(ctx),30);
     assert.equal(next[0].changeId,change);assert.notEqual(next[0].currentSha,head);
+    const nextEvolution=await evolution(ctx,next[0],30);
+    assert.equal(nextEvolution.commits[0].sha,head,'the former Workcopy becomes a selectable earlier snapshot after editing');
     assert.equal(fs.readFileSync(path.join(dir,'note.md'),'utf8'),'four\n');
     fs.renameSync(path.join(dir,'note.md'),path.join(dir,'renamed.md'));await snapshotWorkspace(ctx);
     const renamed=await resolveRepository(app,{path:'renamed.md'} as TFile);
