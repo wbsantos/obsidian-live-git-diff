@@ -14,6 +14,18 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 }
 const savedPages = (cache: RepositoryCache): unknown[] => (cache.serialize() as { pages: unknown[] }).pages;
 
+test('conflicted changes and their files survive cache persistence without aliasing views', async () => {
+  const original = { ...revision(1), conflicted: true, conflictedFiles: ['notes/conflicted.md'] };
+  const loader: RepositoryCacheLoader = { anchor: async () => 'jj:pinned', page: async () => ({ changes: [original], hasMore: false }) };
+  const cache = new RepositoryCache(undefined, loader);
+  const first = await cache.load(context, '', 0, 50);
+  first.changes[0].conflictedFiles!.push('view-only.md');
+  const restored = new RepositoryCache(undefined, loader); restored.hydrate(cache.serialize());
+  const change = (await restored.load(context, '', 0, 50)).changes[0];
+  assert.equal(change.conflicted, true);
+  assert.deepEqual(change.conflictedFiles, ['notes/conflicted.md']);
+});
+
 test('persistent pages require the current anchor and isolate returned objects', async () => {
   let anchor = 'git:original', reads = 0, anchors = 0, changed = 0;
   const loader: RepositoryCacheLoader = {

@@ -8,7 +8,7 @@ export const WORKCOPY = 'workcopy';
 export const SNAPSHOT_DELAY = 15_000;
 export const workcopy = (rel: string): CommitInfo => ({kind:'workcopy', sha:WORKCOPY, shortSha:'Workcopy', subject:'Workcopy', path:rel, date:'', relative:'Live document'});
 function jj(root: string, args: string[], signal?: AbortSignal, snapshot = false, discover = false): Promise<string> {
-  return new Promise((resolve, reject) => execFile('jj', [...(snapshot ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never', ...(discover ? [] : ['-R', root]), ...args],
+  return new Promise((resolve, reject) => execFile('jj', [...(snapshot ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never', '--config', 'git.abandon-unreachable-commits=false', ...(discover ? [] : ['-R', root]), ...args],
     {cwd:root, encoding:'utf8', windowsHide:true, timeout:30_000, maxBuffer:64*1024*1024, signal}, (error, out, err) => error ? reject(new Error(String(err || error.message))) : resolve(out)));
 }
 const queues = new Map<string, Promise<unknown>>();

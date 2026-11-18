@@ -4,8 +4,8 @@ import { snapshotWorkspace } from './repository.ts';
 import { createChange, getChangeDetails, getRepositoryStatus } from './repositoryManager.ts';
 import { errorMessage } from './errors.ts';
 import { FILE_HISTORY_ICON, REPOSITORY_HISTORY_ICON } from './icons.ts';
-import { repositorySyncState } from './repositoryRemote.ts';
-import type { RepositorySyncState } from './repositoryRemote.ts';
+import { repositorySyncState, repositoryRemoteHealth } from './repositoryRemote.ts';
+import type { RepositorySyncState, RepositoryRemoteHealth, RepositorySyncOutcome } from './repositoryRemote.ts';
 import type { RepositoryChange, RepositoryFile, RepositoryPage, RepositoryStatus } from './repositoryManager.ts';
 
 export const REPOSITORY_VIEW_TYPE = 'live-git-diff-repository';
@@ -29,6 +29,7 @@ export interface RepositoryViewHost {
   generateDescription?(context: GitContext, paths: string[], token: string, signal: AbortSignal): Promise<string>;
   explainRepository?(context: GitContext, options: { sha?: string; paths?: string[]; token?: string }): Promise<void>;
   syncRepository?(context: GitContext, action: 'push' | 'pull', revision?: string): Promise<void>;
+  repositorySyncOutcome?(context: GitContext): RepositorySyncOutcome | undefined;
 }
 
 interface VisitState {
@@ -69,6 +70,7 @@ export class GitRepositoryView extends ItemView {
   private status: RepositoryStatus | null = null;
   private pendingCount = 0;
   private syncState: RepositorySyncState = { synced: [], warning: '' };
+  private remoteHealth: RepositoryRemoteHealth | null = null;
   private body: HTMLElement | null = null;
   private footer: HTMLElement | null = null;
   private back: HTMLButtonElement | null = null;
@@ -121,6 +123,7 @@ export class GitRepositoryView extends ItemView {
     this.state = state;
     this.changes = []; this.anchor = undefined; this.details = null; this.status = null; this.hasMore = false; this.error = '';
     this.pendingCount = 0; this.syncState = { synced: [], warning: '' };
+    this.remoteHealth = null;
     await this.loadRoute(false, route.kind === 'changes' ? route.paths : undefined);
   }
   async refresh(): Promise<void> { if (!this.mutating) { this.rememberScroll(); await this.loadRoute(false); } }
@@ -145,6 +148,10 @@ export class GitRepositoryView extends ItemView {
     if (!route || !state || this.closed) return;
     this.job?.abort(); const job = this.job = new AbortController(), generation = ++this.generation;
     const current = (): boolean => !this.closed && generation === this.generation;
+    // Diagnostics load independently: a bad merge or bookmark must not hide its own explanation.
+    const healthJob = repositoryRemoteHealth(route.context, job.signal).then(health => {
+      if (current()) this.remoteHealth = health;
+    }, () => {});
     this.loading = true; this.error = '';
     if (!append) this.render(); else this.updateFooter();
     try {
@@ -195,6 +202,7 @@ export class GitRepositoryView extends ItemView {
       }
     } catch (error) { if (current() && !job.signal.aborted) this.error = errorMessage(error); }
     finally {
+      await healthJob;
       if (current()) { this.loading = false; this.render(); }
     }
   }
@@ -222,6 +230,7 @@ export class GitRepositoryView extends ItemView {
       const location = root.createDiv({ cls: 'lgd-repository-location', text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
       heading.oncontextmenu = location.oncontextmenu = event => this.remoteMenu(event);
     }
+    this.renderRemoteHealth(root);
     if (route?.kind === 'log' || route?.kind === 'changes') {
       const filter = route.kind === 'changes' ? root.createDiv({ cls: 'lgd-repository-filter-row' }) : root;
       this.query = filter.createEl('input', { cls: 'lgd-history-filter', type: 'search', placeholder: route.kind === 'log' ? 'Filter loaded changes' : 'Filter files', attr: { 'aria-label': route.kind === 'log' ? 'Filter loaded changes' : 'Filter files' } });
@@ -256,6 +265,35 @@ export class GitRepositoryView extends ItemView {
     this.setMutationDisabled();
   }
 
+  private renderRemoteHealth(root: HTMLElement): void {
+    const health = this.remoteHealth, route = this.route;
+    if (!route || !health) return;
+    const outcome = this.host.repositorySyncOutcome?.(route.context);
+    const attention = !['ready', 'ahead', 'behind'].includes(health.kind) || !!outcome?.attention;
+    const panel = root.createDiv({ cls: 'lgd-repository-sync-status', attr: { 'data-attention': String(attention), role: 'status' } });
+    panel.createDiv({ cls: 'lgd-history-subject', text: health.summary });
+    if (health.ahead && health.behind && health.kind !== 'diverged')
+      panel.createDiv({ cls: 'lgd-sub', text: `${health.ahead} local / ${health.behind} incoming changes` });
+    for (const hint of health.hints) panel.createDiv({ cls: 'lgd-sub', text: hint });
+    if (health.files.length) {
+      const files = panel.createEl('button', { cls: 'lgd-repository-sync-files', text: `${health.files.length} conflicted ${health.files.length === 1 ? 'file' : 'files'} · Open Pending Changes`, attr: { type: 'button', title: health.files.join('\n') } });
+      files.onclick = () => this.navigate({ kind: 'changes', context: route.context });
+    }
+    if (outcome) {
+      const latest = panel.createDiv({ cls: 'lgd-repository-sync-outcome', text: `Last ${outcome.action}: ${outcome.message.split('\n')[0]}` });
+      latest.setAttr('title', outcome.message);
+      if (outcome.attention) for (const reason of outcome.message.split('\n').slice(1, 3).filter(Boolean))
+        panel.createDiv({ cls: 'lgd-sub', text: reason });
+    }
+    if (attention) {
+      const copy = panel.createEl('button', { cls: 'lgd-repository-error-copy', text: 'Copy sync details', attr: { type: 'button' } });
+      copy.onclick = () => {
+        const text = JSON.stringify({ repository: route.context.workspaceRoot || route.context.root, ...health, lastOperation: outcome }, null, 2);
+        void root.ownerDocument.defaultView!.navigator.clipboard.writeText(text).catch(() => new Notice('Unable to copy sync details.'));
+      };
+    }
+  }
+
   private renderBody(): void {
     const body = this.body, route = this.route, state = this.state;
     if (!body) return;
@@ -282,6 +320,14 @@ export class GitRepositoryView extends ItemView {
         button.createDiv({ cls: 'lgd-history-subject', text: change.subject || '(no description)' });
         button.createDiv({ cls: 'lgd-history-meta', text: `${(change.changeId || change.shortSha).slice(0, 10)} · ${change.author || 'Unknown author'}` });
         button.createDiv({ cls: 'lgd-history-date', text: displayDate(change.date), attr: { title: change.date } });
+        const refs = this.remoteHealth?.refs.filter(ref => ref.sha === change.sha) || [];
+        const conflicted = change.conflicted || this.remoteHealth?.conflicts.includes(change.sha);
+        if (refs.length || conflicted) {
+          const labels = button.createDiv({ cls: 'lgd-repository-refs' });
+          for (const ref of refs) labels.createSpan({ cls: 'lgd-repository-ref', text: ref.name + (ref.conflicted ? ' (conflicted)' : ''),
+            attr: { title: `${ref.name} · ${ref.sha}`, 'data-conflict': String(!!ref.conflicted) } });
+          if (conflicted) labels.createSpan({ cls: 'lgd-repository-ref', text: 'File conflicts', attr: { 'data-conflict': 'true' } });
+        }
         button.onclick = () => this.navigate({ kind: 'details', context: route.context, sha: change.sha });
         row.oncontextmenu = event => {
           event.preventDefault();
@@ -453,7 +499,8 @@ export class GitRepositoryView extends ItemView {
       checkbox.indeterminate = selected > 0 && selected < files.length;
       checkbox.disabled = this.mutating || this.loading;
     }
-    if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count || !this.state?.description.trim();
+    if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count ||
+      this.status.files.some(file => file.status === 'U') || !this.state?.description.trim();
     if (this.aiButton) this.aiButton.disabled = !this.aiJob && (this.mutating || this.loading || !count);
   }
   private updateFooter(): void {

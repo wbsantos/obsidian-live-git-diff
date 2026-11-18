@@ -17,7 +17,7 @@ interface CachedPage {
   page: RepositoryPage;
 }
 interface StoredPage { value: CachedPage; bytes: number }
-const VERSION = 1;
+const VERSION = 2;
 const defaultLoader: RepositoryCacheLoader = { anchor: repositoryAnchor, page: listRepositoryHistory };
 const canonicalRoot = (root: string): string => {
   const normalized = root.replace(/\\/g, '/').replace(/\/$/, '');
@@ -32,6 +32,8 @@ const copyChange = (change: RepositoryChange): RepositoryChange => ({ sha: chang
   subject: change.subject, author: change.author, date: change.date,
   ...(change.changeId !== undefined ? { changeId: change.changeId } : {}),
   ...(change.description !== undefined ? { description: change.description } : {}),
+  ...(change.conflicted !== undefined ? { conflicted: change.conflicted } : {}),
+  ...(change.conflictedFiles ? { conflictedFiles: [...change.conflictedFiles] } : {}),
   ...(change.parents ? { parents: [...change.parents] } : {}) });
 const copyPage = (page: RepositoryPage): RepositoryPage => ({ changes: page.changes.map(copyChange), hasMore: page.hasMore,
   ...(page.anchor !== undefined ? { anchor: page.anchor } : {}) });
@@ -55,6 +57,8 @@ function change(value: unknown): value is RepositoryChange {
     string(value.subject) && string(value.author, 4096) && string(value.date, 1024) &&
     (value.changeId === undefined || string(value.changeId, 128)) &&
     (value.description === undefined || string(value.description, 65_536)) &&
+    (value.conflicted === undefined || typeof value.conflicted === 'boolean') &&
+    (value.conflictedFiles === undefined || (Array.isArray(value.conflictedFiles) && value.conflictedFiles.length <= 1024 && value.conflictedFiles.every(file => string(file, 4096)))) &&
     (value.parents === undefined || (Array.isArray(value.parents) && value.parents.length <= 1024 && value.parents.every(parent => string(parent, 128))));
 }
 function cachedPage(value: unknown): value is CachedPage {

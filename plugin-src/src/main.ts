@@ -8,6 +8,7 @@ import { FILE_HISTORY_ICON, REPOSITORY_HISTORY_ICON } from './icons.ts';
 import type { RepositoryRoute } from './repositoryView.ts';
 import { resolveRepositoryDirectory } from './repositoryManager.ts';
 import { trackedRemote, pushRepository, pullRepository } from './repositoryRemote.ts';
+import type { RepositorySyncOutcome } from './repositoryRemote.ts';
 import { NavigationTrail } from './navigation.ts';
 import { ExplainView, EXPLAIN_VIEW_TYPE } from './explainView.ts';
 import { runAi, boundedContext } from './ai.ts';
@@ -52,6 +53,7 @@ export default class LiveGitDiffPlugin extends Plugin {
   private navigationRequest = 0;
   private explainRequest = 0;
   private remoteJobs = new Map<string, AbortController>();
+  private syncOutcomes = new Map<string, RepositorySyncOutcome>();
   private historicalContext: GitContext | null = null;
   zones!: ViewZones;
   sync!: ScrollSync;
@@ -484,6 +486,7 @@ export default class LiveGitDiffPlugin extends Plugin {
     try { await this.syncRepository(await this.remoteContext(), action); }
     catch (error) { if (!this.disposed) new Notice((error as Error).message, 10_000); }
   }
+  repositorySyncOutcome(context: GitContext): RepositorySyncOutcome | undefined { return this.syncOutcomes.get(context.root); }
   async syncRepository(context: GitContext, action: 'push' | 'pull', revision?: string): Promise<void> {
     if (this.remoteJobs.has(context.root)) throw new Error('A remote operation is already running.');
     const job = new AbortController(); this.remoteJobs.set(context.root, job);
@@ -496,15 +499,19 @@ export default class LiveGitDiffPlugin extends Plugin {
       const result = action === 'push'
         ? await pushRepository(context, target, job.signal, revision)
         : await pullRepository(context, target, job.signal);
+      this.syncOutcomes.set(context.root, { action, message: result.message, attention: !!result.attention });
       if (!this.disposed) new Notice(result.message);
+    } catch (error) {
+      this.syncOutcomes.set(context.root, { action, message: errorMessage(error), attention: true });
+      throw error;
     } finally {
       progress?.hide(); this.remoteJobs.delete(context.root);
       // Fetch can update refs even when integration is refused; refresh caches in both cases.
       if (started && !this.disposed) {
         await this.repositoryChanged(context).catch(error => log.warn('Unable to refresh after remote operation', error));
-        if (this.repositoryView()?.currentRoute?.context.root === context.root)
-          await this.repositoryView()?.refresh();
       }
+      if (!this.disposed && this.repositoryView()?.currentRoute?.context.root === context.root)
+        await this.repositoryView()?.refresh();
     }
   }
   private scheduleCacheSave(): void {

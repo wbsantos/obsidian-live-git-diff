@@ -1,4 +1,16 @@
-# Validation: 0.6.0 — Remote push and pull
+# Validation: 0.8.0 — Sync resilience
+
+Validated with Node 24.13.0, Git 2.47.1.windows.2, Jujutsu 0.47.1 and desktop Obsidian on Windows. All remote mutations use disposable local bare repositories and a separate QA application profile.
+
+- The final Push/Pull integration rerun passed **45/45 checks**; the additional external-Git-import preservation case also passed. Snapshot/cache/bundle regressions passed **25/25**, and navigation/cache/bundle checks passed **32/32**. The earlier broad run executed 286 tests and exposed one pending-rename regression; that protection was restored and the rename/retry case passed in the final integration rerun. TypeScript, worker audit, both capability gates and whitespace checks passed.
+- Recovery tests cover externally fetched bookmark conflicts, colocated and separate JJ storage, bookmark repair after an external rebase, deleted tracked bookmarks, canonical alignment, pending content with a bookmark directly on Workcopy, conflicting content, clean edits to the same note across multiple local changes, independent descendants, rewritten/unrelated remote history, and unfinished Git merge/rebase operations. A separate colocated test verifies that opening status after an external Git fetch retains local ancestors and explains unrelated history.
+- Repository UI verification passes **81 assertions in each of the light and dark themes**, including reference/conflict labels, ahead/behind counts, retained fetch/integration outcomes, copy diagnostics, the conflicted-file shortcut and the existing navigation/draft controls.
+- Native Obsidian verification exercises actual Push/Pull buttons against local repositories: conflicted-bookmark recovery followed by a successful push, canonical bookmark alignment, refused integration with a persistent reason after refresh, inherited conflicts on history and Pending Changes, disabled change creation, and preservation of an unfinished Git rebase. Renderer errors are checked and screenshots are inspected.
+- Integration previews create only unreachable temporary Git objects. They do not update refs or working files. Pending-path and rename checks precede the actual JJ rebase. An unexpected VCS conflict after rebasing is explicitly reported and remains visible in the diagnostics rather than being presented as a completed Pull.
+
+Reproduce with `npm run ci`, `node tools/verify-repository-ui.mjs <Chromium executable>` and `node tools/verify-sync-resilience-app.mjs` after starting the isolated QA profile identified by `.npm-cache/jj-app-qa/manifest.json`. Build and capability gates cover the final artifact. Hosted HTTPS/SSH authentication was not exercised; CLI credentials and errors retain their existing behavior.
+
+## Previous validation: 0.6.0 — Remote push and pull
 
 Validated on 2026-11-15 with Node 24.13.0, Git 2.47.1.windows.2, Jujutsu 0.47.1 and desktop Obsidian on Windows. All remote mutations used disposable local bare repositories; no hosted remote was contacted and no user repository was pushed or pulled.
 

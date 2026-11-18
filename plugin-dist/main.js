@@ -230,7 +230,7 @@ var workcopy = (rel) => ({ kind: "workcopy", sha: WORKCOPY, shortSha: "Workcopy"
 function jj(root, args, signal, snapshot = false, discover = false) {
   return new Promise((resolve3, reject) => (0, import_child_process2.execFile)(
     "jj",
-    [...snapshot ? [] : ["--ignore-working-copy"], "--no-pager", "--color=never", ...discover ? [] : ["-R", root], ...args],
+    [...snapshot ? [] : ["--ignore-working-copy"], "--no-pager", "--color=never", "--config", "git.abandon-unreachable-commits=false", ...discover ? [] : ["-R", root], ...args],
     { cwd: root, encoding: "utf8", windowsHide: true, timeout: 3e4, maxBuffer: 64 * 1024 * 1024, signal },
     (error2, out, err) => error2 ? reject(new Error(String(err || error2.message))) : resolve3(out)
   ));
@@ -450,7 +450,7 @@ function command(binary, cwd, args, signal, input) {
   });
 }
 var git = (ctx, args, signal, input) => command("git", ctx.root, ["--literal-pathspecs", "-C", ctx.root, ...args], signal, input);
-var jj2 = (ctx, args, signal, mutate = false) => command("jj", ctx.workspaceRoot, [...mutate ? [] : ["--ignore-working-copy"], "--no-pager", "--color=never", "-R", ctx.workspaceRoot, ...args], signal);
+var jj2 = (ctx, args, signal, mutate = false) => command("jj", ctx.workspaceRoot, [...mutate ? [] : ["--ignore-working-copy"], "--no-pager", "--color=never", "--config", "git.abandon-unreachable-commits=false", "-R", ctx.workspaceRoot, ...args], signal);
 var digest = (value) => (0, import_crypto.createHash)("sha256").update(value).digest("hex");
 function validPath(value, empty2 = false) {
   if (empty2 && value === "" || value && !value.includes("\0") && !value.includes("\\") && !path3.posix.isAbsolute(value) && !/^[a-z]:/i.test(value) && !value.split("/").some((part) => part === ".." || part === "." || part === "")) return value;
@@ -507,7 +507,7 @@ function gitChanges(output) {
   }
   return changes;
 }
-var jjFields = '"sha" => commit_id, "changeId" => change_id, "subject" => description.first_line(), "description" => description, "author" => author.name(), "date" => committer.timestamp().format("%Y-%m-%dT%H:%M:%S%:z"), "parents" => parents.map(|p| p.commit_id())';
+var jjFields = '"sha" => commit_id, "changeId" => change_id, "subject" => description.first_line(), "description" => description, "author" => author.name(), "date" => committer.timestamp().format("%Y-%m-%dT%H:%M:%S%:z"), "parents" => parents.map(|p| p.commit_id()), "conflicted" => conflict, "conflictedFiles" => conflicted_files.map(|f| f.path())';
 var jjTemplate = `json({${jjFields}}) ++ "\\n"`;
 function jjChanges(output) {
   return output.split(/\r?\n/).filter(Boolean).map((line) => {
@@ -571,6 +571,11 @@ function jjFiles(output) {
     return { ...value, oldPath: value.oldPath === value.path ? void 0 : value.oldPath };
   });
 }
+function includeConflicts(files, paths) {
+  const result = new Map(files.map((file) => [file.path, file]));
+  for (const path5 of paths) result.set(path5, { ...result.get(path5), path: path5, status: "U" });
+  return [...result.values()];
+}
 async function getChangeDetails(ctx, sha, signal) {
   var _a;
   validSha(sha);
@@ -581,7 +586,7 @@ async function getChangeDetails(ctx, sha, signal) {
     ]);
     const change3 = jjChanges(metadata)[0];
     if (!change3) throw new Error("Change is no longer available.");
-    return { change: change3, files: jjFiles(files2) };
+    return { change: change3, files: includeConflicts(jjFiles(files2), change3.conflictedFiles || []) };
   }
   const change2 = gitChanges(await git(ctx, ["show", "-s", "--no-show-signature", `--format=${gitFormat}`, "--end-of-options", sha], signal))[0];
   if (!change2) throw new Error("Change is no longer available.");
@@ -606,7 +611,7 @@ async function statusInsideQueue(ctx, signal) {
       jj2(ctx, ["diff", "-r", "@", "-T", jjFileTemplate], signal)
     ]);
     const change2 = jjChanges(metadata)[0];
-    return { files: jjFiles(files2), token: change2.sha, description: change2.description || "" };
+    return { files: includeConflicts(jjFiles(files2), change2.conflictedFiles || []), token: change2.sha, description: change2.description || "" };
   }
   const [current, branch, raw, staged, unstaged] = await Promise.all([
     head(ctx, signal),
@@ -709,7 +714,7 @@ function untrackedPatch(ctx, filePath, signal) {
 }
 
 // src/repositoryCache.ts
-var VERSION = 1;
+var VERSION = 2;
 var defaultLoader = { anchor: repositoryAnchor, page: listRepositoryHistory };
 var canonicalRoot = (root) => {
   const normalized = root.replace(/\\/g, "/").replace(/\/$/, "");
@@ -729,6 +734,8 @@ var copyChange = (change2) => ({
   date: change2.date,
   ...change2.changeId !== void 0 ? { changeId: change2.changeId } : {},
   ...change2.description !== void 0 ? { description: change2.description } : {},
+  ...change2.conflicted !== void 0 ? { conflicted: change2.conflicted } : {},
+  ...change2.conflictedFiles ? { conflictedFiles: [...change2.conflictedFiles] } : {},
   ...change2.parents ? { parents: [...change2.parents] } : {}
 });
 var copyPage = (page) => ({
@@ -765,7 +772,7 @@ function string(value, max = 32768) {
   return typeof value === "string" && value.length <= max;
 }
 function change(value) {
-  return object(value) && string(value.sha, 128) && !!value.sha && string(value.shortSha, 128) && string(value.subject) && string(value.author, 4096) && string(value.date, 1024) && (value.changeId === void 0 || string(value.changeId, 128)) && (value.description === void 0 || string(value.description, 65536)) && (value.parents === void 0 || Array.isArray(value.parents) && value.parents.length <= 1024 && value.parents.every((parent) => string(parent, 128)));
+  return object(value) && string(value.sha, 128) && !!value.sha && string(value.shortSha, 128) && string(value.subject) && string(value.author, 4096) && string(value.date, 1024) && (value.changeId === void 0 || string(value.changeId, 128)) && (value.description === void 0 || string(value.description, 65536)) && (value.conflicted === void 0 || typeof value.conflicted === "boolean") && (value.conflictedFiles === void 0 || Array.isArray(value.conflictedFiles) && value.conflictedFiles.length <= 1024 && value.conflictedFiles.every((file) => string(file, 4096))) && (value.parents === void 0 || Array.isArray(value.parents) && value.parents.length <= 1024 && value.parents.every((parent) => string(parent, 128)));
 }
 function cachedPage(value) {
   return object(value) && string(value.repository) && string(value.root) && string(value.path) && string(value.anchor, 1048576) && Number.isSafeInteger(value.offset) && Number(value.offset) >= 0 && Number.isSafeInteger(value.limit) && Number(value.limit) > 0 && Number(value.limit) <= 5e3 && object(value.page) && typeof value.page.hasMore === "boolean" && Array.isArray(value.page.changes) && value.page.changes.length <= Number(value.limit) && value.page.changes.every(change);
@@ -904,9 +911,11 @@ var REPOSITORY_HISTORY_ICON = "git-branch";
 // src/repositoryRemote.ts
 var import_child_process4 = require("child_process");
 var CommandError = class extends Error {
-  constructor(message, code) {
+  constructor(message, code, output = "", interrupted = false) {
     super(message);
     this.code = code;
+    this.output = output;
+    this.interrupted = interrupted;
   }
 };
 function command2(tool, cwd, args, signal, input) {
@@ -919,10 +928,15 @@ function command2(tool, cwd, args, signal, input) {
       timeout: 12e4,
       maxBuffer: 8 * 1024 * 1024,
       signal,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_MERGE_AUTOEDIT: "no", SSH_ASKPASS_REQUIRE: "never" }
+      env: { ...process.env, LC_ALL: "C", GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never", GIT_MERGE_AUTOEDIT: "no", SSH_ASKPASS_REQUIRE: "never" }
     }, (error2, out, err) => {
       var _a2;
-      return error2 ? reject(new CommandError(String(err || error2.message).trim(), (_a2 = error2.code) != null ? _a2 : void 0)) : resolve3(out);
+      return error2 ? reject(new CommandError(
+        String(err || out || error2.message).trim(),
+        (_a2 = error2.code) != null ? _a2 : void 0,
+        out,
+        !!error2.killed || error2.name === "AbortError"
+      )) : resolve3(out);
     });
     (_a = child.stdin) == null ? void 0 : _a.on("error", () => {
     });
@@ -954,8 +968,13 @@ var quote = (value) => JSON.stringify(value);
 var remoteRev = (target) => `remote_bookmarks(exact:${quote(target.branch)}, exact:${quote(target.remote)})`;
 var divergent = () => new Error("Local and remote changes have diverged. Resolve the history with your VCS before syncing.");
 async function bookmarks(ctx, signal) {
-  const template = 'json({"name" => name, "remote" => remote, "sha" => if(!conflict && present, normal_target.commit_id(), ""), "conflict" => conflict, "tracked" => tracked}) ++ "\\n"';
-  return lines(await jj3(ctx, ["bookmark", "list", "--all-remotes", "-T", template], signal)).map((line) => JSON.parse(line));
+  const template = 'json({"name" => name, "remote" => remote, "conflict" => conflict, "tracked" => tracked}) ++ "\\t" ++ added_targets.map(|c| if(c, c.commit_id(), "")).join(",") ++ "\\n"';
+  return lines(await jj3(ctx, ["bookmark", "list", "--all-remotes", "-T", template], signal)).map((line) => {
+    const [metadata, ids = ""] = line.split("	");
+    if (!metadata.startsWith("{")) throw new Error(`Unable to read Jujutsu bookmark state: ${metadata}`);
+    const ref = JSON.parse(metadata), targets = ids.split(",").filter(Boolean);
+    return { ...ref, targets, sha: !ref.conflict && targets.length === 1 ? targets[0] : null };
+  });
 }
 async function getRepositoryRemotes(ctx, signal) {
   var _a;
@@ -963,20 +982,22 @@ async function getRepositoryRemotes(ctx, signal) {
   if (ctx.backend === "jj") {
     const refs2 = await bookmarks(ctx, signal);
     const branches2 = [...new Set(refs2.filter((ref) => ref.remote !== "git").map((ref) => ref.name))].sort();
-    const ancestors = new Set(lines(await jj3(ctx, ["log", "-G", "-r", "heads((bookmarks() | remote_bookmarks()) & ancestors(@-))", "-T", 'commit_id ++ "\\n"'], signal)));
-    const nearby = refs2.filter((ref) => !ref.conflict && ref.sha && ancestors.has(ref.sha) && ref.remote !== "git");
+    const ancestors = new Set(lines(await jj3(ctx, ["log", "-G", "-r", "heads((bookmarks() | remote_bookmarks()) & ancestors(@))", "-T", 'commit_id ++ "\\n"'], signal)));
+    const nearby = refs2.filter((ref) => ref.targets.some((sha) => ancestors.has(sha)) && ref.remote !== "git");
     const names = new Set(nearby.map((ref) => ref.name));
-    const tracked = refs2.filter((ref) => names.has(ref.name) && !ref.conflict && ref.remote && ref.tracked && remotes.includes(ref.remote));
+    const allTracked = refs2.filter((ref) => ref.remote && ref.remote !== "git" && ref.tracked && remotes.includes(ref.remote));
+    const tracked = allTracked.filter((ref) => names.has(ref.name));
     const unique = [...new Map(tracked.map((ref) => [`${ref.remote}\0${ref.name}`, { remote: ref.remote, branch: ref.name }])).values()];
     if (!unique.length && await git2(ctx, ["rev-parse", "--is-bare-repository"], signal) === "false") {
       const configured = await getRepositoryRemotes({ ...ctx, backend: "git" }, signal);
-      if (configured.currentBranch)
-        return { remotes, branches: branches2, suggested: names.has(configured.currentBranch) ? configured.suggested : void 0 };
+      if (configured.currentBranch && names.has(configured.currentBranch) && configured.suggested)
+        return { remotes, branches: branches2, suggested: configured.suggested };
       const upstreams = lines(await git2(ctx, ["for-each-ref", "--format=%(refname:short)%00%(upstream:remotename)%00%(upstream:remoteref)", "refs/heads"], signal)).map((line) => line.split("\0")).filter(([name, remote, ref]) => names.has(name) && remotes.includes(remote) && (ref == null ? void 0 : ref.startsWith("refs/heads/"))).map(([, remote, ref]) => ({ remote, branch: ref.slice(11) }));
       const choices = [...new Map(upstreams.map((target) => [`${target.remote}\0${target.branch}`, target])).values()];
       if (choices.length === 1) return { remotes, branches: branches2, suggested: choices[0] };
     }
-    return { remotes, branches: branches2, suggested: unique.length === 1 ? unique[0] : void 0 };
+    const fallback = [...new Map(allTracked.map((ref) => [`${ref.remote}\0${ref.name}`, { remote: ref.remote, branch: ref.name }])).values()];
+    return { remotes, branches: branches2, suggested: unique.length === 1 ? unique[0] : !unique.length && fallback.length === 1 ? fallback[0] : void 0 };
   }
   const currentBranch = await optional(git2(ctx, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal));
   const refs = lines(await git2(ctx, ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], signal));
@@ -1000,8 +1021,131 @@ async function getRepositoryRemotes(ctx, signal) {
 }
 async function trackedRemote(ctx, signal) {
   const options = await getRepositoryRemotes(ctx, signal);
+  if (!options.suggested && ctx.backend !== "jj") {
+    const operation = await gitOperation(ctx, signal);
+    if (operation) throw new Error(`Finish or abort the current ${operation} before syncing. Its state was preserved.`);
+  }
   if (!options.suggested) throw new Error(ctx.backend === "jj" ? "No unique tracked remote bookmark. Configure tracking in Jujutsu before syncing." : "The current branch has no remote upstream. Configure tracking in Git before syncing.");
   return options.suggested;
+}
+async function gitOperation(ctx, signal) {
+  const status = await git2(ctx, ["status", "--untracked-files=no"], signal);
+  if (/rebase in progress|currently rebasing/i.test(status)) return "rebase";
+  if (/currently cherry-picking/i.test(status)) return "cherry-pick";
+  if (/currently reverting/i.test(status)) return "revert";
+  if (/unmerged paths|still merging/i.test(status)) return "merge";
+  return void 0;
+}
+async function repositoryRemoteHealth(ctx, signal) {
+  const health = {
+    kind: "unknown",
+    summary: "Remote status unavailable",
+    ahead: 0,
+    behind: 0,
+    hints: [],
+    refs: [],
+    conflicts: [],
+    files: []
+  };
+  try {
+    const options = await getRepositoryRemotes(ctx, signal), target = health.target = options.suggested;
+    let local = "", incoming = "", operation, bookmarkIssue = false, needsAlignment = false, unrelated = false;
+    if (ctx.backend === "jj") {
+      const [refs, working, conflicts] = await Promise.all([
+        bookmarks(ctx, signal),
+        jj3(ctx, ["log", "-G", "-r", "@", "-T", 'json({"sha" => commit_id, "parents" => parents.map(|c| c.commit_id()), "files" => conflicted_files.map(|f| f.path())})'], signal),
+        jj3(ctx, ["log", "-G", "-r", `conflicts() & (ancestors(@)${target ? ` | ancestors(bookmarks(exact:${quote(target.branch)}))` : ""})`, "-T", 'commit_id ++ "\\n"'], signal)
+      ]);
+      const current = JSON.parse(working);
+      health.files = current.files;
+      health.conflicts = lines(conflicts);
+      if (current.parents.length === 1) local = current.parents[0];
+      else operation = "merge with multiple working-copy parents";
+      if (local) health.refs.push({ name: "Workcopy parent", sha: local });
+      for (const ref of refs.filter((ref2) => !ref2.remote)) for (const sha of ref.targets)
+        health.refs.push({ name: ref.name, sha, conflicted: ref.conflict });
+      if (target) {
+        const bookmark = refs.find((ref) => ref.name === target.branch && !ref.remote);
+        const remote = refs.find((ref) => ref.name === target.branch && ref.remote === target.remote);
+        bookmarkIssue = !!(bookmark == null ? void 0 : bookmark.conflict) || !!(remote == null ? void 0 : remote.conflict);
+        if (remote) for (const sha of remote.targets)
+          health.refs.push({ name: `${remote.remote}/${remote.name}`, sha, conflicted: remote.conflict });
+        incoming = (remote == null ? void 0 : remote.sha) || "";
+        needsAlignment = !(bookmark == null ? void 0 : bookmark.sha) || incoming === local && bookmark.sha !== local;
+      }
+    } else {
+      const [head2, activeOperation, files] = await Promise.all([
+        gitHead(ctx, signal),
+        gitOperation(ctx, signal),
+        git2(ctx, ["diff", "--name-only", "--diff-filter=U", "-z"], signal, true)
+      ]);
+      local = head2;
+      operation = activeOperation;
+      health.files = files.split("\0").filter(Boolean);
+      if (local) health.refs.push({ name: options.currentBranch || "Detached HEAD", sha: local });
+      if (options.trackingRef) incoming = await optional(git2(ctx, ["rev-parse", "--verify", "--quiet", options.trackingRef], signal));
+      if (target && incoming) health.refs.push({ name: `${target.remote}/${target.branch}`, sha: incoming });
+      if (!options.currentBranch && !operation) operation = "detached HEAD";
+    }
+    if (local && incoming) {
+      try {
+        const counts = /^0+$/.test(local) ? `0 ${await git2(ctx, ["rev-list", "--count", incoming], signal)}` : await git2(ctx, ["rev-list", "--left-right", "--count", `${local}...${incoming}`], signal);
+        [health.ahead, health.behind] = counts.split(/\s+/).map(Number);
+      } catch (error2) {
+        if (!(error2 instanceof CommandError) || !/no merge base/i.test(error2.message)) throw error2;
+        unrelated = true;
+        const counts = await Promise.all([
+          git2(ctx, ["rev-list", "--count", `${incoming}..${local}`], signal),
+          git2(ctx, ["rev-list", "--count", `${local}..${incoming}`], signal)
+        ]);
+        [health.ahead, health.behind] = counts.map(Number);
+      }
+    }
+    if (health.ahead && health.behind && !unrelated)
+      unrelated = !await optional(git2(ctx, ["merge-base", local, incoming], signal));
+    const destination = target ? `${target.remote}/${target.branch}` : "remote";
+    if (operation) {
+      health.kind = "blocked";
+      health.summary = `${operation === "detached HEAD" ? "Detached HEAD" : `Unfinished ${operation}`} \xB7 sync needs attention`;
+      health.hints.push(operation === "detached HEAD" ? "Switch to the intended local branch before syncing." : "Finish or abort the current operation in your VCS, then refresh this panel. Push and Pull preserve that operation.");
+    } else if (health.conflicts.length || health.files.length) {
+      health.kind = "conflict";
+      health.summary = "Unresolved file conflicts";
+      health.hints.push("Open VCS Pending Changes to inspect conflicted files. Resolve them before syncing; conflicts in an earlier change must be resolved in that change.");
+    } else if (!target) {
+      health.kind = "untracked";
+      health.summary = ctx.backend === "jj" ? "No unique tracked remote bookmark" : "No remote upstream configured";
+      health.hints.push("Configure the intended upstream in your VCS. Multiple tracked destinations require a bookmark related to the Workcopy.");
+    } else if (!incoming) {
+      health.kind = "blocked";
+      health.summary = `Tracked reference unavailable \xB7 ${destination}`;
+      health.hints.push("Pull to refresh the tracked reference. If the remote branch was removed, configure its replacement in your VCS.");
+    } else if (unrelated) {
+      health.kind = "blocked";
+      health.summary = `Local and remote history have no common ancestor \xB7 ${destination}`;
+      health.hints.push("Inspect this remote rewrite or unrelated branch in your VCS before integrating it. The local histories are retained.");
+    } else if (bookmarkIssue) {
+      health.kind = "conflict";
+      health.summary = `Bookmark targets conflict \xB7 ${destination}`;
+      health.hints.push("Pull can reconcile a single unpublished local line and realign the tracked bookmark. Independent branches or published rewrites require VCS resolution first.");
+    } else if (health.ahead && health.behind) {
+      health.kind = "diverged";
+      health.summary = `Diverged \xB7 ${health.ahead} local / ${health.behind} incoming \xB7 ${destination}`;
+      health.hints.push(ctx.backend === "jj" ? "Pull can rebase a single unpublished local line when all changes apply cleanly, then align the bookmark. Shared branches and unresolved conflicts are preserved for manual resolution." : "Integrate the two histories with a Git merge or rebase, then retry. Pull fetches updates but only fast-forwards the local branch.");
+    } else if (needsAlignment) {
+      health.kind = "blocked";
+      health.summary = `Bookmark needs alignment \xB7 ${destination}`;
+      health.hints.push("Pull will align the bookmark with the latest finalized change when all of its targets are accounted for. Pending Workcopy edits stay unpublished.");
+    } else {
+      health.kind = health.ahead ? "ahead" : health.behind ? "behind" : "ready";
+      health.summary = `${destination} \xB7 ${health.ahead ? `${health.ahead} local to push` : health.behind ? `${health.behind} incoming to pull` : "Up to date"}`;
+    }
+    return health;
+  } catch (error2) {
+    if (signal == null ? void 0 : signal.aborted) throw error2;
+    health.hints.push(String(error2.message || error2));
+    return health;
+  }
 }
 async function repositorySyncState(ctx, revisions, signal) {
   const ids = [...new Set(revisions)];
@@ -1092,6 +1236,66 @@ async function protectUntrackedJjFiles(ctx, affected, signal) {
       throw new Error("Incoming changes overlap untracked or ignored files. Move or record those files before pulling.");
   }
 }
+async function previewJjRebase(ctx, incoming, working, target, signal) {
+  const chain = lines(await git2(ctx, ["rev-list", "--reverse", "--parents", `${incoming}..${working}`], signal)).map((line) => line.split(" "));
+  if (!chain.length) throw new Error("The working change is no longer available. Refresh before pulling.");
+  if (chain.length > 1 && !await optional(git2(ctx, ["merge-base", incoming, working], signal)))
+    throw new Error("The local and remote histories have no common ancestor. Inspect this remote rewrite or unrelated branch in your VCS before integrating it.");
+  const rewritten = new Set(chain.map(([sha]) => sha));
+  for (let i = 0; i < chain.length; i++) if (chain[i].length > 2 || i && chain[i][1] !== chain[i - 1][0])
+    throw new Error("Local history has independent branches or merges. Integrate those histories with Jujutsu, then retry Pull.");
+  const set = [...rewritten].join(" | ");
+  const [shared, descendants, refs] = await Promise.all([
+    jj3(ctx, ["log", "-G", "-r", `(${set}) & (immutable() | ancestors(remote_bookmarks()))`, "-n", "1", "-T", "commit_id"], signal),
+    jj3(ctx, ["log", "-G", "-r", `(${chain[0][0]}::) ~ (${set})`, "-n", "1", "-T", "commit_id"], signal),
+    bookmarks(ctx, signal)
+  ]);
+  if (shared) throw new Error("Local history includes published or immutable changes. Reconcile that shared history in your VCS before pulling.");
+  if (descendants || refs.some((ref) => !ref.remote && ref.name !== target.branch && ref.targets.some((sha) => rewritten.has(sha))))
+    throw new Error("Local changes also belong to another branch. Integrate those histories with Jujutsu, then retry Pull.");
+  const incomingPaths = (chain[0][1] ? await git2(ctx, ["diff", "--name-only", "-z", "--no-renames", chain[0][1], incoming, "--"], signal, true) : await git2(ctx, ["ls-tree", "-r", "--name-only", "-z", incoming], signal, true)).split("\0").filter(Boolean);
+  let parent = incoming;
+  for (const [sha, previous] of chain) {
+    const changes = lines(await jj3(ctx, ["diff", "-r", sha, "-T", 'json({"path" => path, "source" => source.path(), "status" => status_char}) ++ "\\n"'], signal)).map((line) => JSON.parse(line));
+    const overlap = changes.find((change2) => (sha === working || change2.status === "R" || change2.status === "C") && incomingPaths.some((path5) => overlaps(change2.path, path5) || overlaps(change2.source, path5)));
+    if (overlap) throw new Error(`Incoming changes overlap ${sha === working ? "pending files" : "a local rename"}: ${overlap.path}. Resolve or finalize those edits before pulling. The Workcopy was preserved.`);
+    const base = previous || await git2(ctx, ["mktree"], signal, false, "");
+    let merged;
+    try {
+      merged = await git2(ctx, ["merge-tree", "--write-tree", "--name-only", "-z", `--merge-base=${base}`, parent, sha], signal, true);
+    } catch (error2) {
+      if (error2 instanceof CommandError && error2.code === 1) {
+        const fields2 = error2.output.split("\0"), end = fields2.indexOf("", 1);
+        const names = fields2.slice(1, end < 0 ? 9 : Math.min(end, 9)).join(", ");
+        throw new Error(sha === working ? `Incoming changes overlap pending files${names ? ": " + names : ""}. Create a change or resolve those edits before pulling. The Workcopy was preserved.` : `Incoming changes conflict with local history${names ? ": " + names : ""}. Local history and Workcopy were preserved. Resolve the divergence with your VCS, then retry Pull.`);
+      }
+      throw error2;
+    }
+    const tree = merged.split("\0")[0].trim();
+    if (!/^[0-9a-f]{40,64}$/.test(tree)) throw new Error("Unable to preview the incoming changes safely. Integrate them with your VCS.");
+    parent = await git2(ctx, [
+      "-c",
+      "user.name=Change Review",
+      "-c",
+      "user.email=change-review@localhost",
+      "-c",
+      "commit.gpgsign=false",
+      "commit-tree",
+      tree,
+      "-p",
+      parent
+    ], signal, false, "Change Review integration preview\n");
+  }
+  return { root: chain[0][0], rewritten, count: chain.length - 1 };
+}
+async function alignJjBookmark(ctx, target, tip, rewritten, signal) {
+  const local = (await bookmarks(ctx, signal)).find((ref) => ref.name === target.branch && !ref.remote);
+  const working = await jj3(ctx, ["log", "-G", "-r", "@", "-T", "commit_id"], signal);
+  for (const sha of (local == null ? void 0 : local.targets) || []) if (sha !== working && !rewritten.has(sha) && !await isAncestor(ctx, sha, tip, signal))
+    throw new Error(`Bookmark ${target.branch} has an independent target at ${sha.slice(0, 8)}. Its history was preserved; reconcile the bookmark in Jujutsu before syncing.`);
+  await jj3(ctx, ["bookmark", "set", target.branch, "-r", tip, "--allow-backwards"], signal, true);
+  await jj3(ctx, ["bookmark", "track", exact(target.branch), "--remote", exact(target.remote)], signal, true);
+}
 async function pushRepository(ctx, target, signal, revision) {
   return withRepositoryMutation(ctx, async () => {
     await validateTarget(ctx, target, signal);
@@ -1105,39 +1309,52 @@ async function pushRepository(ctx, target, signal, revision) {
       sha = revision || tip;
       if (!await isAncestor(ctx, sha, tip, signal)) throw new Error("The selected change is not an ancestor of the latest finalized change.");
       const local = (await bookmarks(ctx, signal)).find((ref) => ref.name === target.branch && !ref.remote);
-      if (local == null ? void 0 : local.conflict) throw divergent();
-      if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, tip, signal)) throw new Error("The selected branch is not an ancestor of the latest finalized change.");
-      keepLocalBookmark = !!(local == null ? void 0 : local.sha) && await isAncestor(ctx, sha, local.sha, signal);
+      if (local == null ? void 0 : local.conflict) throw new Error("The tracked bookmark has conflicting targets. Pull to reconcile it before pushing.");
+      const working = await jj3(ctx, ["log", "-G", "-r", "@", "-T", "commit_id"], signal);
+      if ((local == null ? void 0 : local.sha) && local.sha !== working && !await isAncestor(ctx, local.sha, tip, signal)) throw new Error("The selected branch is not an ancestor of the latest finalized change. Pull to inspect and reconcile its targets.");
+      keepLocalBookmark = !!(local == null ? void 0 : local.sha) && local.sha !== working && await isAncestor(ctx, sha, local.sha, signal);
       const conflicts = await jj3(ctx, ["log", "-G", "-r", `ancestors(${sha}) & conflicts()`, "-n", "1", "-T", "commit_id"], signal);
       if (conflicts) throw new Error("Resolve conflicts before pushing.");
     } else {
+      const operation = await gitOperation(ctx, signal);
+      if (operation) throw new Error(`Finish or abort the current ${operation} before pushing. Its state was preserved.`);
       await gitBranch(ctx, signal);
       const tip = await gitHead(ctx, signal);
       if (!tip) throw new Error("Create a change before pushing.");
       sha = revision || tip;
       if (!await isAncestor(ctx, sha, tip, signal)) throw new Error("The selected change is not an ancestor of the current branch.");
     }
-    await git2(ctx, [
-      "-c",
-      `remote.${target.remote}.mirror=false`,
-      "push",
-      "--porcelain",
-      "--no-force",
-      "--no-follow-tags",
-      "--recurse-submodules=no",
-      "--",
-      target.remote,
-      `${sha}:refs/heads/${target.branch}`
-    ], signal);
+    try {
+      await git2(ctx, [
+        "-c",
+        `remote.${target.remote}.mirror=false`,
+        "push",
+        "--porcelain",
+        "--no-force",
+        "--no-follow-tags",
+        "--recurse-submodules=no",
+        "--",
+        target.remote,
+        `${sha}:refs/heads/${target.branch}`
+      ], signal);
+    } catch (error2) {
+      if (error2 instanceof CommandError && error2.interrupted)
+        throw new Error("Push was interrupted. The remote may already have accepted the changes. Pull or inspect the remote before retrying.\n" + error2.message);
+      throw error2;
+    }
     if (ctx.backend === "jj") {
       try {
         await jj3(ctx, ["git", "import"]);
-        if (!keepLocalBookmark) await jj3(ctx, ["bookmark", "set", target.branch, "-r", sha], void 0, true);
+        if (!keepLocalBookmark) {
+          const tip = await workingParent(ctx);
+          await alignJjBookmark(ctx, target, revision ? tip : sha, /* @__PURE__ */ new Set());
+        }
         const refs = await bookmarks(ctx);
         if (refs.some((ref) => ref.name === target.branch && ref.remote === target.remote))
           await jj3(ctx, ["bookmark", "track", exact(target.branch), "--remote", exact(target.remote)], void 0, true);
       } catch (error2) {
-        throw new Error(`Push succeeded, but local branch tracking needs attention: ${String(error2.message)}`);
+        return { message: `Push to ${target.remote}/${target.branch} succeeded. Local tracking needs attention; refresh and retry Pull.
+${String(error2.message)}`, attention: true };
       }
     }
     return { message: `Pushed to ${target.remote}/${target.branch}.` };
@@ -1145,52 +1362,69 @@ async function pushRepository(ctx, target, signal, revision) {
 }
 async function pullRepository(ctx, target, signal) {
   return withRepositoryMutation(ctx, async () => {
+    var _a;
     await validateTarget(ctx, target, signal);
     if (ctx.backend !== "jj") {
-      await gitBranch(ctx, signal);
-      const before2 = await gitHead(ctx, signal);
-      if (await optional(git2(ctx, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], signal))) throw new Error("Finish the current merge before pulling.");
+      const operation = await gitOperation(ctx, signal);
+      if (operation) throw new Error(`Finish or abort the current ${operation} before pulling. Its state was preserved.`);
+      const branch = await gitBranch(ctx, signal);
+      const before = await gitHead(ctx, signal);
       await git2(ctx, ["fetch", "--no-tags", "--no-recurse-submodules", "--", target.remote, `refs/heads/${target.branch}`], signal);
-      const incoming2 = await git2(ctx, ["rev-parse", "--verify", "FETCH_HEAD"], signal);
-      if (before2 && !await isAncestor(ctx, before2, incoming2, signal)) {
-        if (await isAncestor(ctx, incoming2, before2, signal)) return { message: `Already up to date with ${target.remote}/${target.branch}.` };
-        throw divergent();
+      const incoming = await git2(ctx, ["rev-parse", "--verify", "FETCH_HEAD"], signal);
+      if (before && !await isAncestor(ctx, before, incoming, signal)) {
+        if (await isAncestor(ctx, incoming, before, signal)) return { message: `Already up to date with ${target.remote}/${target.branch}.` };
+        throw new Error(`Fetched ${target.remote}/${target.branch}. ${divergent().message} Merge or rebase the local branch, then retry. No local commits or files were changed.`);
       }
-      await git2(ctx, ["-c", "merge.autoStash=false", "merge", "--ff-only", "--no-edit", "--no-autostash", "--no-overwrite-ignore", incoming2], signal);
-      return { message: before2 === incoming2 ? `Already up to date with ${target.remote}/${target.branch}.` : `Pulled from ${target.remote}/${target.branch}.` };
+      if (await gitBranch(ctx, signal) !== branch || await gitHead(ctx, signal) !== before)
+        throw new Error("Fetched updates, but the local branch changed during Pull. Refresh before retrying.");
+      try {
+        await git2(ctx, ["-c", "merge.autoStash=false", "merge", "--ff-only", "--no-edit", "--no-autostash", "--no-overwrite-ignore", incoming], signal);
+      } catch (error2) {
+        throw new Error(`Fetched ${target.remote}/${target.branch}, but the incoming changes were not integrated.
+${String(error2.message)}`);
+      }
+      return { message: before === incoming ? `Already up to date with ${target.remote}/${target.branch}.` : `Pulled from ${target.remote}/${target.branch}.` };
     }
     await jj3(ctx, ["util", "snapshot"], signal, true);
-    const before = await workingParent(ctx, signal);
+    await workingParent(ctx, signal);
     const initialRefs = await bookmarks(ctx, signal);
-    if (initialRefs.some((ref) => ref.name === target.branch && ref.conflict)) throw divergent();
-    const local = initialRefs.find((ref) => ref.name === target.branch && !ref.remote);
-    if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, before, signal) && !await isAncestor(ctx, before, local.sha, signal))
-      throw new Error("The selected branch is not an ancestor of the working change.");
-    if (await jj3(ctx, ["log", "-G", "-r", "(@:: ~ @) | (@ & conflicts())", "-n", "1", "-T", "commit_id"], signal))
+    if (await jj3(ctx, ["log", "-G", "-r", "(@:: ~ @) | (ancestors(@) & conflicts())", "-n", "1", "-T", "commit_id"], signal))
       throw new Error("Finish the current change or resolve its conflicts before pulling.");
     await jj3(ctx, ["git", "fetch", "--remote", exact(target.remote), "--branch", exact(target.branch)], signal, true);
-    const incoming = await jj3(ctx, ["log", "-G", "-r", remoteRev(target), "-T", "commit_id"], signal);
-    if (!incoming) throw new Error("The remote branch was not found.");
-    if ((local == null ? void 0 : local.sha) && !await isAncestor(ctx, local.sha, incoming, signal) && !await isAncestor(ctx, local.sha, before, signal))
-      throw new Error("The selected branch has finalized changes beyond the working change.");
-    if (!await isAncestor(ctx, before, incoming, signal)) {
-      if (await isAncestor(ctx, incoming, before, signal)) return { message: `Already up to date with ${target.remote}/${target.branch}.` };
-      throw divergent();
+    let integrated = false;
+    try {
+      const incoming = await jj3(ctx, ["log", "-G", "-r", remoteRev(target), "-T", "commit_id"], signal);
+      if (!/^[0-9a-f]{40,64}$/.test(incoming)) throw new Error("The remote branch is absent or has conflicting targets. Inspect its tracking in Jujutsu.");
+      const previousRemote = (_a = initialRefs.find((ref) => ref.name === target.branch && ref.remote === target.remote)) == null ? void 0 : _a.sha;
+      if (previousRemote && !await isAncestor(ctx, previousRemote, incoming, signal))
+        throw new Error("The remote branch was rewritten. Inspect the old and new histories in your VCS before integrating them.");
+      const before = await workingParent(ctx, signal);
+      const working = await jj3(ctx, ["log", "-G", "-r", "@", "-T", "commit_id"], signal);
+      const local = (await bookmarks(ctx, signal)).find((ref) => ref.name === target.branch && !ref.remote);
+      for (const sha of (local == null ? void 0 : local.targets) || []) if (sha !== working && !await isAncestor(ctx, sha, before, signal) && !await isAncestor(ctx, sha, incoming, signal))
+        throw new Error("The selected bookmark has finalized changes beyond the working change. Reconcile that independent branch in Jujutsu.");
+      let rewritten = /* @__PURE__ */ new Set(), count = 0;
+      const ahead = await isAncestor(ctx, incoming, before, signal);
+      if (!ahead) {
+        const affected = /^0+$/.test(before) ? (await git2(ctx, ["ls-tree", "-r", "--name-only", "-z", incoming], signal, true)).split("\0").filter(Boolean) : (await git2(ctx, ["diff", "--name-only", "-z", "--no-renames", before, incoming, "--"], signal, true)).split("\0").filter(Boolean);
+        await protectUntrackedJjFiles(ctx, affected, signal);
+        const operation = await jj3(ctx, ["op", "log", "-G", "-n", "1", "-T", "id"], signal);
+        const plan = await previewJjRebase(ctx, incoming, working, target, signal);
+        if (await jj3(ctx, ["log", "-G", "-r", "@", "-T", "commit_id"], signal) !== working || await jj3(ctx, ["log", "-G", "-r", remoteRev(target), "-T", "commit_id"], signal) !== incoming || await jj3(ctx, ["op", "log", "-G", "-n", "1", "-T", "id"], signal) !== operation)
+          throw new Error("The repository changed during Pull. Refresh before retrying.");
+        await jj3(ctx, ["rebase", "-s", plan.root, "-o", incoming], signal, true);
+        integrated = true;
+        rewritten = plan.rewritten;
+        count = plan.count;
+        if (await jj3(ctx, ["log", "-G", "-r", "ancestors(@) & conflicts()", "-n", "1", "-T", "commit_id"], signal))
+          throw new Error("Integration produced file conflicts. Inspect VCS Pending Changes and the marked history entries before syncing again.");
+      }
+      await alignJjBookmark(ctx, target, await workingParent(ctx, signal), rewritten, signal);
+      return { message: `${ahead ? "Already up to date with" : "Pulled from"} ${target.remote}/${target.branch}.` + (count ? ` Rebased ${count} local ${count === 1 ? "change" : "changes"} and preserved Workcopy.` : "") + ` Aligned bookmark ${target.branch} with the latest finalized change.` };
+    } catch (error2) {
+      throw new Error(`Fetched ${target.remote}/${target.branch}. ${integrated ? "The Workcopy was rebased, but synchronization needs attention." : "Integration stopped; local history and Workcopy were preserved."}
+${String(error2.message)}`);
     }
-    if (before !== incoming) {
-      const pending = lines(await jj3(ctx, ["diff", "-r", "@", "-T", 'json({"path" => path, "source" => source.path()}) ++ "\\n"'], signal)).flatMap((line) => {
-        const entry = JSON.parse(line);
-        return [entry.path, entry.source];
-      });
-      const affected = /^0+$/.test(before) ? (await git2(ctx, ["ls-tree", "-r", "--name-only", "-z", incoming], signal, true)).split("\0").filter(Boolean) : (await git2(ctx, ["diff", "--name-only", "-z", "--no-renames", before, incoming, "--"], signal, true)).split("\0").filter(Boolean);
-      if (pending.some((file) => affected.some((changed) => overlaps(file, changed))))
-        throw new Error("Incoming changes overlap pending files. Create a change or finish reviewing those files before pulling.");
-      await protectUntrackedJjFiles(ctx, affected, signal);
-      await jj3(ctx, ["rebase", "-r", "@", "-o", incoming], signal, true);
-    }
-    await jj3(ctx, ["bookmark", "set", target.branch, "-r", incoming], signal, true);
-    await jj3(ctx, ["bookmark", "track", exact(target.branch), "--remote", exact(target.remote)], signal, true);
-    return { message: before === incoming ? `Already up to date with ${target.remote}/${target.branch}.` : `Pulled from ${target.remote}/${target.branch}.` };
   });
 }
 
@@ -1225,6 +1459,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     this.status = null;
     this.pendingCount = 0;
     this.syncState = { synced: [], warning: "" };
+    this.remoteHealth = null;
     this.body = null;
     this.footer = null;
     this.back = null;
@@ -1303,6 +1538,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     this.error = "";
     this.pendingCount = 0;
     this.syncState = { synced: [], warning: "" };
+    this.remoteHealth = null;
     await this.loadRoute(false, route.kind === "changes" ? route.paths : void 0);
   }
   async refresh() {
@@ -1345,6 +1581,10 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     (_a = this.job) == null ? void 0 : _a.abort();
     const job = this.job = new AbortController(), generation = ++this.generation;
     const current = () => !this.closed && generation === this.generation;
+    const healthJob = repositoryRemoteHealth(route.context, job.signal).then((health) => {
+      if (current()) this.remoteHealth = health;
+    }, () => {
+    });
     this.loading = true;
     this.error = "";
     if (!append) this.render();
@@ -1405,6 +1645,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     } catch (error2) {
       if (current() && !job.signal.aborted) this.error = errorMessage(error2);
     } finally {
+      await healthJob;
       if (current()) {
         this.loading = false;
         this.render();
@@ -1449,6 +1690,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       const location = root.createDiv({ cls: "lgd-repository-location", text: context, attr: { title: route.context.workspaceRoot || route.context.root } });
       heading.oncontextmenu = location.oncontextmenu = (event) => this.remoteMenu(event);
     }
+    this.renderRemoteHealth(root);
     if ((route == null ? void 0 : route.kind) === "log" || (route == null ? void 0 : route.kind) === "changes") {
       const filter = route.kind === "changes" ? root.createDiv({ cls: "lgd-repository-filter-row" }) : root;
       this.query = filter.createEl("input", { cls: "lgd-history-filter", type: "search", placeholder: route.kind === "log" ? "Filter loaded changes" : "Filter files", attr: { "aria-label": route.kind === "log" ? "Filter loaded changes" : "Filter files" } });
@@ -1490,8 +1732,37 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
     this.body.scrollTop = ((_b = this.state) == null ? void 0 : _b.scroll) || 0;
     this.setMutationDisabled();
   }
+  renderRemoteHealth(root) {
+    var _a, _b;
+    const health = this.remoteHealth, route = this.route;
+    if (!route || !health) return;
+    const outcome = (_b = (_a = this.host).repositorySyncOutcome) == null ? void 0 : _b.call(_a, route.context);
+    const attention = !["ready", "ahead", "behind"].includes(health.kind) || !!(outcome == null ? void 0 : outcome.attention);
+    const panel = root.createDiv({ cls: "lgd-repository-sync-status", attr: { "data-attention": String(attention), role: "status" } });
+    panel.createDiv({ cls: "lgd-history-subject", text: health.summary });
+    if (health.ahead && health.behind && health.kind !== "diverged")
+      panel.createDiv({ cls: "lgd-sub", text: `${health.ahead} local / ${health.behind} incoming changes` });
+    for (const hint of health.hints) panel.createDiv({ cls: "lgd-sub", text: hint });
+    if (health.files.length) {
+      const files = panel.createEl("button", { cls: "lgd-repository-sync-files", text: `${health.files.length} conflicted ${health.files.length === 1 ? "file" : "files"} \xB7 Open Pending Changes`, attr: { type: "button", title: health.files.join("\n") } });
+      files.onclick = () => this.navigate({ kind: "changes", context: route.context });
+    }
+    if (outcome) {
+      const latest = panel.createDiv({ cls: "lgd-repository-sync-outcome", text: `Last ${outcome.action}: ${outcome.message.split("\n")[0]}` });
+      latest.setAttr("title", outcome.message);
+      if (outcome.attention) for (const reason of outcome.message.split("\n").slice(1, 3).filter(Boolean))
+        panel.createDiv({ cls: "lgd-sub", text: reason });
+    }
+    if (attention) {
+      const copy = panel.createEl("button", { cls: "lgd-repository-error-copy", text: "Copy sync details", attr: { type: "button" } });
+      copy.onclick = () => {
+        const text = JSON.stringify({ repository: route.context.workspaceRoot || route.context.root, ...health, lastOperation: outcome }, null, 2);
+        void root.ownerDocument.defaultView.navigator.clipboard.writeText(text).catch(() => new import_obsidian.Notice("Unable to copy sync details."));
+      };
+    }
+  }
   renderBody() {
-    var _a;
+    var _a, _b, _c;
     const body = this.body, route = this.route, state = this.state;
     if (!body) return;
     const scroll = body.scrollTop;
@@ -1519,6 +1790,17 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
         button.createDiv({ cls: "lgd-history-subject", text: change2.subject || "(no description)" });
         button.createDiv({ cls: "lgd-history-meta", text: `${(change2.changeId || change2.shortSha).slice(0, 10)} \xB7 ${change2.author || "Unknown author"}` });
         button.createDiv({ cls: "lgd-history-date", text: displayDate(change2.date), attr: { title: change2.date } });
+        const refs = ((_a = this.remoteHealth) == null ? void 0 : _a.refs.filter((ref) => ref.sha === change2.sha)) || [];
+        const conflicted = change2.conflicted || ((_b = this.remoteHealth) == null ? void 0 : _b.conflicts.includes(change2.sha));
+        if (refs.length || conflicted) {
+          const labels = button.createDiv({ cls: "lgd-repository-refs" });
+          for (const ref of refs) labels.createSpan({
+            cls: "lgd-repository-ref",
+            text: ref.name + (ref.conflicted ? " (conflicted)" : ""),
+            attr: { title: `${ref.name} \xB7 ${ref.sha}`, "data-conflict": String(!!ref.conflicted) }
+          });
+          if (conflicted) labels.createSpan({ cls: "lgd-repository-ref", text: "File conflicts", attr: { "data-conflict": "true" } });
+        }
         button.onclick = () => this.navigate({ kind: "details", context: route.context, sha: change2.sha });
         row.oncontextmenu = (event) => {
           event.preventDefault();
@@ -1547,7 +1829,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       info.createDiv({ cls: "lgd-history-subject", text: change2.description || change2.subject || "(no description)" });
       info.createDiv({ cls: "lgd-history-meta", text: change2.changeId || change2.sha });
       info.createDiv({ cls: "lgd-history-date", text: `${change2.author || "Unknown author"} \xB7 ${displayDate(change2.date)}`, attr: { title: change2.date } });
-      if ((_a = change2.parents) == null ? void 0 : _a.length) {
+      if ((_c = change2.parents) == null ? void 0 : _c.length) {
         const parents = info.createDiv({ cls: "lgd-repository-parents" });
         for (const sha of change2.parents) {
           const parent = parents.createEl("button", { cls: "lgd-repository-parent", text: sha.slice(0, 8), attr: { type: "button", title: "Parent change", "aria-label": `Parent change ${sha.slice(0, 8)}` } });
@@ -1765,7 +2047,7 @@ var GitRepositoryView = class extends import_obsidian.ItemView {
       checkbox.indeterminate = selected > 0 && selected < files.length;
       checkbox.disabled = this.mutating || this.loading;
     }
-    if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count || !((_d = this.state) == null ? void 0 : _d.description.trim());
+    if (this.createButton) this.createButton.disabled = this.mutating || this.loading || !this.status || !count || this.status.files.some((file) => file.status === "U") || !((_d = this.state) == null ? void 0 : _d.description.trim());
     if (this.aiButton) this.aiButton.disabled = !this.aiJob && (this.mutating || this.loading || !count);
   }
   updateFooter() {
@@ -5742,6 +6024,7 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
     this.navigationRequest = 0;
     this.explainRequest = 0;
     this.remoteJobs = /* @__PURE__ */ new Map();
+    this.syncOutcomes = /* @__PURE__ */ new Map();
     this.historicalContext = null;
     this.comparisonChrome = new ComparisonChrome();
     this.worker = new ComparisonWorker();
@@ -6310,6 +6593,9 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       if (!this.disposed) new import_obsidian9.Notice(error2.message, 1e4);
     }
   }
+  repositorySyncOutcome(context) {
+    return this.syncOutcomes.get(context.root);
+  }
   async syncRepository(context, action, revision) {
     var _a, _b, _c;
     if (this.remoteJobs.has(context.root)) throw new Error("A remote operation is already running.");
@@ -6322,15 +6608,19 @@ var LiveGitDiffPlugin = class extends import_obsidian9.Plugin {
       progress = new import_obsidian9.Notice(`${action === "push" ? "Pushing to" : "Pulling from"} ${target.remote}/${target.branch}\u2026`, 0);
       started = true;
       const result = action === "push" ? await pushRepository(context, target, job.signal, revision) : await pullRepository(context, target, job.signal);
+      this.syncOutcomes.set(context.root, { action, message: result.message, attention: !!result.attention });
       if (!this.disposed) new import_obsidian9.Notice(result.message);
+    } catch (error2) {
+      this.syncOutcomes.set(context.root, { action, message: errorMessage(error2), attention: true });
+      throw error2;
     } finally {
       progress == null ? void 0 : progress.hide();
       this.remoteJobs.delete(context.root);
       if (started && !this.disposed) {
         await this.repositoryChanged(context).catch((error2) => warn("Unable to refresh after remote operation", error2));
-        if (((_b = (_a = this.repositoryView()) == null ? void 0 : _a.currentRoute) == null ? void 0 : _b.context.root) === context.root)
-          await ((_c = this.repositoryView()) == null ? void 0 : _c.refresh());
       }
+      if (!this.disposed && ((_b = (_a = this.repositoryView()) == null ? void 0 : _a.currentRoute) == null ? void 0 : _b.context.root) === context.root)
+        await ((_c = this.repositoryView()) == null ? void 0 : _c.refresh());
     }
   }
   scheduleCacheSave() {

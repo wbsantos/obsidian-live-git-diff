@@ -106,9 +106,15 @@ Repository history uses green dots for commits reachable from the tracked remote
 | Action | Git | Jujutsu |
 | --- | --- | --- |
 | Push | Publishes the current branch's committed history to the selected remote branch. | Publishes the finalized parent of the working change and advances the selected bookmark when safe. |
-| Pull | Fetches the selected branch and fast-forwards the current branch. | Fetches the selected branch and moves the pending working change onto its newer history when safe. |
+| Pull | Fetches the selected branch and fast-forwards the current branch. | Fetches the tracked branch, previews integration, and rebases a single unpublished local line plus Workcopy when safe. Aligns the bookmark with the latest finalized change. |
 
-Push never forces a remote update. Pull stops on divergent history or incompatible pending work instead of creating a merge or rewriting finalized changes. Resolve those cases in your VCS, then retry. Authentication failures and remote errors appear in the panel or a notice.
+Push never forces a remote update and keeps pending Workcopy content unpublished, even if a Jujutsu bookmark points directly at Workcopy. In Jujutsu, Pull can reconcile a conflicted bookmark and a single linear set of local changes not present on a remote or marked immutable. It previews each replay before changing the workspace, preserves the working change ID, and aligns the bookmark even after an external rebase has already integrated incoming history. Independent branches, shared history, remote rewrites and incompatible content require resolution in your VCS. Git Pull remains fast-forward only and preserves unfinished merge, rebase, cherry-pick and revert operations.
+
+Pending Workcopy edits that overlap incoming paths, and local renames affected by incoming edits, require explicit review before Pull. This also protects rename sources and paths with spaces. Saved pending edits in other files remain in Workcopy during integration.
+
+Plugin reads and snapshots disable Jujutsu's automatic abandonment of commits made unreachable by imported Git references. External remote rewrites therefore remain available for diagnosis instead of causing an implicit cleanup and rebase while opening a panel.
+
+The repository panel shows the tracked destination and local/incoming counts above the existing list. When attention is needed, it explains the state and retains the last Push/Pull result for this session, including when fetch succeeded but integration stopped. **Copy sync details** copies the diagnostic. History labels identify the local bookmark, remote tip and Workcopy parent; conflicted bookmarks and file conflicts are marked explicitly. Conflicted files, including conflicts inherited by an otherwise empty Workcopy, appear in **VCS Pending Changes**. Change creation stays disabled until those file conflicts are resolved.
 
 For remote backup, create a change and then push it. Pending notes and Jujutsu's local snapshots, evolution log and operation history are not included in a Git remote push. Pull can update files in the vault through the VCS.
 
@@ -195,7 +201,7 @@ The build writes the installable files to `plugin-dist`. See [VALIDATION.md](VAL
 
 ## Scope and limitations
 
-Change Review covers everyday documentation review, selective recording and remote push/pull. It does not provide general branch management, rebase, reset or conflict-resolution controls. Resolve conflicts and finish Git merges outside the plugin. Standard Git hooks run when Git creates a commit.
+Change Review covers everyday documentation review, selective recording and remote push/pull, including the bounded Jujutsu reconciliation described above. It does not provide general branch management, arbitrary rebase, reset or conflict-resolution controls. Resolve conflicts and finish Git operations outside the plugin. Standard Git hooks run when Git creates a commit.
 
 Repository lists and selected changes support non-Markdown files, while rendered comparisons are Markdown-only. Files outside the current vault may appear in repository details but cannot be opened as vault notes. Ignored files are not force-tracked.
 

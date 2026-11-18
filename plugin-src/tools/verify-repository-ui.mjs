@@ -86,6 +86,7 @@ const host={settings:{logLimit:10},
   openRepositoryFile:async(ctx,path,revision)=>calls.push({kind:'file',path,revision}),
   openRepositoryNote:async(ctx,path)=>calls.push({kind:'note',path}),
   navigationBack:()=>calls.push({kind:'back'}),navigationForward:()=>calls.push({kind:'forward'}),navigationState:()=>({back:true,forward:false}),repositoryChanged:async()=>{},
+  repositorySyncOutcome:()=>qa.outcome,
   generateDescription:async(ctx,paths,token,signal)=>qa.generate ? qa.generate(signal) : 'Generated description',
   explainRepository:async(ctx,options)=>calls.push({kind:'explain',...options}),
   syncRepository:async(ctx,action)=>{calls.push({kind:'sync',action,context:ctx});if(qa.syncWait)await qa.syncWait;if(qa.syncError)throw new Error(qa.syncError);}
@@ -274,6 +275,19 @@ async function run(){
   explainRoot.querySelector('[aria-label="Close Explain panel"]').click();await request;
   check('Closing Explain aborts its request and detaches the panel',explainSignal.aborted && detached===1);
   qa.files=[...files];await view.setRoute({kind:'log',context});view.state.query='';view.render();
+  qa.health={kind:'conflict',summary:'Bookmark targets conflict · origin/main',target:{remote:'origin',branch:'main'},ahead:1,behind:1,
+    hints:['Pull can reconcile a single unpublished local line.'],refs:[{name:'main',sha:change(1).sha,conflicted:true},{name:'origin/main',sha:change(2).sha}],conflicts:[change(1).sha],files:['Stories/Checkout.md']};
+  qa.outcome={action:'pull',message:'Fetched origin/main. Integration stopped.\\nIncoming changes conflict with local history: Stories/Checkout.md.',attention:true};
+  await view.refresh();
+  check('Conflicted bookmarks keep history and identify both branch targets',commits().length>=10 && get('.lgd-repository-sync-status').textContent.includes('Bookmark targets conflict') && all('.lgd-repository-ref').some(el=>el.textContent==='main (conflicted)') && all('.lgd-repository-ref').some(el=>el.textContent==='origin/main'));
+  check('File conflicts are visible on history entries',!!get('.lgd-repository-ref[data-conflict="true"]') && all('.lgd-repository-ref').some(el=>el.textContent==='File conflicts'));
+  check('Sync panel retains the fetched outcome and actual reason after refresh',get('.lgd-repository-sync-status').textContent.includes('Incoming changes conflict with local history') && get('.lgd-repository-sync-status').textContent.includes('1 local / 1 incoming'));
+  check('Sync diagnostics have a copy action',all('.lgd-repository-error-copy').some(el=>el.textContent==='Copy sync details'));
+  get('.lgd-repository-sync-files').click();await turn();
+  check('Conflicted-file shortcut uses the existing Pending Changes screen',view.currentRoute.kind==='changes');
+  qa.health={...qa.health,kind:'blocked',summary:'Unfinished rebase · sync needs attention',hints:['Finish or abort the current operation in your VCS, then refresh.']};
+  await view.setRoute({kind:'log',context});
+  check('Unfinished Git operations have a persistent explanation without losing history',get('.lgd-repository-sync-status').textContent.includes('Unfinished rebase') && commits().length>=10);
   const report=document.getElementById('report');report.textContent=JSON.stringify({results,passed:results.length});report.dataset.complete='true';
 }
 run().catch(error=>{const report=document.getElementById('report');report.textContent=JSON.stringify({results,error:error.stack});report.dataset.complete='failed';});
@@ -284,7 +298,7 @@ const bundle = await build({stdin:{contents:entry,resolveDir:root},bundle:true,w
   builder.onResolve({filter:/^(child_process|os)$/},args=>({path:args.path,namespace:'qa-node'}));
   builder.onLoad({filter:/.*/,namespace:'qa-node'},()=>({contents:'export const spawn=()=>{throw new Error("Unexpected process")}; export const execFile=spawn; export const tmpdir=()=>"/tmp";'}));
   builder.onResolve({filter:/repositoryRemote\.ts$/},()=>({path:'remote',namespace:'qa-remote'}));
-  builder.onLoad({filter:/.*/,namespace:'qa-remote'},()=>({contents:'export const repositorySyncState=async(ctx,ids)=>({synced:ids.filter((_,index)=>index%2===0),remote:"origin/main"});'}));
+  builder.onLoad({filter:/.*/,namespace:'qa-remote'},()=>({contents:'export const repositorySyncState=async(ctx,ids)=>({synced:ids.filter((_,index)=>index%2===0),remote:"origin/main"});export const repositoryRemoteHealth=async()=>globalThis.qa?.health||null;'}));
   builder.onResolve({filter:/repositoryManager\.ts$/},()=>({path:'manager',namespace:'qa-manager'}));
   builder.onLoad({filter:/.*/,namespace:'qa-manager'},()=>({contents:`
     export const getChangeDetails=async(ctx,sha)=>qa.detail(sha);

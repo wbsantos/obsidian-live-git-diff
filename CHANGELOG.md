@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] - 2026-11-17
 
+- Preserve remote discovery through conflicted/deleted Jujutsu bookmarks; reconcile a single unpublished local line only after a clean integration preview, then align the canonical bookmark.
+- Preserve unreachable local commits during implicit Git imports from plugin reads and snapshots instead of silently abandoning and rebasing their descendants.
+- Keep shared/independent history, conflicting content, rewritten remotes and unfinished Git operations intact; distinguish completed fetches, stopped integration and successful pushes needing local tracking repair.
+- Add persistent session sync diagnostics, ahead/behind counts and reference/conflict labels to the repository panel. Surface inherited Jujutsu conflicts in Pending Changes and disable change creation while they remain.
 - Omit the current Jujutsu snapshot from File History when it matches Workcopy, retaining earlier changes and snapshots that differ from unsaved editor content.
 - Add clickable change maps beside both comparison scrollbars, including navigation to additions and removals absent from one side.
 - Show temporary version details above the live note during comparison and match header heights across both panes as details wrap.

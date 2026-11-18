@@ -8,7 +8,7 @@ import { resolveRepository, withRepositoryMutation } from './repository.ts';
 
 export interface RepositoryChange {
   sha: string; shortSha: string; changeId?: string; subject: string; author: string;
-  date: string; description?: string; parents?: string[];
+  date: string; description?: string; parents?: string[]; conflicted?: boolean; conflictedFiles?: string[];
 }
 export interface RepositoryFile { path: string; oldPath?: string; status: string }
 export interface RepositoryStatus { files: RepositoryFile[]; token: string; description?: string }
@@ -39,7 +39,7 @@ function command(binary: string, cwd: string, args: string[], signal?: AbortSign
 const git = (ctx: GitContext, args: string[], signal?: AbortSignal, input?: string): Promise<string> =>
   command('git', ctx.root, ['--literal-pathspecs', '-C', ctx.root, ...args], signal, input);
 const jj = (ctx: GitContext, args: string[], signal?: AbortSignal, mutate = false): Promise<string> =>
-  command('jj', ctx.workspaceRoot!, [...(mutate ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never', '-R', ctx.workspaceRoot!, ...args], signal);
+  command('jj', ctx.workspaceRoot!, [...(mutate ? [] : ['--ignore-working-copy']), '--no-pager', '--color=never', '--config', 'git.abandon-unreachable-commits=false', '-R', ctx.workspaceRoot!, ...args], signal);
 const digest = (value: string): string => createHash('sha256').update(value).digest('hex');
 function validPath(value: string, empty = false): string {
   if ((empty && value === '') || (value && !value.includes('\0') && !value.includes('\\') && !path.posix.isAbsolute(value) &&
@@ -90,7 +90,7 @@ function gitChanges(output: string): RepositoryChange[] {
   }
   return changes;
 }
-const jjFields = '"sha" => commit_id, "changeId" => change_id, "subject" => description.first_line(), "description" => description, "author" => author.name(), "date" => committer.timestamp().format("%Y-%m-%dT%H:%M:%S%:z"), "parents" => parents.map(|p| p.commit_id())';
+const jjFields = '"sha" => commit_id, "changeId" => change_id, "subject" => description.first_line(), "description" => description, "author" => author.name(), "date" => committer.timestamp().format("%Y-%m-%dT%H:%M:%S%:z"), "parents" => parents.map(|p| p.commit_id()), "conflicted" => conflict, "conflictedFiles" => conflicted_files.map(|f| f.path())';
 const jjTemplate = `json({${jjFields}}) ++ "\\n"`;
 function jjChanges(output: string): RepositoryChange[] {
   return output.split(/\r?\n/).filter(Boolean).map(line => {
@@ -134,6 +134,11 @@ function jjFiles(output: string): RepositoryFile[] {
     return { ...value, oldPath: value.oldPath === value.path ? undefined : value.oldPath };
   });
 }
+function includeConflicts(files: RepositoryFile[], paths: string[]): RepositoryFile[] {
+  const result = new Map(files.map(file => [file.path, file]));
+  for (const path of paths) result.set(path, { ...result.get(path), path, status: 'U' });
+  return [...result.values()];
+}
 export async function getChangeDetails(ctx: GitContext, sha: string, signal?: AbortSignal): Promise<{ change: RepositoryChange; files: RepositoryFile[] }> {
   validSha(sha);
   if (ctx.backend === 'jj') {
@@ -142,7 +147,7 @@ export async function getChangeDetails(ctx: GitContext, sha: string, signal?: Ab
       jj(ctx, ['diff', '-r', sha, '-T', jjFileTemplate], signal),
     ]);
     const change = jjChanges(metadata)[0]; if (!change) throw new Error('Change is no longer available.');
-    return { change, files: jjFiles(files) };
+    return { change, files: includeConflicts(jjFiles(files), change.conflictedFiles || []) };
   }
   const change = gitChanges(await git(ctx, ['show', '-s', '--no-show-signature', `--format=${gitFormat}`, '--end-of-options', sha], signal))[0];
   if (!change) throw new Error('Change is no longer available.');
@@ -172,7 +177,7 @@ async function statusInsideQueue(ctx: GitContext, signal?: AbortSignal): Promise
       jj(ctx, ['diff', '-r', '@', '-T', jjFileTemplate], signal),
     ]);
     const change = jjChanges(metadata)[0];
-    return { files: jjFiles(files), token: change.sha, description: change.description || '' };
+    return { files: includeConflicts(jjFiles(files), change.conflictedFiles || []), token: change.sha, description: change.description || '' };
   }
   const [current, branch, raw, staged, unstaged] = await Promise.all([
     head(ctx, signal), git(ctx, ['symbolic-ref', '--quiet', 'HEAD'], signal).catch(error => { if (signal?.aborted) throw error; return ''; }),
